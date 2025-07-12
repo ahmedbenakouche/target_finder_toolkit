@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import signal
 import threading
 import numpy as np
 import cv2
@@ -165,6 +166,7 @@ def show_detections(detector: TargetFinder):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     ov  = OverlayWindow(detector)
     ov.show()
+    signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     sys.exit(app.exec())
 
 
