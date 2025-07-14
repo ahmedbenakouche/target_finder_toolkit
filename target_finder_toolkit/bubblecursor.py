@@ -39,10 +39,13 @@ class BubbleCursor(QtWidgets.QWidget):
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
             | QtCore.Qt.WindowType.Tool
+            | QtCore.Qt.WindowType.WindowTransparentForInput
         )
+        if sys.platform.startswith("linux"):
+            flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
+
         self.setWindowFlags(flags)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         # Start detection thread
         self.detector.start()
@@ -199,16 +202,16 @@ def main():
     parser = argparse.ArgumentParser(description="Launch the BubbleCursor overlay")
     parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
-    parser.add_argument('--capture-interval', type=float, default=1 / 30,
-                        help="Interval between screen captures (in seconds)")
+    parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
+    parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     args = parser.parse_args()
 
     if args.model_path is None:
         here = os.path.dirname(__file__)
         args.model_path = os.path.join(here, "best.pt")
 
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence)
+    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     bubble_cursor(det)
 
 if __name__ == "__main__":

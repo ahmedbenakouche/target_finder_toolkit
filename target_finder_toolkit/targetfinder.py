@@ -24,7 +24,7 @@ CLASS_NAMES = {
 
 class TargetFinder:
     """Continuous widget detection and storage of bounding boxes"""
-    def __init__(self, model_path=None, change_thresh=100, capture_interval=1/30, confidence=0.28):
+    def __init__(self, model_path=None, change_thresh=100, capture_interval=1/30, confidence=0.28, iou = 0.3):
         # Ensure a QApplication exists for primaryScreen()
         if QtWidgets.QApplication.instance() is None:
             self._app = QtWidgets.QApplication(sys.argv)
@@ -35,6 +35,7 @@ class TargetFinder:
         self.change_thresh = change_thresh
         self.interval = capture_interval
         self.conf = confidence
+        self.iou = iou
         self.detections = []   # (x, y, w, h, score, cls_id)
         self.sx = 1.0
         self.sy = 1.0
@@ -72,7 +73,7 @@ class TargetFinder:
                 if self.overlay_window:
                     QtCore.QMetaObject.invokeMethod(self.overlay_window, "hide",
                         QtCore.Qt.ConnectionType.QueuedConnection)
-                time.sleep(0.01)  # allow time for the window to hide
+                time.sleep(0.03)  # allow time for the window to hide
 
                 # Full-resolution capture without overlay
                 full = np.array(sct.grab(monitor))[..., :3]
@@ -83,7 +84,7 @@ class TargetFinder:
                         QtCore.Qt.ConnectionType.QueuedConnection)
 
                 # YOLO inference
-                results = self.model(full, conf=self.conf, verbose = False)[0]
+                results = self.model(full, conf=self.conf, iou=self.iou, verbose = False)[0]
                 boxes = results.boxes.xyxy.cpu().numpy()
                 scores = results.boxes.conf.cpu().numpy()
                 class_ids = results.boxes.cls.cpu().numpy()
@@ -129,10 +130,13 @@ class OverlayWindow(QtWidgets.QWidget):
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
             | QtCore.Qt.WindowType.Tool
+            | QtCore.Qt.WindowType.WindowTransparentForInput
         )
+        if sys.platform.startswith("linux"):
+            flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
+
         self.setWindowFlags(flags)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         # Start detection thread
         self.detector.start()
@@ -175,16 +179,16 @@ def main():
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")
     parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
-    parser.add_argument('--capture-interval', type=float, default=1 / 30,
-                        help="Interval between screen captures (in seconds)")
+    parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
+    parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     args = parser.parse_args()
 
     if args.model_path is None:
         here = os.path.dirname(__file__)
         args.model_path = os.path.join(here, "best.pt")
 
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence)
+    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     show_detections(det)
 
 if __name__ == "__main__":

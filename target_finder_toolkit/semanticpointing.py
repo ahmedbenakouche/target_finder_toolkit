@@ -68,6 +68,10 @@ class SemanticPointing(QtWidgets.QWidget):
                 | QtCore.Qt.WindowType.WindowStaysOnTopHint
                 | QtCore.Qt.WindowType.Tool
         )
+        if sys.platform.startswith("linux"):
+            flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
+
+        self._base_flags = flags
         self.setWindowFlags(flags)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -247,9 +251,13 @@ class SemanticPointing(QtWidgets.QWidget):
             # simulate the click by removing the semi-transparent rectangle that blocks clicks
             pyautogui.mouseUp(button='left') # simulate button release
             self._mouse_listener.stop() # stop listener
-            self._simulating_click = True # activate the flag
+            self._simulating_click = True # activate the flag "windows"
             self.update()  # request immediate Qt repaint
             QtWidgets.QApplication.processEvents()  # force immediate event processing
+            if sys.platform.startswith("linux"):  # activate TransparentForInput "linux"
+                self.setWindowFlags(self._base_flags | QtCore.Qt.WindowType.WindowTransparentForInput)
+                self.show()
+                QtWidgets.QApplication.processEvents()
             QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y())) # move real cursor
                                                                                  # note: this doesn’t work on Windows
                                                                                  # if the semi-transparent rectangle isn’t drawn
@@ -261,6 +269,10 @@ class SemanticPointing(QtWidgets.QWidget):
                 # to prevent the script from crashing when the mouse hits a corner
                 pass
             finally:
+                if sys.platform.startswith("linux"):
+                    self.setWindowFlags(self._base_flags)
+                    self.show()
+                    QtWidgets.QApplication.processEvents()
                 self._simulating_click = False # deactivate the flag and resynchronize
                 self.prev_real = QtCore.QPointF(QtGui.QCursor.pos())
                 self._start_mouse_listener() # restart the listener
@@ -285,11 +297,10 @@ def main():
     parser = argparse.ArgumentParser(description="Launch the Semantic Pointing overlay")
     parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
-    parser.add_argument('--capture-interval', type=float, default=1 / 30,
-                        help="Interval between screen captures (in seconds)")
+    parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
-    parser.add_argument('--display', action='store_true',
-                        help="Enable on-screen display of target boxe and physical area")
+    parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
+    parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
     parser.add_argument('--disable-accel', action='store_true', help="Disable system mouse acceleration")
     args = parser.parse_args()
 
@@ -297,7 +308,7 @@ def main():
         here = os.path.dirname(__file__)
         args.model_path = os.path.join(here, "best.pt")
 
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence)
+    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     semantic_pointing(det, args.display, args.disable_accel)
 
 if __name__ == "__main__":

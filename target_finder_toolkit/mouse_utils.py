@@ -2,8 +2,8 @@
 
 """
 Utilities for managing system cursor visibility and Windows mouse acceleration.
-- hide_cursor_everywhere() / restore_default_cursor(): hide/show system cursor (Windows) or Qt override (other OS)
-- get_current_mouse_acceleration_settings(), set_mouse_acceleration(), apply_mouse_settings(): disable_mouse_acceleration_temporarily(): helper to disable and restore acceleration
+- hide_cursor_everywhere() / restore_default_cursor(): hide/show system cursor
+- disable_mouse_acceleration(), restore_mouse_acceleration(): helper to disable and restore acceleration
 """
 
 
@@ -13,14 +13,12 @@ Utilities for managing system cursor visibility and Windows mouse acceleration.
 import sys
 from PyQt6 import QtWidgets, QtGui, QtCore
 
-# Detect platform
-IS_WIN = sys.platform.startswith("win")
-
-if IS_WIN:
+if sys.platform.startswith("win"):
     import ctypes
     # Windows API handles
     user32 = ctypes.windll.user32
     SPI_SETCURSORS = 0x57
+    SPIF_SENDCHANGE = 0x02
 
     # Windows system cursor IDs
     # https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setsystemcursor
@@ -42,31 +40,94 @@ if IS_WIN:
 
     # Replace all system cursors with the transparent one on widnows
     def hide_cursor_everywhere():
-        if IS_WIN:
+        for idc in OCR_IDS:
             blank = create_blank_cursor()
-            for idc in OCR_IDS:
-                user32.SetSystemCursor(blank, idc)
+            user32.SetSystemCursor(blank, idc)
 
     # Reload default cursors from Windows settings
     def restore_default_cursors():
-        if IS_WIN:
-            user32.SystemParametersInfoW(SPI_SETCURSORS, 0, None, 0)
+        user32.SystemParametersInfoW(SPI_SETCURSORS, 0, None, SPIF_SENDCHANGE)
 
-else:
-    # For Linux/macOS à tester !!??? .............
+elif sys.platform.startswith("linux"):
+    import ctypes
+
+    # X11 and XFixes libraries
+    libX11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+    libXfixes = ctypes.cdll.LoadLibrary("libXfixes.so.3")
+
+    # argument and types for X11 functions
+    libX11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    libX11.XOpenDisplay.restype = ctypes.c_void_p
+    libX11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    libX11.XDefaultRootWindow.restype = ctypes.c_ulong
+    libX11.XFlush.argtypes = [ctypes.c_void_p]
+    libX11.XFlush.restype = ctypes.c_int
+
+    # argument and return types for XFixes extension
+    libXfixes.XFixesQueryVersion.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int)]
+    libXfixes.XFixesQueryVersion.restype = ctypes.c_int
+
+    libXfixes.XFixesHideCursor.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    libXfixes.XFixesHideCursor.restype = None
+    libXfixes.XFixesShowCursor.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    libXfixes.XFixesShowCursor.restype = None
+
+
     def hide_cursor_everywhere():
-        # Hide the cursor using Qt override (Linux/macOS)
-        QtWidgets.QApplication.setOverrideCursor(QtGui.QCursor(QtCore.Qt.CursorShape.BlankCursor))
+        # connection to the X server
+        dpy = libX11.XOpenDisplay(None)
+        if not dpy:
+            return  # could not connect silently fail
+
+        # the root window handle
+        root = libX11.XDefaultRootWindow(dpy)
+
+        # check the XFixes extension is present
+        major = ctypes.c_int()
+        minor = ctypes.c_int()
+        if libXfixes.XFixesQueryVersion(dpy, ctypes.byref(major), ctypes.byref(minor)) == 0:
+            return # XFixes not available
+
+        # instruct the X server to hide the cursor on the root window
+        libXfixes.XFixesHideCursor(dpy, root)
+        # 5) Flush the request buffer to ensure the command is sent immediately
+        libX11.XFlush(dpy)
+
 
     def restore_default_cursors():
-        # Restore the cursor by restoring Qt override
-        QtWidgets.QApplication.restoreOverrideCursor()
+        # re open the X connection (or reuse a cached handle)
+        dpy = libX11.XOpenDisplay(None)
+        if not dpy:
+            return
+
+        # root window
+        root = libX11.XDefaultRootWindow(dpy)
+
+        # XFixes is still available
+        major = ctypes.c_int()
+        minor = ctypes.c_int()
+        if libXfixes.XFixesQueryVersion(dpy, ctypes.byref(major), ctypes.byref(minor)) == 0:
+            return
+
+        # show the cursor again
+        libXfixes.XFixesShowCursor(dpy, root)
+        # flush to apply the change
+        libX11.XFlush(dpy)
+
+else:
+    # For macOS pas encore fais  ......
+    def hide_cursor_everywhere():
+        pass
+
+    def restore_default_cursors():
+        pass
 
 
 # 2) Mouse acceleration functions
 # ---------------------------------------
 
-if IS_WIN:
+if sys.platform.startswith("win"):
     import winreg
 
     # Constantes Windows
@@ -123,8 +184,14 @@ if IS_WIN:
 
             _ORIGINAL_MOUSE_ACCEL = None
 
+elif sys.platform.startswith("linux"):
+    def disable_mouse_acceleration():
+        pass
+
+    def restore_mouse_acceleration():
+        pass
+
 else:
-    # No-op on non Windows platforms
     def disable_mouse_acceleration():
         pass
 
