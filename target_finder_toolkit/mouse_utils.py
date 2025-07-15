@@ -72,48 +72,26 @@ elif sys.platform.startswith("linux"):
     libXfixes.XFixesHideCursor.restype = None
     libXfixes.XFixesShowCursor.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
     libXfixes.XFixesShowCursor.restype = None
-
+    
+    _X11_DISPLAY = libX11.XOpenDisplay(None)  # connection to the X server
+    _X11_ROOT = libX11.XDefaultRootWindow(_X11_DISPLAY)  # the root window handle
+    _major = ctypes.c_int()  # to check if the XFixes extension is present
+    _minor = ctypes.c_int()
+    _XFIXES_OK = libXfixes.XFixesQueryVersion(_X11_DISPLAY, ctypes.byref(_major), ctypes.byref(_minor)) != 0
 
     def hide_cursor_everywhere():
-        # connection to the X server
-        dpy = libX11.XOpenDisplay(None)
-        if not dpy:
-            return  # could not connect silently fail
-
-        # the root window handle
-        root = libX11.XDefaultRootWindow(dpy)
-
-        # check the XFixes extension is present
-        major = ctypes.c_int()
-        minor = ctypes.c_int()
-        if libXfixes.XFixesQueryVersion(dpy, ctypes.byref(major), ctypes.byref(minor)) == 0:
-            return # XFixes not available
-
-        # instruct the X server to hide the cursor on the root window
-        libXfixes.XFixesHideCursor(dpy, root)
-        # 5) Flush the request buffer to ensure the command is sent immediately
-        libX11.XFlush(dpy)
-
+        if not _X11_DISPLAY or not _XFIXES_OK:
+            return
+        libXfixes.XFixesHideCursor(_X11_DISPLAY, _X11_ROOT)
+        # flush the request buffer to ensure the command is sent immediately
+        libX11.XFlush(_X11_DISPLAY)
 
     def restore_default_cursors():
-        # re open the X connection (or reuse a cached handle)
-        dpy = libX11.XOpenDisplay(None)
-        if not dpy:
+        if not _X11_DISPLAY or not _XFIXES_OK:
             return
-
-        # root window
-        root = libX11.XDefaultRootWindow(dpy)
-
-        # XFixes is still available
-        major = ctypes.c_int()
-        minor = ctypes.c_int()
-        if libXfixes.XFixesQueryVersion(dpy, ctypes.byref(major), ctypes.byref(minor)) == 0:
-            return
-
-        # show the cursor again
-        libXfixes.XFixesShowCursor(dpy, root)
-        # flush to apply the change
-        libX11.XFlush(dpy)
+        libXfixes.XFixesShowCursor(_X11_DISPLAY, _X11_ROOT)
+        # flush the request buffer to ensure the command is sent immediately
+        libX11.XFlush(_X11_DISPLAY)
 
 else:
     # For macOS pas encore fais  ......
@@ -187,7 +165,7 @@ if sys.platform.startswith("win"):
 elif sys.platform.startswith("linux"):
     def disable_mouse_acceleration():
         pass
-
+        
     def restore_mouse_acceleration():
         pass
 

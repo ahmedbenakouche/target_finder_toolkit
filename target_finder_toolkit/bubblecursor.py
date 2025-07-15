@@ -66,27 +66,41 @@ class BubbleCursor(QtWidgets.QWidget):
         # Pointer position (logical coordinates)
         pos = QtGui.QCursor.pos()
         cx, cy = pos.x(), pos.y()
-
+                
         # Compute distances from pointer to each box edge
         distances = []
         for x, y, w, h, *_ in self.detector.get_detections():
             cx_box = x + w/2
             cy_box = y + h/2
+
+            # Intersecting Distance (IntD)
             dx = max(0.0, abs(cx - cx_box) - w/2)
             dy = max(0.0, abs(cy - cy_box) - h/2)
-            di = math.hypot(dx, dy)
-            distances.append((di, cx_box, cy_box, w, h))
+            IntD = math.hypot(dx, dy)
+
+            distances.append((IntD, cx_box, cy_box, w, h))
 
         if distances:
+
             distances.sort(key=lambda t: t[0])
-            d1, tx, ty, w, h = distances[0]
-            self._last_target = (tx/self.detector.sx, ty/self.detector.sy, w/self.detector.sx, h/self.detector.sy)
+            IntD1, tx, ty, w, h = distances[0]
+            self._last_target = (
+            tx / self.detector.sx, ty / self.detector.sy, w / self.detector.sx, h / self.detector.sy)
+
+            # Containment Distance (ConD1)
+            x = tx - w / 2
+            y = ty - h / 2
+            corners = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]
+            ConD1 = max([math.hypot(cx - px, cy - py) for (px, py) in corners])
+
             if len(distances) > 1:
-                d2 = distances[1][0]
-                eps = (d2 - d1) / 2.0
-                radius = d1 + eps   # to avoid touching the second target
+                IntD2 = distances[1][0]
+                radius = min(ConD1, IntD2)
+                if radius == IntD2:
+                    gap = 0.01 * radius
+                    radius = int(radius - gap)  # to avoid touching the second target
             else:
-                radius = d1
+                radius = ConD1
 
             # Or we can also simply use a circle around it , but it's less representative
             # reinforce radius: half max dimension of widget = max(w, h) / 2.0
