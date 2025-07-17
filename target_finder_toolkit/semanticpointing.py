@@ -169,9 +169,9 @@ class SemanticPointing(QtWidgets.QWidget):
                     iy = rect2.top() + (self.fake_pos.y() - rect.top()) * self.s
 
                     # FAKE CURSOR in the physical space
-                    pen3 = QtGui.QPen(QtGui.QColor(255, 255, 0, 200), 2)
+                    pen3 = QtGui.QPen(QtGui.QColor(255, 0, 0, 200), 2)
                     painter.setPen(pen3)
-                    painter.setBrush(QtGui.QColor(255, 255, 0, 100))
+                    painter.setBrush(QtGui.QColor(255, 0, 0, 100))
                     painter.drawEllipse(QtCore.QPointF(ix, iy), 6, 6)
 
 
@@ -208,11 +208,19 @@ class SemanticPointing(QtWidgets.QWidget):
             hide_cursor_everywhere()
             if self.disable_accel:
                 disable_mouse_acceleration()
+            if sys.platform.startswith("linux"):
+                    self.setWindowFlags(self._base_flags)
+                    self.show()
+                    QtWidgets.QApplication.processEvents()
         else:
             self.detector.stop()
             restore_default_cursors()
             if self.disable_accel:
                 restore_mouse_acceleration()
+            if sys.platform.startswith("linux"):
+                self.setWindowFlags(self._base_flags | QtCore.Qt.WindowType.WindowTransparentForInput)
+                self.show()
+                QtWidgets.QApplication.processEvents()
         self.update() # repaint immediately
 
     # === Quit ===
