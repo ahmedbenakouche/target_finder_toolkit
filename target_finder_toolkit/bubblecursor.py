@@ -102,17 +102,21 @@ class BubbleCursor(QtWidgets.QWidget):
             else:
                 radius = ConD1
 
-            # Or we can also simply use a circle around it , but it's less representative
-            # reinforce radius: half max dimension of widget = max(w, h) / 2.0
-            ew, eh = w * math.sqrt(2), h * math.sqrt(2)
-
             # build main and env bubble with different centers
             main_path = QtGui.QPainterPath()
             main_path.addEllipse(cx - radius, cy - radius, 2 * radius, 2 * radius)
 
             # env bubble centered on widget center
             env_path = QtGui.QPainterPath()
-            env_path.addEllipse(tx - ew/2, ty - eh/2, ew, eh)
+            t = 1  # t interpolates between 0 = sharp‑cornered rectangle / 1 = fully rounded (ellipse‑like)
+            r = min(w, h) / 2 * t  # corner radius
+            d = math.hypot(r, r) - r
+            env_path.addRoundedRect(tx - w/2 -d, ty - h/2 - d, w + 2*d, h + 2*d, r + d, r + d)
+
+            # Or we can also use a circle around it or a ellipse
+            # reinforce radius: half max dimension of widget = max(w, h) / 2.0
+            # ew, eh = w * math.sqrt(2), h * math.sqrt(2)
+            # env_path.addEllipse(tx - ew/2, ty - eh/2, ew, eh)
 
             union_path = main_path.united(env_path)
             pen = QtGui.QPen(QtGui.QColor(0, 255, 0, 200), 3)
