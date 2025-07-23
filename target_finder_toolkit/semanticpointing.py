@@ -308,8 +308,8 @@ def main():
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
-    parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
     parser.add_argument('--disable-accel', action='store_true', help="Disable system mouse acceleration")
+    parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
     args = parser.parse_args()
 
     if args.model_path is None:

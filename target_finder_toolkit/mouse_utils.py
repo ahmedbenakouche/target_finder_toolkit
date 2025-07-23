@@ -113,12 +113,14 @@ if sys.platform.startswith("win"):
     SPIF_SENDCHANGE = 0x02
 
     _ORIGINAL_MOUSE_ACCEL = None
+    _HONOR_ACCEL_BACKUP = None
 
 
     def disable_mouse_acceleration():
         """ Disable Windows mouse acceleration (set all thresholds to 0),
          and remember the original settings for later restoration """
         global _ORIGINAL_MOUSE_ACCEL
+        global _HONOR_ACCEL_BACKUP
         if _ORIGINAL_MOUSE_ACCEL is None:
             """
             Read the current mouse acceleration settings from the registry
@@ -138,6 +140,21 @@ if sys.platform.startswith("win"):
                     winreg.SetValueEx(key, "MouseSpeed", 0, winreg.REG_SZ, "0")
                     winreg.SetValueEx(key, "MouseThreshold1", 0, winreg.REG_SZ, "0")
                     winreg.SetValueEx(key, "MouseThreshold2", 0, winreg.REG_SZ, "0")
+                    
+                # Some touchpads ignore the usual mouse acceleration registry settings
+                # To make them respect these settings we try to enable "HonorMouseAccelSetting" in the registry
+                # This tells the touchpad driver to follow the normal mouse acceleration config
+                # Note: This setting only works on some systems depending on the driver used
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad") as key:
+                        _HONOR_ACCEL_BACKUP, _ = winreg.QueryValueEx(key, "HonorMouseAccelSetting")
+                except FileNotFoundError:
+                    _HONOR_ACCEL_BACKUP = None
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad", 0, winreg.KEY_SET_VALUE) as key:
+                        winreg.SetValueEx(key, "HonorMouseAccelSetting", 0, winreg.REG_DWORD, 1)
+                except FileNotFoundError:
+                    pass
 
                 # Apply the registry settings immediately to the running system
                 params = (ctypes.c_int * 3)(0, 0, 0)
@@ -147,6 +164,7 @@ if sys.platform.startswith("win"):
     def restore_mouse_acceleration():
         """Restore the previously saved Windows mouse acceleration settings"""
         global _ORIGINAL_MOUSE_ACCEL
+        global _HONOR_ACCEL_BACKUP
         if _ORIGINAL_MOUSE_ACCEL:
             speed, th1, th2 = _ORIGINAL_MOUSE_ACCEL
 
@@ -155,19 +173,78 @@ if sys.platform.startswith("win"):
                 winreg.SetValueEx(key, "MouseSpeed", 0, winreg.REG_SZ, speed)
                 winreg.SetValueEx(key, "MouseThreshold1", 0, winreg.REG_SZ, th1)
                 winreg.SetValueEx(key, "MouseThreshold2", 0, winreg.REG_SZ, th2)
+                
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad", 0, winreg.KEY_SET_VALUE) as key:
+                    if _HONOR_ACCEL_BACKUP is not None:
+                        winreg.SetValueEx(key, "HonorMouseAccelSetting", 0, winreg.REG_DWORD, int(_HONOR_ACCEL_BACKUP))
+                    else:
+                        winreg.DeleteValue(key, "HonorMouseAccelSetting")
+            except FileNotFoundError:
+                pass
 
             # Apply the registry settings immediately to the running system
             params = (ctypes.c_int * 3)(int(th1), int(th2), int(speed))
             ctypes.windll.user32.SystemParametersInfoW(SPI_SETMOUSE, 0, ctypes.byref(params), SPIF_SENDCHANGE)
 
             _ORIGINAL_MOUSE_ACCEL = None
+            _HONOR_ACCEL_BACKUP = None
 
 elif sys.platform.startswith("linux"):
+    import subprocess
+    import re
+    _AFFECTED_DEVICES = []
+
+    def _list_pointer_devices():
+        result = subprocess.run(['xinput', '--list'], stdout=subprocess.PIPE, text=True)
+        devices = {}
+        for line in result.stdout.split('\n'):
+            if 'pointer' in line.lower():
+                match_id = re.search(r'id=(\d+)', line)
+                match_name = re.search(r'^\s*(.+?)\s+id=', line)
+                if match_id and match_name:
+                    name = match_name.group(1).strip()
+                    dev_id = match_id.group(1)
+                    devices[name] = dev_id
+        return devices
+
+    def _get_props(device_id):
+        result = subprocess.run(['xinput', '--list-props', device_id], stdout=subprocess.PIPE, text=True)
+        return result.stdout
+
+    def _has_libinput_profile(device_id):
+        return 'libinput Accel Profile Enabled' in _get_props(device_id)
+
+    def _has_evdev_profile(device_id):
+        return 'Device Accel Profile' in _get_props(device_id)
+
+    def _set_libinput_profile(device_id, adaptive: int, flat: int):
+        subprocess.run(['xinput', '--set-prop', device_id, 'libinput Accel Profile Enabled', str(adaptive), str(flat)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _set_evdev_profile(device_id, profile_value: int):
+        subprocess.run(['xinput', '--set-prop', device_id, 'Device Accel Profile', str(profile_value)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     def disable_mouse_acceleration():
-        pass
-        
+        global _AFFECTED_DEVICES
+        _AFFECTED_DEVICES.clear()
+        for name, dev_id in _list_pointer_devices().items():
+            if _has_libinput_profile(dev_id):
+                _set_libinput_profile(dev_id, 0, 1)
+                _AFFECTED_DEVICES.append((dev_id, "libinput"))
+            elif _has_evdev_profile(dev_id):
+                _set_evdev_profile(dev_id, 0)
+                _AFFECTED_DEVICES.append((dev_id, "evdev"))
+
     def restore_mouse_acceleration():
-        pass
+        global _AFFECTED_DEVICES
+        for dev_id, method in _AFFECTED_DEVICES:
+            if method == "libinput":
+                _set_libinput_profile(dev_id, 1, 0)
+            elif method == "evdev":
+                _set_evdev_profile(dev_id, 1)
+        _AFFECTED_DEVICES.clear()
 
 else:
     def disable_mouse_acceleration():
