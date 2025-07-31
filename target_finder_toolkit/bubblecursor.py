@@ -226,7 +226,7 @@ def main():
     args = parser.parse_args()
 
     if args.model_path is None:
-        here = os.path.dirname(__file__)
+        here = os.path.dirname(os.path.abspath(__file__))
         args.model_path = os.path.join(here, "best.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
