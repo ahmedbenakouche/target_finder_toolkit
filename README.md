@@ -5,37 +5,24 @@ Provides CLI/GUI entry points to experiment with and visualize these interaction
 
 ## Demo (visual preview)
 
-### Animated previews
+### Target Finder (side by side)
 
-Click on each GIF below to open its corresponding full video (`.mp4` with the same base name).
+| Linux | Windows |
+|-------|---------|
+| [![Target Finder - Linux](./demo/GIFs/linux_TargetFinder.gif)](./demo/Videos/linux_TargetFinder.mp4) | [![Target Finder - Windows](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4) |
+| [Watch full video (Linux)](./demo/Videos/linux_TargetFinder.mp4) | [Watch full video (Windows)](./demo/Videos/windows_TargetFinder.mp4) |
 
-#### Linux
-[![Aperçu](./demo/GIFs/linux_TargetFinder.gif)](https://github.com/AHMEDBENAKOUCHE/target_finder_toolkit/blob/main/demo/Videos/linux_TargetFinder.mp4) 
+### Bubble Cursor
 
-[![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif)](./demo/Videos/linux_bubble_cursor.mp4)  
+| Linux | Windows |
+|-------|---------|
+| [![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif)](./demo/Videos/linux_bubble_cursor.mp4) | [![Bubble Cursor - Windows](./demo/GIFs/windows_bubble_cursor.gif)](./demo/Videos/windows_bubble_cursor.mp4) |
+| [Watch full video (Linux)](./demo/Videos/linux_bubble_cursor.mp4) | [Watch full video (Windows)](./demo/Videos/windows_bubble_cursor.mp4) |
 
-[![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif)](./demo/Videos/linux_semantic_pointing.mp4)  
+### Semantic Pointing
 
+| Linux | Windows |
+|-------|---------|
+| [![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif)](./demo/Videos/linux_semantic_pointing.mp4) | [![Semantic Pointing - Windows](./demo/GIFs/windows_semantic_pointing.gif)](./demo/Videos/windows_semantic_pointing.mp4) |
+| [Watch full video (Linux)](./demo/Videos/linux_semantic_pointing.mp4) | [Watch full video (Windows)](./demo/Videos/windows_semantic_pointing.mp4) |
 
-#### Windows
-[![Target Finder - Windows](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4)  
-[![Bubble Cursor - Windows](./demo/GIFs/windows_bubble_cursor.gif)](./demo/Videos/windows_bubble_cursor.mp4)  
-[![Semantic Pointing - Windows](./demo/GIFs/windows_semantic_pointing.gif)](./demo/Videos/windows_semantic_pointing.mp4)  
-
-> If storing full videos in the repository is undesirable due to size, you can publish them as a **GitHub Release** and replace the above links with the release asset URLs.
-
-## Installation (development)
-
-```bash
-git clone https://github.com/AHMEDBENAKOUCHE/target_finder_toolkit.git
-cd target_finder_toolkit
-
-# create and activate a virtual environment
-python -m venv .venv
-# Windows
-.\.venv\Scripts\activate
-# Unix/macOS
-# source .venv/bin/activate
-
-# install the package (and its dependencies) in editable mode
-pip install -e .
