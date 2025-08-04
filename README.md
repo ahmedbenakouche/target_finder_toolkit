@@ -10,7 +10,7 @@ Provides CLI/GUI entry points to experiment with and visualize these interaction
 Click on each GIF below to open its corresponding full video (`.mp4` with the same base name).
 
 #### Linux
-[![Target Finder - Linux](./demo/GIFs/linux_TargetFinder.gif)](./demo/Videos/linux_TargetFinder.mp4)  
+[![Aperçu](./demo/GIFs/linux_TargetFinder.gif)](https://github.com/AHMEDBENAKOUCHE/target_finder_toolkit/blob/main/demo/Videos/linux_TargetFinder.mp4) 
 [![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif)](./demo/Videos/linux_bubble_cursor.mp4)  
 [![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif)](./demo/Videos/linux_semantic_pointing.mp4)  
 
