@@ -20,6 +20,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 - **Semantic Pointing**: Adjusts control-display ratio based on proximity to targets, effectively enlarging targets in motor space while keeping visual appearance unchanged [Read the article](https://dl.acm.org/doi/10.1145/985692.985758). 
 - **Cross-platform compatibility**: The core detection engine works across all platforms. Visual rendering (GUI overlay) and system-level features (e.g., mouse acceleration disabling, cursor hiding) are currently tested only on **Windows** and **Linux (Ubuntu X11)**.
 
+
 ---
 
 ## Demo
@@ -28,7 +29,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 | Windows | Linux |
 |--------|--------|
-| [![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4) | [![Linux Target Finder](https://imgur.com/a/36kt0aI)](./demo/Videos/linux_TargetFinder.mp4) |
+| [![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4) | [![Linux Target Finder](./demo/GIFs/linux_TargetFinder.gif)](./demo/Videos/linux_TargetFinder.mp4) |
 | [Watch full video (Windows)](./demo/Videos/windows_TargetFinder.mp4) | [Watch full video (Linux)](./demo/Videos/linux_TargetFinder.mp4) |
 
 ### Bubble Cursor
