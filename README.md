@@ -43,6 +43,8 @@ As proof of concept, we include two interaction techniques built on top of Targe
 ```bash
 # Option 1 — Install from PyPI
 pip install target_finder_toolkit
+# Pour le moment installez depuis le dépôt de test :
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple target-finder-toolkit==0.1.0
 
 # Option 2 — Install from GitHub (direct link)
 pip install git+https://...
