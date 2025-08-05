@@ -28,7 +28,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 | Windows | Linux |
 |--------|--------|
-| [![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4) | [![Linux Target Finder](./demo/GIFs/linux_TargetFinder.gif)](./demo/Videos/linux_TargetFinder.mp4) |
+| [![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4) | [![Linux Target Finder](https://imgur.com/a/36kt0aI)](./demo/Videos/linux_TargetFinder.mp4) |
 | [Watch full video (Windows)](./demo/Videos/windows_TargetFinder.mp4) | [Watch full video (Linux)](./demo/Videos/linux_TargetFinder.mp4) |
 
 ### Bubble Cursor
