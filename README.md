@@ -6,20 +6,10 @@ It provides a real-time detection system using the YOLOv8 model to predict the b
 The system is lightweight and easy to integrate, enabling the implementation of advanced interaction techniques.  
 As proof of concept, we include two interaction techniques built on top of TargetFinder:
 
-- **Bubble Cursor**
-- **Semantic Pointing**
+- **Bubble Cursor** [Read the article](https://dl.acm.org/doi/10.1145/1054972.1055012).
+- **Semantic Pointing** [Read the article](https://dl.acm.org/doi/10.1145/985692.985758). 
 
 > **Note**: TargetFinder uses the `mss` library for ultra-fast screen capture and is cross-platform. However, the **visual overlay rendering** via PyQt6, as well as system-level mechanisms such as mouse acceleration disabling (for Semantic Pointing) and cursor hiding, are currently tested only on **Windows** and **Linux (Ubuntu X11)**. Adaptation is required for other Linux distributions or for macOS.
-
----
-
-## Key Features
-
-- **TargetFinder**: Real-time YOLOv8-based detection of GUI widgets from screen pixels.
-- **Bubble Cursor**: Dynamic cursor that adapts its active area to always contain exactly one target, facilitating selection [Read the article](https://dl.acm.org/doi/10.1145/1054972.1055012).
-- **Semantic Pointing**: Adjusts control-display ratio based on proximity to targets, effectively enlarging targets in motor space while keeping visual appearance unchanged [Read the article](https://dl.acm.org/doi/10.1145/985692.985758). 
-- **Cross-platform compatibility**: The core detection engine works across all platforms. Visual rendering (GUI overlay) and system-level features (e.g., mouse acceleration disabling, cursor hiding) are currently tested only on **Windows** and **Linux (Ubuntu X11)**.
-
 
 ---
 
