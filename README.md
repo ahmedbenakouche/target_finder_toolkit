@@ -42,15 +42,6 @@ As proof of concept, we include two interaction techniques built on top of Targe
 ---
 
 
-### Semantic Pointing
-
-<table>
-  <tr>
-    <td align="center"><a href="./demo/Videos/windows_semantic_pointing.mp4"><img src="./demo/GIFs/windows_semantic_pointing.gif" width="400"></a><br>[Watch full video (Windows)](./demo/Videos/windows_semantic_pointing.mp4)</td>
-    <td align="center"><a href="./demo/Videos/linux_semantic_pointing.mp4"><img src="./demo/GIFs/linux_semantic_pointing.gif" width="400"></a><br>[Watch full video (Linux)](./demo/Videos/linux_semantic_pointing.mp4)</td>
-  </tr>
-</table>
-
 ## Installation
 
 ```bash
