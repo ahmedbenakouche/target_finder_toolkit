@@ -1,11 +1,16 @@
 from setuptools import setup, find_packages
 
+with open("README.md", "r", encoding="utf-8") as f:
+    long_description = f.read()
+
 setup(
     name='target_finder_toolkit',
-    version='0.1.0',
+    version='0.1.2',
     author='Ahmed Benakouche',
     author_email='ahmed.benakouche.etudiant@gmail.com',
     description='Widget detection and interaction techniques: Bubble cursor and semantic pointing',
+    long_description=long_description,
+    long_description_content_type='text/markdown',
     packages=find_packages(),
     include_package_data=True,
     package_data={'target_finder_toolkit': ['*.pt'],},
@@ -29,8 +34,7 @@ setup(
     classifiers=[
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
-        'License :: OSI Approved :: MIT',
+        'License :: OSI Approved :: MIT License',
     ],
 )
-
 
