@@ -13,30 +13,37 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 ---
 
+
+
+
 ## Demo
 
 ### Target Finder (Windows & Linux)
 
-| Windows | Linux |
-|--------|--------|
-| [![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4) | [![Linux Target Finder](./demo/GIFs/linux_TargetFinder.gif)](./demo/Videos/linux_TargetFinder.mp4) |
-| [Watch full video (Windows)](./demo/Videos/windows_TargetFinder.mp4) | [Watch full video (Linux)](./demo/Videos/linux_TargetFinder.mp4) |
+<table>
+  <tr>
+    <td align="center"><a href="./demo/Videos/windows_TargetFinder.mp4"><img src="./demo/GIFs/windows_TargetFinder.gif" width="400"></a><br>[Watch full video (Windows)](./demo/Videos/windows_TargetFinder.mp4)</td>
+    <td align="center"><a href="./demo/Videos/linux_TargetFinder.mp4"><img src="./demo/GIFs/linux_TargetFinder.gif" width="400"></a><br>[Watch full video (Linux)](./demo/Videos/linux_TargetFinder.mp4)</td>
+  </tr>
+</table>
 
 ### Bubble Cursor
 
-| Windows | Linux |
-|--------|--------|
-| [![Bubble Cursor - Windows](./demo/GIFs/windows_bubble_cursor.gif)](./demo/Videos/windows_bubble_cursor.mp4) | [![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif)](./demo/Videos/linux_bubble_cursor.mp4) |
-| [Watch full video (Windows)](./demo/Videos/windows_bubble_cursor.mp4) | [Watch full video (Linux)](./demo/Videos/linux_bubble_cursor.mp4) |
+<table>
+  <tr>
+    <td align="center"><a href="./demo/Videos/windows_bubble_cursor.mp4"><img src="./demo/GIFs/windows_bubble_cursor.gif" width="400"></a><br>[Watch full video (Windows)](./demo/Videos/windows_bubble_cursor.mp4)</td>
+    <td align="center"><a href="./demo/Videos/linux_bubble_cursor.mp4"><img src="./demo/GIFs/linux_bubble_cursor.gif" width="400"></a><br>[Watch full video (Linux)](./demo/Videos/linux_bubble_cursor.mp4)</td>
+  </tr>
+</table>
 
 ### Semantic Pointing
 
-| Windows | Linux |
-|--------|--------|
-| [![Semantic Pointing - Windows](./demo/GIFs/windows_semantic_pointing.gif)](./demo/Videos/windows_semantic_pointing.mp4) | [![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif)](./demo/Videos/linux_semantic_pointing.mp4) |
-| [Watch full video (Windows)](./demo/Videos/windows_semantic_pointing.mp4) | [Watch full video (Linux)](./demo/Videos/linux_semantic_pointing.mp4) |
-
----
+<table>
+  <tr>
+    <td align="center"><a href="./demo/Videos/windows_semantic_pointing.mp4"><img src="./demo/GIFs/windows_semantic_pointing.gif" width="400"></a><br>[Watch full video (Windows)](./demo/Videos/windows_semantic_pointing.mp4)</td>
+    <td align="center"><a href="./demo/Videos/linux_semantic_pointing.mp4"><img src="./demo/GIFs/linux_semantic_pointing.gif" width="400"></a><br>[Watch full video (Linux)](./demo/Videos/linux_semantic_pointing.mp4)</td>
+  </tr>
+</table>
 
 ## Installation
 
