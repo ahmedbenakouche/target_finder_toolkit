@@ -22,24 +22,23 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 | Windows | Linux |
 |--------|--------|
-| [![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif)](./demo/Videos/windows_TargetFinder.mp4) | [![Linux Target Finder](./demo/GIFs/linux_TargetFinder.gif)](./demo/Videos/linux_TargetFinder.mp4) |
-| [Watch full video (Windows)](./demo/Videos/windows_TargetFinder.mp4) | [Watch full video (Linux)](./demo/Videos/linux_TargetFinder.mp4) |
+| ![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif) | ![Linux Target Finder](./demo/GIFs/linux_TargetFinder.gif) |
+| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
 
 ### Bubble Cursor
 
 | Windows | Linux |
 |--------|--------|
-| [![Bubble Cursor - Windows](./demo/GIFs/windows_bubble_cursor.gif)](./demo/Videos/windows_bubble_cursor.mp4) | [![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif)](./demo/Videos/linux_bubble_cursor.mp4) |
-| [Watch full video (Windows)](./demo/Videos/windows_bubble_cursor.mp4) | [Watch full video (Linux)](./demo/Videos/linux_bubble_cursor.mp4) |
+| ![Bubble Cursor - Windows](./demo/GIFs/windows_bubble_cursor.gif) | ![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif) |
+| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
 
 ### Semantic Pointing
 
 | Windows | Linux |
 |--------|--------|
-| [![Semantic Pointing - Windows](./demo/GIFs/windows_semantic_pointing.gif)](./demo/Videos/windows_semantic_pointing.mp4) | [![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif)](./demo/Videos/linux_semantic_pointing.mp4) |
-| [Watch full video (Windows)](./demo/Videos/windows_semantic_pointing.mp4) | [Watch full video (Linux)](./demo/Videos/linux_semantic_pointing.mp4) |
+| ![Semantic Pointing - Windows](./demo/GIFs/windows_semantic_pointing.gif) | ![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif) |
+| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
 
----
 
 
 ## Installation
