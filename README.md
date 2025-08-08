@@ -1,4 +1,4 @@
-# Target Finder Toolkit
+# TargetFinder Toolkit
 
 This toolkit accompanies the work presented in the article [TargetFinder: Detecting Widget Information from Pixels on Desktop Interfaces](https://....).  
 It provides a real-time detection system using the YOLOv8 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
@@ -18,7 +18,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 ## Demo
 
-### Target Finder (Windows & Linux)
+### TargetFinder
 
 | Windows | Linux |
 |--------|--------|
@@ -45,7 +45,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 ```bash
 # Option 1 — Install from PyPI
-pip install target_finder_toolkit
+pip install target-finder-toolkit
 # Pour le moment installez depuis le dépôt de test :
 pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple target-finder-toolkit==0.1.0
 
@@ -124,10 +124,10 @@ bubblecursor \
 | Option | Description |
 |--------|-------------|
 | `--model-path` | Path to YOLOv8 `.pt` model (default: `best.pt` from package). |
-| `--change-thresh` | Threshold for low-res change detection. |
-| `--capture-interval` | Time interval between screen captures (in seconds). |
-| `--confidence` | YOLO confidence threshold (0.0–1.0). |
-| `--iou` | YOLO IoU threshold for non-max suppression. |
+| `--change-thresh` | Threshold for low-res change detection (default: `100`). |
+| `--capture-interval` | Time interval between screen captures in seconds (default: `1/30`). |
+| `--confidence` | YOLO confidence threshold (0.0–1.0, default: `0.28`). |
+| `--iou` | YOLO IoU threshold for non-max suppression (default: `0.3`). |
 | `--display` *(semanticpointing only)* | Show visual feedback (motor vs visual space). |
 | `--disable-accel` *(semanticpointing only)* | Disable system mouse acceleration. |
 
