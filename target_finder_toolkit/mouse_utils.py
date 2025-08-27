@@ -1,10 +1,26 @@
-# mouse_utils.py
+"""
+mouse_utils.py
+===============
 
+Utilities to manage system cursor visibility and mouse acceleration.
+
+This module exposes a minimal, public helper API used by the two example
+interaction techniques (Bubble Cursor and Semantic Pointing):
+
+- `hide_cursor_everywhere()` / `restore_default_cursors()`:
+    Hide/show the system cursor globally (platform-specific).
+- `disable_mouse_acceleration()` / `restore_mouse_acceleration()`:
+    Disable/restore OS mouse acceleration (platform-specific).
+
+Notes
+-----
+- Windows: uses User32 APIs to replace system cursors and writes registry keys
+  to control acceleration.
+- Linux (X11): uses XFixes to hide/show the cursor and `xinput` to flip accel profiles
+  (libinput/evdev). Wayland is not supported here.
+- macOS: currently no-op stubs (could be implemented via Quartz/Cocoa).
 """
-Utilities for managing system cursor visibility and Windows mouse acceleration.
-- hide_cursor_everywhere() / restore_default_cursor(): hide/show system cursor
-- disable_mouse_acceleration(), restore_mouse_acceleration(): helper to disable and restore acceleration
-"""
+
 
 
 # 1) Cursor hide/show functions
@@ -94,7 +110,7 @@ elif sys.platform.startswith("linux"):
         libX11.XFlush(_X11_DISPLAY)
 
 else:
-    # For macOS pas encore fais  ......
+    # For macOS pas ...
     def hide_cursor_everywhere():
         pass
 
@@ -247,6 +263,7 @@ elif sys.platform.startswith("linux"):
         _AFFECTED_DEVICES.clear()
 
 else:
+    # For macOS pas ...
     def disable_mouse_acceleration():
         pass
 

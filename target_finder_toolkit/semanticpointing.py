@@ -1,4 +1,31 @@
-# semanticpointing.py
+"""
+semanticpointing.py
+===================
+
+Example script demonstrating the use of the TargetFinder toolkit with
+the **Semantic Pointing** interaction technique.
+
+A "fake" cursor is drawn. Its speed is reduced when
+approaching detected widgets, effectively enlarging their motor-space
+representation and making them easier to acquire.
+
+Usage
+-----
+From the command line:
+
+    semanticpointing
+
+Options:
+    --display        Show the target bounding box and its physical area (S*W).
+    --disable-accel  Disable system mouse acceleration during the session.
+
+Note
+----
+This script is a **demonstration example** and is not part of the official
+TargetFinder toolkit API. It relies on `TargetFinder` to provide detected
+widgets (logical, DPI-aware coordinates).
+"""
+
 
 import os
 import sys
@@ -40,6 +67,32 @@ import math
 #     return 0.0
 
 class SemanticPointing(QtWidgets.QWidget):
+    """
+    PyQt overlay widget implementing the Semantic Pointing technique.
+
+    Principle
+    ---------
+    For each frame, bell-shaped weights are aggregated around each
+    detected widget. The speed factor `s` varies from 1 to `self.s`,
+    slowing down the fake cursor near targets and facilitating selection.
+
+    Parameters
+    ----------
+    detector : TargetFinder
+        Detector providing widget bounding boxes (logical coordinates).
+    display : bool, optional
+        If True, highlights the target box and its physical motor-space area.
+    disable_accel : bool, optional
+        If True, disables system mouse acceleration during the session.
+
+    Notes
+    -----
+    - The overlay is a transparent, always-on-top window.
+    - Real clicks are redirected to the fake cursor position during
+      click simulation.
+    - The Qt timer is set to 10 ms for smooth cursor rendering;
+      this does not increase the detector’s inference frequency.
+    """
     def __init__(self, detector: TargetFinder, display = False, disable_accel = False):
         super().__init__()
         self.display = display
@@ -286,6 +339,23 @@ class SemanticPointing(QtWidgets.QWidget):
                 self._start_mouse_listener() # restart the listener
 
 def semantic_pointing(detector: TargetFinder, display = False, disable_accel=False):
+    """
+    Launch the Semantic Pointing overlay with a given detector.
+
+    Parameters
+    ----------
+    detector : TargetFinder
+        Initialized TargetFinder object (YOLO model loaded).
+    display : bool, optional
+        If True, show the target box and its motor-space area.
+    disable_accel : bool, optional
+        If True, disable mouse acceleration for the duration of the session.
+
+    Returns
+    -------
+    None
+        Blocks until the Qt application is closed.
+    """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     hide_cursor_everywhere()
     if disable_accel:

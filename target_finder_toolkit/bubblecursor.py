@@ -1,4 +1,32 @@
-# bubblecursor.py
+"""
+bubblecursor.py
+===============
+
+Example script demonstrating how to use the TargetFinder toolkit with
+the **Bubble Cursor** interaction technique.
+
+This overlay replaces the standard mouse pointer with a dynamic
+"bubble" that expands to always include the closest detected widget.
+Clicking inside the bubble automatically activates the nearest widget.
+
+Usage
+-----
+From the command line:
+
+    bubblecursor
+
+Keyboard shortcuts:
+    - Press **b** to toggle the bubble cursor on/off.
+    - Press **q** to quit the program.
+
+Mouse:
+    - Left-click normally to interact with widgets inside the bubble.
+    - Clicking outside will redirect the click to the nearest widget.
+
+This script is for demonstration purposes only and is not part of the
+core TargetFinder toolkit API.
+"""
+
 
 import os
 import sys
@@ -20,6 +48,28 @@ from importlib import resources
 
 
 class BubbleCursor(QtWidgets.QWidget):
+    """
+    PyQt overlay widget implementing the Bubble Cursor technique.
+
+    Principle
+    ---------
+    At each frame, the system computes the intersecting distance (IntD)
+    from the pointer to all detected widgets. The bubble radius is set
+    to encompass the closest widget but not overlap the second closest.
+    A visual "bubble" is drawn around the pointer and the target.
+
+    Parameters
+    ----------
+    detector : TargetFinder
+        Detector providing widget bounding boxes (logical coordinates).
+
+    Notes
+    -----
+    - The overlay is transparent and always on top.
+    - Clicking outside a widget inside the bubble is redirected
+      to the nearest detected target.
+    - The real cursor is hidden and replaced by a drawn "fake" cursor.
+    """
     def __init__(self, detector: TargetFinder):
         super().__init__()
         self.detector = detector
@@ -205,6 +255,19 @@ class BubbleCursor(QtWidgets.QWidget):
 
 
 def bubble_cursor(detector: TargetFinder):
+    """
+    Launch the Bubble Cursor overlay with a given detector.
+
+    Parameters
+    ----------
+    detector : TargetFinder
+        Initialized TargetFinder object (YOLO model loaded).
+
+    Returns
+    -------
+    None
+        Blocks until the Qt application is closed.
+    """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     hide_cursor_everywhere()
     ov = BubbleCursor(detector)
