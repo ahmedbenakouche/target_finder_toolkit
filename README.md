@@ -44,9 +44,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 ## Installation
 
 ```bash
-# Option 1 — Install from PyPI
-# pip install target-finder-toolkit
-# Pour le moment installez depuis test.pypi :
+# Option 1 — Install from TestPyPI 
 pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple target-finder-toolkit==0.1.2
 
 # Option 2 — Install from GitHub (direct link)
@@ -123,45 +121,99 @@ bubblecursor \
 
 | Option | Description |
 |--------|-------------|
-| `--model-path` | Path to YOLOv8 `.pt` model (default: `best.pt` from package). |
-| `--change-thresh` | Threshold for low-res change detection (default: `100`). |
-| `--capture-interval` | Time interval between screen captures in seconds (default: `1/30`). |
-| `--confidence` | YOLO confidence threshold (0.0–1.0, default: `0.28`). |
-| `--iou` | YOLO IoU threshold for non-max suppression (default: `0.3`). |
+| `--model-path` | By default, TargetFinder loads our trained model `YOLOv8n` packaged with the toolkit, but you can supply your own. |
+| `--change-thresh` | Screen change detection threshold. A higher value makes detection less sensitive to small variations. (`default = 100`). |
+| `--capture-interval` | Time between screen captures in seconds. Lower values = higher frequency but more CPU/GPU usage. (`default = 1/30 ≈ 0.033s`). |
+| `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0]`, default = 0.28`). |
+| `--iou` | IoU threshold for non-max suppression (controls overlap merging). (`[0.0–1.0], default = 0.3`). |
 | `--display` *(semanticpointing only)* | Show visual feedback (motor vs visual space). |
 | `--disable-accel` *(semanticpointing only)* | Disable system mouse acceleration. |
 
 ---
 
-### Python API
+### Python API & Examples
 
 You can also use `TargetFinder` directly in your own Python scripts:
+
+#### Print detection changes (callback)
 
 ```python
 import time
 from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit import postprocess as pp
 
-# 1) Instantiate the detector (loads best.pt by default)
-det = TargetFinder(
-    change_thresh=100,
-    capture_interval=1/30,
-    confidence=0.28
-)
+def on_change(detections, added, removed, frame):
+    pp.pretty_print_change(detections, added, removed)
 
-# 2) Start detection loop
+det = TargetFinder()
+det.set_callback(on_change, with_frame=False, diff_iou=0.5)
 det.start()
-print("TargetFinder started — press Ctrl+C to stop.")
 
+print("TargetFinder started — press Ctrl+C to stop.")
 try:
     while True:
-        # 3) Get current detections
-        detections = det.get_detections()  # [(x, y, w, h, score, cls_id), ...]
-        if detections:
-            print(detections)
-        time.sleep(1)
+        time.sleep(0.2)
 except KeyboardInterrupt:
     det.stop()
-    print("Detection stopped.")
+    print("Stopped.")
 ```
+
+#### Save one annotated frame + crops
+
+```python
+import time
+from pathlib import Path
+from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit import postprocess as pp
+
+_saved_once = False
+
+def on_change(detections, added, removed, frame):
+    global _saved_once
+    if _saved_once or frame is None or not detections:
+        return
+    out_dir = Path("out")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pp.save_annotated(out_dir / "annotated.png", frame, detections)
+    crops = pp.extract_crops(frame, detections)
+    pp.save_crops(out_dir / "crops", crops)
+    print("Saved annotated frame and crops.")
+    _saved_once = True
+
+det = TargetFinder()
+det.set_callback(on_change, with_frame=True, diff_iou=0.5)
+det.start()
+
+print("Waiting for detections… Ctrl+C to stop.")
+try:
+    while True:
+        time.sleep(0.2)
+except KeyboardInterrupt:
+    det.stop()
+    print("Stopped.")
+```
+
+#### Detect on a static image
+
+```python
+from target_finder_toolkit.targetfinder import TargetFinder
+
+if __name__ == "__main__":
+    image_path = "screenshot.png"  # change this to your image
+
+    det = TargetFinder()
+    detections = det.detect_image(
+        image_path,
+        save_annotated=True,   # creates e.g. screenshot_annotated.png
+        save_json=True         # creates e.g. screenshot_detections.json
+    )
+```
+
+## Documentation
+
+For the full API reference and detailed explanations of all parameters,  
+visit the documentation site:
+
+👉 [**Documentation (API & Developer Guide)**](URL_TO_DOC_PAGE)
 
 ---
