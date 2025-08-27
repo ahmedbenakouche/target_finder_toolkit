@@ -110,7 +110,6 @@ After installation, three console entry points are available:
 
 ```bash
 bubblecursor \
-  --model-path path/to/best.pt \
   --change-thresh 100 \
   --capture-interval 0.033 \
   --confidence 0.28 \
