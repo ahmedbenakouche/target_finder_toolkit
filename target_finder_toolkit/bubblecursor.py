@@ -1,30 +1,15 @@
 """
-bubblecursor.py
-===============
+Bubble Cursor Demo
+==================
 
-Example script demonstrating how to use the TargetFinder toolkit with
-the **Bubble Cursor** interaction technique.
+This module demonstrates the **Bubble Cursor** interaction technique
+using the TargetFinder toolkit.
 
-This overlay replaces the standard mouse pointer with a dynamic
-"bubble" that expands to always include the closest detected widget.
-Clicking inside the bubble automatically activates the nearest widget.
-
-Usage
+Notes
 -----
-From the command line:
-
-    bubblecursor
-
-Keyboard shortcuts:
-    - Press **b** to toggle the bubble cursor on/off.
-    - Press **q** to quit the program.
-
-Mouse:
-    - Left-click normally to interact with widgets inside the bubble.
-    - Clicking outside will redirect the click to the nearest widget.
-
-This script is for demonstration purposes only and is not part of the
-core TargetFinder toolkit API.
+- This script is for demonstration purposes only.
+- It is **not part of the core TargetFinder API**, but shows how the
+  toolkit can be used for novel interaction techniques.
 """
 
 
@@ -46,6 +31,7 @@ from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from importlib import resources
 
+__all__ = ["bubble_cursor", "main"]
 
 class BubbleCursor(QtWidgets.QWidget):
     """
@@ -255,18 +241,17 @@ class BubbleCursor(QtWidgets.QWidget):
 
 
 def bubble_cursor(detector: TargetFinder):
-    """
-    Launch the Bubble Cursor overlay with a given detector.
+    """Launch the Bubble Cursor overlay.
 
-    Parameters
-    ----------
-    detector : TargetFinder
-        Initialized TargetFinder object (YOLO model loaded).
+    This replaces the system cursor with a dynamic "bubble" that
+    expands to always contain the closest widget detected by
+    :class:`TargetFinder`.
 
-    Returns
-    -------
-    None
-        Blocks until the Qt application is closed.
+    Args:
+        detector (TargetFinder): Initialized detector (YOLO model loaded).
+
+    Returns:
+        None: Blocks until the Qt application is closed.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     hide_cursor_everywhere()
@@ -280,6 +265,29 @@ def bubble_cursor(detector: TargetFinder):
 
 # CLI usage
 def main():
+    """Command-line entry point for the Bubble Cursor demo.
+
+    CLI arguments:
+        - -model-path (str, optional): Path to YOLO .pt weights.
+            Defaults to ``best.pt`` in the package.
+        - -change-thresh (int, optional): Threshold for screen change detection.
+            Higher = less sensitive. Default = ``100``.
+        - -capture-interval (float, optional): Delay in seconds between captures.
+            Lower = higher refresh rate, more CPU/GPU usage. Default = ``1/30``.
+        - -confidence (float, optional): YOLO confidence threshold in ``[0, 1]``.
+            Default = ``0.28``.
+        - -iou (float, optional): IoU threshold for YOLO NMS in ``[0, 1]``.
+            Controls overlap merging. Default = ``0.3``.
+
+    Keyboard shortcuts:
+        - **b**: Toggle between the Bubble Cursor and the normal system cursor.
+        - **q**: Quit the program.
+
+    **Example:** ``bubblecursor --change-thresh 200 --confidence 0.3 --iou 0.4``
+
+    Returns:
+        Starts the Qt event loop until exit.
+    """
     parser = argparse.ArgumentParser(description="Launch the BubbleCursor overlay")
     parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")

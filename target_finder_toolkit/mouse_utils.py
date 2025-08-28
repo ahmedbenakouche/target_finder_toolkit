@@ -1,7 +1,4 @@
 """
-mouse_utils.py
-===============
-
 Utilities to manage system cursor visibility and mouse acceleration.
 
 This module exposes a minimal, public helper API used by the two example
@@ -133,8 +130,8 @@ if sys.platform.startswith("win"):
 
 
     def disable_mouse_acceleration():
-        """ Disable Windows mouse acceleration (set all thresholds to 0),
-         and remember the original settings for later restoration """
+        # Disable Windows mouse acceleration (set all thresholds to 0)
+        # and remember the original settings for later restoration
         global _ORIGINAL_MOUSE_ACCEL
         global _HONOR_ACCEL_BACKUP
         if _ORIGINAL_MOUSE_ACCEL is None:
@@ -178,7 +175,7 @@ if sys.platform.startswith("win"):
 
 
     def restore_mouse_acceleration():
-        """Restore the previously saved Windows mouse acceleration settings"""
+        # Restore the previously saved Windows mouse acceleration settings
         global _ORIGINAL_MOUSE_ACCEL
         global _HONOR_ACCEL_BACKUP
         if _ORIGINAL_MOUSE_ACCEL:

@@ -1,22 +1,16 @@
 """
-targetfinder.py
-===============
+Detection of GUI widgets from live screen captures or static images.
 
-Continuous widget detection from screen captures or static images.
+Core features:
+    - Real-time screen capture and YOLO-based detection of GUI widgets.
+    - Callback mechanism to provide the current detections, the captured frame (optional), and the lists of added/removed detections.
+    - Optional PyQt overlay to visualize bounding boxes in real time.
+    - One-shot detection on static images with optional annotated export.
 
-Core features
--------------
-- Real-time screen capture and YOLO-based detection of GUI widgets.
-- Callback mechanism to provide the current detections, the captured frame
-  (optional), and the lists of added/removed detections.
-- Optional PyQt overlay to visualize bounding boxes in real time.
-- One-shot detection on static images with optional annotated export.
-
-Notes
------
-This is the **main entry point** of the toolkit. Other modules
-(`postprocess.py`, `mouse_utils.py`) provide utilities and helpers,
-while `bubblecursor.py` and `semanticpointing.py` are demonstration examples.
+Notes:
+    This is the **main entry point** of the toolkit. Utility helpers live in
+    ``postprocess.py`` and demonstration apps are in ``bubblecursor.py`` and
+    ``semanticpointing.py``.
 """
 
 
@@ -32,6 +26,8 @@ from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
 
+__all__ = ["TargetFinder", "show_detections", "main"]
+
 # Mapping of class IDs to names
 CLASS_NAMES = {
     0: "Button",
@@ -44,18 +40,14 @@ CLASS_NAMES = {
 
 
 def _iou(a, b):
-    """
-    Compute Intersection over Union (IoU) between two bounding boxes.
+    """Compute IoU between two (x, y, w, h) boxes.
 
-    Parameters
-    ----------
-    a : tuple (x, y, w, h)
-    b : tuple (x, y, w, h)
+    Args:
+        a (tuple[int, int, int, int]): First box (x, y, w, h).
+        b (tuple[int, int, int, int]): Second box (x, y, w, h).
 
-    Returns
-    -------
-    float
-        IoU value in [0, 1].
+    Returns:
+        float: IoU in ``[0, 1]``.
     """
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
@@ -73,35 +65,12 @@ def _iou(a, b):
 
 
 def _require_number(name, val):
-    """Convert value to float or raise a TypeError with context."""
     try:
         return float(val)
     except Exception:
         raise TypeError(f"{name} must be a number, got {type(val).__name__}")
 
 def _require_between(name, val, lo, hi, inclusive=True):
-    """
-    Validate that a number is within a range.
-
-    Parameters
-    ----------
-    name : str
-        Parameter name for error messages.
-    val : any
-        Value to check.
-    lo : float
-        Lower bound.
-    hi : float
-        Upper bound.
-    inclusive : bool, optional
-        If True, interval is closed [lo, hi].
-        If False, interval is open (lo, hi).
-
-    Returns
-    -------
-    float
-        The validated numeric value.
-    """
     v = _require_number(name, val)
     if inclusive:
         if not (lo <= v <= hi):
@@ -112,32 +81,49 @@ def _require_between(name, val, lo, hi, inclusive=True):
     return v
 
 
-class TargetFinder:
-    """
-    Continuous screen capture + widget detection using YOLO.
-
-    Provides:
-    - real-time loop over screen captures with change detection
-    - persistent IDs for tracked detections
-    - one-shot image detection with optional export
-    """
-    
+class TargetFinder:    
     def __init__(self, model_path=None, change_thresh=100, capture_interval=1/30, confidence=0.28, iou = 0.3):
-        """
-        Initialize the TargetFinder detector.
+        """Initialize the detector.
 
-        Parameters
-        ----------
-        model_path : str or None
-            Path to YOLO .pt file. If None, defaults to 'best.pt' in this folder.
-        change_thresh : int
-            Threshold for triggering re-detection on screen changes.
-        capture_interval : float
-            Interval between screen captures (seconds).
-        confidence : float
-            YOLO confidence threshold (0.0–1.0).
-        iou : float
-            YOLO IoU threshold (0.0–1.0).
+        Args:
+            model_path (str | None, optional):
+                Path to a YOLO ``.pt`` weights file.  
+                If ``None``, the detector loads the default model (``best.pt``)
+                packaged with the toolkit. You can also supply your own trained
+                YOLOv8 model.
+
+            change_thresh (int, optional):
+                Screen change detection threshold (L2 distance on a down-scaled
+                screen).  
+                A **higher value** makes the detector **less sensitive**
+                to small variations.  
+                Default = ``100``.
+
+            capture_interval (float, optional):
+                Delay in **seconds** between consecutive screen captures.  
+                Lower values = higher refresh rate but also higher CPU/GPU usage.  
+                Default = ``1/30 ≈ 0.033s (30 FPS)``.
+
+            confidence (float, optional):
+                Minimum YOLO confidence score required to keep a detection.  
+                Must be in the range ``[0.0 – 1.0]``.  
+                Default = ``0.28``.
+
+            iou (float, optional):
+                Intersection-over-Union (IoU) threshold used for YOLO’s
+                Non-Maximum Suppression (NMS).  
+                Determines when two overlapping bounding boxes should be considered
+                the same object (higher = stricter merging, lower = more boxes kept).  
+                Must be in the range ``[0.0 – 1.0]``.  
+                Default = ``0.3``.
+
+        Raises:
+            FileNotFoundError:
+                If the specified YOLO model file cannot be found.
+            ValueError:
+                If numeric arguments are outside their valid ranges.
+            TypeError:
+                If numeric arguments have invalid types.
         """
         
         # Ensure a QApplication exists for primaryScreen()
@@ -181,21 +167,44 @@ class TargetFinder:
         self._diff_iou = 0.5        # IoU threshold for added/removed + ID conservation
 
     def set_callback(self, fn, with_frame=False, diff_iou=0.5):
-        """
-        Register a callback to be invoked after each detection update.
+        """Register a callback invoked after each detection update.
 
-        Parameters
-        ----------
-        fn : callable or None
-            Signature: fn(detections, added, removed, frame)
-            - detections: current list[dict]
-            - added: newly appeared list[dict]
-            - removed: disappeared list[dict]
-            - frame: RGB np.ndarray or None (depending on with_frame)
-        with_frame : bool, optional
-            If True, pass the full-resolution RGB frame to the callback.
-        diff_iou : float, optional
-            IoU threshold used to determine added/removed and to keep stable IDs.
+        The callback is invoked as:
+            ``fn(detections, added, removed, frame)``
+
+        Args:
+            fn (Callable | None):
+                User callback function, or ``None`` to disable.  
+                The function receives:
+                    - ``detections (list[dict])``: All current detections (widgets).
+                    - ``added (list[dict])``: Detections that appeared since the last frame.
+                    - ``removed (list[dict])``: Detections that disappeared since the last frame.
+                    - ``frame (np.ndarray | None)``: RGB screen frame
+                      (only provided if ``with_frame=True``).
+
+                Each detection dictionary has the following keys:
+                    - ``id (int)``: Unique identifier for a detection,
+                      preserved across frames as long as the widget remains visible.
+                    - ``x (int)``: Top-left X coordinate.
+                    - ``y (int)``: Top-left Y coordinate.
+                    - ``width (int)``: Bounding box width.
+                    - ``height (int)``: Bounding box height.
+                    - ``score (float)``: Confidence score in ``[0, 1]``.
+                    - ``class_id (int)``: YOLO class index.
+                    - ``class_name (str)``: class label (e.g., "Button").
+
+            with_frame (bool, optional):
+                If ``True``, include the RGB frame in the callback.
+                Default = ``False``.
+
+            diff_iou (float, optional):
+                IoU threshold used to decide whether a detection is considered
+                the same widget across frames (for ID conservation and added/removed lists).
+                Must be in ``[0, 1]``. Default = ``0.5``.
+
+        Raises:
+            TypeError: If ``fn`` is not callable.
+            ValueError: If ``diff_iou`` is outside ``[0, 1]``.
         """
         if fn is not None and not callable(fn):
             raise TypeError("on_change must be a callable or None")
@@ -205,44 +214,28 @@ class TargetFinder:
 
 
     def start(self):
-        """Start the capture+inference loop in a separate thread"""
+        """Start the capture+inference loop in a separate thread."""
         self._stop = False
         threading.Thread(target=self._capture_loop, daemon=True).start()
 
     def stop(self):
-        """Stop the detection loop"""
+        """Stop the detection loop."""
         self._stop = True
 
     def get_detections(self):
-        """
-        Get current detections as a list of tuples.
+        """Return current detections as tuples. Coordinates are in **logical screen space**, i.e. they already include DPI-aware scaling to match the primary screen geometry.
 
-        Notes
-        -----
-        The coordinates are in **logical screen space**, i.e. they already
-        include DPI-aware scaling to match the primary screen geometry.
-
-        Returns
-        -------
-        list[tuple]
-            Each entry is (x, y, w, h, score, cls_id).
+        Returns:
+            ``[(x, y, w, h, score, class_id) ...]``.
         """
         return self.detections
 
     def _build_dicts(self, boxes_xyxy, scores, class_ids, scale_x, scale_y):
-        """
-        Build detection dicts from YOLO raw outputs.
+        """Convert raw YOLO outputs to detection dicts.
 
-        Notes
-        -----
-        The (x, y, width, height) values are converted from YOLO pixel
-        coordinates and multiplied by `scale_x`/`scale_y` so they are
-        expressed in **logical screen space** (DPI-aware).
-
-        Returns
-        -------
-        list[dict]
-            Each dict has: id, x, y, width, height, score, class_id, class_name.
+        Returns:
+            list[dict]: Dicts with keys
+            ``id, x, y, width, height, score, class_id, class_name``.
         """
         dets = []
         for (x1, y1, x2, y2), score, cls_id in zip(boxes_xyxy, scores, class_ids):
@@ -259,37 +252,14 @@ class TargetFinder:
         return dets
 
     def _assign_ids_and_diff(self, prev, curr):
-        """
-        Assign stable IDs across frames by class-aware IoU matching, and compute
-        the sets of added/removed detections.
+        """Assign stable IDs via class-aware IoU matching; compute added/removed.
 
-        ID lifecycle / policy
-        ---------------------
-        - Monotonic IDs: `self._next_id` increases over time; we never decrement or
-          reuse past IDs in the current session.
-        - No re-identification of disappeared widgets: if a widget is absent at
-          this frame (no IoU match ≥ self._diff_iou with same class), it is marked
-          as *removed*. Its ID is considered *expired* and will NOT be re-assigned to
-          any future detection — even if a visually similar widget reappears later.
-          (We do not track through long occlusions or disappearance/reappearance.)
-        - Class-aware matching: candidates are matched only within the same class_id.
-        - Greedy matching by best IoU: for each current detection, we pick the
-          unmatched previous detection with the highest IoU (if ≥ self._diff_iou).
-        - New IDs for unmatched current detections: anything not matched to a
-          previous detection receives a fresh, never-before-used ID.
+        Args:
+            prev (list[dict]): Previous detections (with assigned ``id``).
+            curr (list[dict]): Current detections (``id`` will be set).
 
-        Parameters
-        ----------
-        prev : list[dict]
-            Previous-frame detections with assigned "id".
-        curr : list[dict]
-            Current-frame detections (their "id" will be set/kept here).
-
-        Returns
-        -------
-        (added, removed) : tuple(list[dict], list[dict])
-            - added: detections in `curr` that received *new* IDs (unmatched).
-            - removed: detections in `prev` that were *not matched* this frame.
+        Returns:
+            tuple[list[dict], list[dict]]: ``(added, removed)``.
         """
         used_prev = set()
         used_curr = set()
@@ -325,25 +295,20 @@ class TargetFinder:
         return added, removed
 
     def detect_image(self, image_path, save_annotated=False, save_json=False):
-        """
-        Run detection on a single image and optionally save results.
+        """Run detection on a single image and optionally save results.
 
-        Parameters
-        ----------
-        image_path : str
-            Path to the input image.
-        save_annotated : bool
-            If True, saves an annotated version of the image at the same location
-            with suffix '_annotated.png'.
-        save_json : bool
-            If True, saves detections as a JSON file at the same location
-            with suffix '_detections.json'.
+        Args:
+            image_path (str): Path to input image.
+            save_annotated (bool, optional): If ``True``, write
+                ``*_annotated.png`` next to the image. Defaults to ``False``.
+            save_json (bool, optional): If ``True``, write
+                ``*_detections.json`` next to the image. Defaults to ``False``.
 
-        Returns
-        -------
-        detections : list of dict
-            List of detections in the format:
-            {id, x, y, width, height, score, class_id, class_name}
+        Returns:
+            Detections with keys ``id, x, y, width, height, score, class_id, class_name``.
+
+        Raises:
+            FileNotFoundError: If the image cannot be read.
         """
         # Read image (BGR as expected by OpenCV/Ultralytics)
         img_bgr = cv2.imread(image_path, cv2.IMREAD_COLOR)
@@ -461,11 +426,7 @@ class TargetFinder:
 
 
 class OverlayWindow(QtWidgets.QWidget):
-    """
-    Transparent full-screen overlay window for drawing bounding boxes.
-
-    Colors are assigned per class ID.
-    """
+    # Transparent full-screen overlay window for drawing bounding boxes. Colors are assigned per class ID.
     PALETTE = [
         QtGui.QColor(0, 255, 0, 200),    # Button → green
         QtGui.QColor(255, 0, 0, 200),    # ToggleButton → red
@@ -476,14 +437,7 @@ class OverlayWindow(QtWidgets.QWidget):
     ]
 
     def __init__(self, detector: TargetFinder):
-        """
-        Construct an always-on-top, click-through, transparent overlay.
-
-        Parameters
-        ----------
-        detector : TargetFinder
-            The detector instance from which to read detections.
-        """
+        # Construct an always-on-top, click-through, transparent overlay.
         super().__init__()
         self.detector = detector
 
@@ -517,9 +471,8 @@ class OverlayWindow(QtWidgets.QWidget):
         self._timer.start(10)  # 10 ms
 
     def paintEvent(self, event):
-        """
-        Paint bounding boxes and scores on the transparent overlay.
-        """
+        # Paint bounding boxes and scores on the transparent overlay.
+
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
 
@@ -540,13 +493,10 @@ class OverlayWindow(QtWidgets.QWidget):
 
 
 def show_detections(detector: TargetFinder):
-    """
-    Launch a PyQt application showing detections in a transparent overlay window.
+    """Launch a PyQt application showing detections in a transparent overlay window.
 
-    Parameters
-    ----------
-    detector : TargetFinder
-        The detector instance to visualize.
+    Args:
+        detector (TargetFinder): The detector instance providing the detections.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     ov  = OverlayWindow(detector)
@@ -557,12 +507,10 @@ def show_detections(detector: TargetFinder):
 
 # CLI usage
 def main():
-    """
-    CLI entry point for launching TargetFinder overlay.
+    """CLI entry point for launching the TargetFinder overlay.
 
-    Example
-    -------
-    python -m targetfinder --model-path best.pt --confidence 0.3 --iou 0.4
+    **Example:**  ``python -m target_finder_toolkit.targetfinder --confidence 0.3 --iou 0.4``
+
     """
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")
     parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")

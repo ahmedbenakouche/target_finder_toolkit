@@ -1,30 +1,17 @@
 """
-semanticpointing.py
-===================
+Semantic Pointing Demo
+======================
 
-Example script demonstrating the use of the TargetFinder toolkit with
-the **Semantic Pointing** interaction technique.
+This module demonstrates the **Semantic Pointing** interaction technique
+using the TargetFinder toolkit.
 
-A "fake" cursor is drawn. Its speed is reduced when
-approaching detected widgets, effectively enlarging their motor-space
-representation and making them easier to acquire.
-
-Usage
+Notes
 -----
-From the command line:
-
-    semanticpointing
-
-Options:
-    --display        Show the target bounding box and its physical area (S*W).
-    --disable-accel  Disable system mouse acceleration during the session.
-
-Note
-----
-This script is a **demonstration example** and is not part of the official
-TargetFinder toolkit API. It relies on `TargetFinder` to provide detected
-widgets (logical, DPI-aware coordinates).
+- This script is for demonstration purposes only.
+- It is **not part of the core TargetFinder API**, but illustrates how
+  the toolkit can support advanced interaction techniques.
 """
+
 
 
 import os
@@ -44,6 +31,8 @@ import argparse
 from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
 import math
+
+__all__ = ["semantic_pointing", "main"]
 
 # def Omega_rc(u, b):
 #     """
@@ -339,22 +328,25 @@ class SemanticPointing(QtWidgets.QWidget):
                 self._start_mouse_listener() # restart the listener
 
 def semantic_pointing(detector: TargetFinder, display = False, disable_accel=False):
-    """
-    Launch the Semantic Pointing overlay with a given detector.
+    """Launch the Semantic Pointing overlay with a given detector.
 
-    Parameters
-    ----------
-    detector : TargetFinder
-        Initialized TargetFinder object (YOLO model loaded).
-    display : bool, optional
-        If True, show the target box and its motor-space area.
-    disable_accel : bool, optional
-        If True, disable mouse acceleration for the duration of the session.
+    The overlay draws a **fake cursor** whose speed dynamically changes
+    depending on proximity to detected widgets. This alters their
+    motor-space representation, making them easier to acquire.
 
-    Returns
-    -------
-    None
-        Blocks until the Qt application is closed.
+    Args:
+        detector (TargetFinder): Initialized TargetFinder (YOLO model loaded).
+        display (bool, optional): If True, highlight the target box and its
+            motor-space area (S×W). Defaults to False.
+        disable_accel (bool, optional): If True, disable OS mouse
+            acceleration. Defaults to False.
+
+    Keyboard shortcuts:
+        - **b**: Toggle between Semantic Pointing and the normal system cursor.
+        - **q**: Quit the program.
+
+    Returns:
+        None: Blocks until the Qt application is closed.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     hide_cursor_everywhere()
@@ -372,6 +364,32 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
 
 # CLI usage
 def main():
+    """Command-line entry point for the Semantic Pointing demo.
+
+    CLI arguments:
+        --model-path (str, optional): Path to YOLO .pt weights.
+            Defaults to ``best.pt`` in the package.
+        --change-thresh (int, optional): Screen-change L2 threshold on a
+            down-scaled frame. Higher = less sensitive. Default: ``100``.
+        --capture-interval (float, optional): Delay in seconds between captures.
+            Lower = higher refresh rate, more CPU/GPU. Default: ``1/30``.
+        --confidence (float, optional): YOLO confidence threshold in ``[0, 1]``.
+            Default: ``0.28``.
+        --iou (float, optional): IoU threshold for YOLO NMS in ``[0, 1]``.
+            Controls overlap merging. Default: ``0.3``.
+        --disable-accel (flag): Disable system mouse acceleration.  
+
+        --display (flag): Show the target bounding box and its motor-space area.
+
+    Keyboard shortcuts:
+        - **b**: Toggle between Semantic Pointing and the normal system cursor.
+        - **q**: Quit the program.
+
+    **Example:** ``semanticpointing --disable-accel --display --confidence 0.4``
+
+    Returns:
+        Starts the Qt event loop until exit.
+    """
     parser = argparse.ArgumentParser(description="Launch the Semantic Pointing overlay")
     parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
