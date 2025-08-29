@@ -1,59 +1,22 @@
 # TargetFinder Toolkit
 
-This toolkit accompanies the work presented in the article [TargetFinder: Detecting Widget Information from Pixels on Desktop Interfaces](URL_TO_BE_ADDED).  
+This toolkit accompanies the work presented in the article TargetFinder: Detecting Widget Information from Pixels on Desktop Interfaces.  
 It provides a real-time detection system using the YOLOv8 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
 
 The system is lightweight and easy to integrate, enabling the implementation of advanced interaction techniques.  
 As proof of concept, we include two interaction techniques built on top of TargetFinder:
 
-- **Bubble Cursor** [Read the article](https://dl.acm.org/doi/10.1145/1054972.1055012).
-- **Semantic Pointing** [Read the article](https://dl.acm.org/doi/10.1145/985692.985758). 
+- **[Bubble Cursor](https://dl.acm.org/doi/10.1145/1054972.1055012)** 
+- **[Semantic Pointing](https://dl.acm.org/doi/10.1145/985692.985758)** 
 
 > **Note**: TargetFinder uses the `mss` library for ultra-fast screen capture and is cross-platform, meaning the core detection engine works across all operating systems. However, the **visual overlay rendering** via PyQt6, as well as system-level mechanisms such as mouse acceleration disabling (for Semantic Pointing) and cursor hiding, are currently tested only on **Windows** and **Linux (Ubuntu X11)**. Additional adaptation is required for other Linux environments or for macOS.
 
 ---
 
-
-
-
-## Demo
-
-### TargetFinder
-
-| Windows | Linux |
-|--------|--------|
-| ![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif) | ![Linux Target Finder](./demo/GIFs/linux_TargetFinder.gif) |
-| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
-
-### Bubble Cursor
-
-| Windows | Linux |
-|--------|--------|
-| ![Bubble Cursor - Windows](./demo/GIFs/windows_bubble_cursor.gif) | ![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif) |
-| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
-
-### Semantic Pointing
-
-| Windows | Linux |
-|--------|--------|
-| ![Semantic Pointing - Windows](./demo/GIFs/windows_semantic_pointing.gif) | ![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif) |
-| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
-
-
-
 ## Installation
 
 ```bash
-# Option 1 — Install from TestPyPI 
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple target-finder-toolkit
-
-# Option 2 — Install from GitHub (direct link)
-pip install git+https://...
-
-# Option 3 — Development mode (editable install)
-git clone https://...
-cd target_finder_toolkit
-pip install -e .
+pip install .
 ```
 
 <details>
@@ -93,46 +56,9 @@ During installation on Linux, you may need to install some system packages to av
 
 </details>
 
-
-
-
-## Usage
-
-### Command Line Interface (CLI)
-
-After installation, three console entry points are available:
-
-- `targetfinder-gui`: launches the main overlay GUI.
-- `bubblecursor`: runs the Bubble Cursor interaction technique.
-- `semanticpointing`: runs the Semantic Pointing interaction technique.
-
-#### Example usage:
-
-```bash
-bubblecursor \
-  --change-thresh 100 \
-  --capture-interval 0.033 \
-  --confidence 0.28 \
-  --iou 0.3
-```
-
-#### Available options:
-
-| Option | Description |
-|--------|-------------|
-| `--model-path` | By default, TargetFinder loads our trained model `YOLOv8n` packaged with the toolkit, but you can supply your own. |
-| `--change-thresh` | Screen change detection threshold. A higher value makes detection less sensitive to small variations. (`default = 100`). |
-| `--capture-interval` | Time between screen captures in seconds. Lower values = higher frequency but more CPU/GPU usage. (`default = 1/30 ≈ 0.033s`). |
-| `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0], default = 0.28`). |
-| `--iou` | IoU threshold for non-max suppression (controls overlap merging). (`[0.0–1.0], default = 0.3`). |
-| `--display` *(semanticpointing only)* | Show visual feedback (motor vs visual space). |
-| `--disable-accel` *(semanticpointing only)* | Disable system mouse acceleration. |
-
----
-
 ### Python API & Examples
 
-You can also use `TargetFinder` directly in your own Python scripts:
+Minimal examples:
 
 #### Print detection changes (callback)
 
@@ -240,5 +166,58 @@ For the full API reference and detailed explanations of all parameters,
 visit the documentation site:
 
 👉 [**Documentation (API & Developer Guide)**](https://zingy-biscuit-a4bc5c.netlify.app/)
+
+
+
+## Demos using TargetFinder
+
+### TargetFinder GUI
+
+After installation, `targetfinder-gui`: launches the main overlay GUI.
+
+| Windows | Linux |
+|--------|--------|
+| ![Windows Target Finder](./demo/GIFs/windows_TargetFinder.gif) | ![Linux Target Finder](./demo/GIFs/linux_TargetFinder.gif) |
+| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
+
+### Bubble Cursor
+
+After installation, `bubblecursor` runs the Bubble Cursor interaction technique.
+
+| Windows | Linux |
+|--------|--------|
+| ![Bubble Cursor - Windows](./demo/GIFs/windows_bubble_cursor.gif) | ![Bubble Cursor - Linux](./demo/GIFs/linux_bubble_cursor.gif) |
+| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
+
+### Semantic Pointing
+
+After installation, `semanticpointing` runs the Semantic Pointing interaction technique.
+
+| Windows | Linux |
+|--------|--------|
+| ![Semantic Pointing - Windows](./demo/GIFs/windows_semantic_pointing.gif) | ![Semantic Pointing - Linux](./demo/GIFs/linux_semantic_pointing.gif) |
+| **Full video: (see in /demo/Videos/)** | **Full video: (see in /demo/Videos/)** |
+
+
+#### Available options:
+
+| Option | Description |
+|--------|-------------|
+| `--model-path` | By default, TargetFinder loads our trained model `YOLOv8n` packaged with the toolkit, but you can supply your own. |
+| `--change-thresh` | Screen change detection threshold. A higher value makes detection less sensitive to small variations. (`default = 100`). |
+| `--capture-interval` | Time between screen captures in seconds. Lower values = higher frequency but more CPU/GPU usage. (`default = 1/30 ≈ 0.033s`). |
+| `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0], default = 0.28`). |
+| `--iou` | IoU threshold for non-max suppression (controls overlap merging). (`[0.0–1.0], default = 0.3`). |
+| `--display` *(semanticpointing only)* | Show visual feedback (motor vs visual space). |
+| `--disable-accel` *(semanticpointing only)* | Disable system mouse acceleration. |
+
+Example:
+```bash
+bubblecursor \
+  --change-thresh 100 \
+  --capture-interval 0.033 \
+  --confidence 0.28 \
+  --iou 0.3
+```
 
 ---
