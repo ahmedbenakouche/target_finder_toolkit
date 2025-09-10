@@ -1,6 +1,6 @@
 # TargetFinder Toolkit
 
-This toolkit accompanies the work presented in the article TargetFinder: Detecting Widget Information from Pixels on Desktop Interfaces.  
+This toolkit accompanies the work presented in the article **TargetFinder: Detecting Widgets from Pixels on Desktop Interfaces**.  
 It provides a real-time detection system using the YOLOv8 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
 
 The system is lightweight and easy to integrate, enabling the implementation of advanced interaction techniques.  
