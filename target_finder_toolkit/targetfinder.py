@@ -13,7 +13,6 @@ Notes:
     ``semanticpointing.py``.
 """
 
-
 import os
 import sys
 import time
@@ -25,8 +24,14 @@ import mss
 from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
+import pyautogui
 
 __all__ = ["TargetFinder", "show_detections", "main"]
+
+
+class ScreenCaptureError(Exception):
+    pass
+
 
 # Mapping of class IDs to names
 CLASS_NAMES = {
@@ -35,7 +40,7 @@ CLASS_NAMES = {
     2: "Hyperlink",
     3: "Text",
     4: "TextInput",
-    5: "Slider"
+    5: "Slider",
 }
 
 
@@ -63,12 +68,12 @@ def _iou(a, b):
     return inter / float(area_a + area_b - inter + 1e-9)
 
 
-
 def _require_number(name, val):
     try:
         return float(val)
     except Exception:
         raise TypeError(f"{name} must be a number, got {type(val).__name__}")
+
 
 def _require_between(name, val, lo, hi, inclusive=True):
     v = _require_number(name, val)
@@ -81,40 +86,47 @@ def _require_between(name, val, lo, hi, inclusive=True):
     return v
 
 
-class TargetFinder:    
-    def __init__(self, model_path=None, change_thresh=100, capture_interval=1/30, confidence=0.28, iou = 0.3):
+class TargetFinder:
+    def __init__(
+        self,
+        model_path=None,
+        change_thresh=100,
+        capture_interval=1 / 30,
+        confidence=0.28,
+        iou=0.3,
+    ):
         """Initialize the detector.
 
         Args:
             model_path (str | None, optional):
-                Path to a YOLO ``.pt`` weights file.  
+                Path to a YOLO ``.pt`` weights file.
                 If ``None``, the detector loads the default model (``best.pt``)
                 packaged with the toolkit. You can also supply your own trained
                 YOLOv8 model.
 
             change_thresh (int, optional):
                 Screen change detection threshold (L2 distance on a down-scaled
-                screen).  
+                screen).
                 A **higher value** makes the detector **less sensitive**
-                to small variations.  
+                to small variations.
                 Default = ``100``.
 
             capture_interval (float, optional):
-                Delay in **seconds** between consecutive screen captures.  
-                Lower values = higher refresh rate but also higher CPU/GPU usage.  
+                Delay in **seconds** between consecutive screen captures.
+                Lower values = higher refresh rate but also higher CPU/GPU usage.
                 Default = ``1/30 ≈ 0.033s (30 FPS)``.
 
             confidence (float, optional):
-                Minimum YOLO confidence score required to keep a detection.  
-                Must be in the range ``[0.0 – 1.0]``.  
+                Minimum YOLO confidence score required to keep a detection.
+                Must be in the range ``[0.0 – 1.0]``.
                 Default = ``0.28``.
 
             iou (float, optional):
                 Intersection-over-Union (IoU) threshold used for YOLO’s
-                Non-Maximum Suppression (NMS).  
+                Non-Maximum Suppression (NMS).
                 Determines when two overlapping bounding boxes should be considered
-                the same object (higher = stricter merging, lower = more boxes kept).  
-                Must be in the range ``[0.0 – 1.0]``.  
+                the same object (higher = stricter merging, lower = more boxes kept).
+                Must be in the range ``[0.0 – 1.0]``.
                 Default = ``0.3``.
 
         Raises:
@@ -125,7 +137,7 @@ class TargetFinder:
             TypeError:
                 If numeric arguments have invalid types.
         """
-        
+
         # Ensure a QApplication exists for primaryScreen()
         if QtWidgets.QApplication.instance() is None:
             self._app = QtWidgets.QApplication(sys.argv)
@@ -141,10 +153,14 @@ class TargetFinder:
         self.model = YOLO(model_path)
 
         # Validate and store core thresholds/intervals
-        self.change_thresh = int(_require_between("change_thresh", change_thresh, 0, 1e12))
-        self.interval      = float(_require_between("capture_interval", capture_interval, 0, 1e6))
-        self.conf          = float(_require_between("confidence", confidence, 0.0, 1.0))
-        self.iou           = float(_require_between("iou", iou, 0.0, 1.0))
+        self.change_thresh = int(
+            _require_between("change_thresh", change_thresh, 0, 1e12)
+        )
+        self.interval = float(
+            _require_between("capture_interval", capture_interval, 0, 1e6)
+        )
+        self.conf = float(_require_between("confidence", confidence, 0.0, 1.0))
+        self.iou = float(_require_between("iou", iou, 0.0, 1.0))
 
         # Public snapshot used by the overlay: list of tuples (x, y, w, h, score, cls_id)
         self.detections = []
@@ -155,16 +171,16 @@ class TargetFinder:
 
         # Control flags for the background loop
         self._stop = False
-        self.overlay_window = None  # will be set by OverlayWindow
+        self.overlay_window = {}  # will be set by OverlayWindow
 
         # Tracking state to keep stable IDs between frames
-        self._prev_det_dicts = []   # previous frame detection dicts (with "id")
-        self._next_id = 1           # next stable ID to assign
+        self._prev_det_dicts = []  # previous frame detection dicts (with "id")
+        self._next_id = 1  # next stable ID to assign
 
         # Callback configuration
-        self._on_change = None      # callable or None
-        self._with_frame = False    # whether to forward the frame to callback
-        self._diff_iou = 0.5        # IoU threshold for added/removed + ID conservation
+        self._on_change = None  # callable or None
+        self._with_frame = False  # whether to forward the frame to callback
+        self._diff_iou = 0.5  # IoU threshold for added/removed + ID conservation
 
     def set_callback(self, fn, with_frame=False, diff_iou=0.5):
         """Register a callback invoked after each detection update.
@@ -174,7 +190,7 @@ class TargetFinder:
 
         Args:
             fn (Callable | None):
-                User callback function, or ``None`` to disable.  
+                User callback function, or ``None`` to disable.
                 The function receives:
                     - ``detections (list[dict])``: All current detections (widgets).
                     - ``added (list[dict])``: Detections that appeared since the last frame.
@@ -212,7 +228,6 @@ class TargetFinder:
         self._with_frame = bool(with_frame)
         self._diff_iou = float(_require_between("diff_iou", diff_iou, 0.0, 1.0))
 
-
     def start(self):
         """Start the capture+inference loop in a separate thread."""
         self._stop = False
@@ -239,16 +254,18 @@ class TargetFinder:
         """
         dets = []
         for (x1, y1, x2, y2), score, cls_id in zip(boxes_xyxy, scores, class_ids):
-            dets.append({
-                "id": None,
-                "x": int(x1 * scale_x),
-                "y": int(y1 * scale_y),
-                "width": int((x2 - x1) * scale_x),
-                "height": int((y2 - y1) * scale_y),
-                "score": float(score),
-                "class_id": int(cls_id),
-                "class_name": CLASS_NAMES.get(int(cls_id), str(int(cls_id))),
-            })
+            dets.append(
+                {
+                    "id": None,
+                    "x": int(x1 * scale_x),
+                    "y": int(y1 * scale_y),
+                    "width": int((x2 - x1) * scale_x),
+                    "height": int((y2 - y1) * scale_y),
+                    "score": float(score),
+                    "class_id": int(cls_id),
+                    "class_name": CLASS_NAMES.get(int(cls_id), str(int(cls_id))),
+                }
+            )
         return dets
 
     def _assign_ids_and_diff(self, prev, curr):
@@ -327,7 +344,7 @@ class TargetFinder:
             scores=scores,
             class_ids=class_ids,
             scale_x=1.0,
-            scale_y=1.0
+            scale_y=1.0,
         )
         # Assign unique IDs (no temporal tracking in one-shot mode)
         for d in detections:
@@ -341,8 +358,16 @@ class TargetFinder:
                 x, y, w, h = int(d["x"]), int(d["y"]), int(d["width"]), int(d["height"])
                 cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 label = f"{d['class_name']}:{d['score']:.2f}"
-                cv2.putText(annotated, label, (x, max(0, y - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText(
+                    annotated,
+                    label,
+                    (x, max(0, y - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
 
             out_path = image_path.rsplit(".", 1)[0] + "_annotated.png"
             cv2.imwrite(out_path, annotated)
@@ -350,34 +375,88 @@ class TargetFinder:
         # Optionally save JSON detections
         if save_json:
             import json
+
             out_json = image_path.rsplit(".", 1)[0] + "_detections.json"
             with open(out_json, "w", encoding="utf-8") as f:
                 json.dump(detections, f, ensure_ascii=False, indent=2)
 
         return detections
 
+    @staticmethod
+    def get_monitor_from_mouse(sct):
+        sct = mss.mss()
+        x, y = pyautogui.position()  # current mouse position
+
+        for i, monitor in enumerate(
+            sct.monitors[1:], start=1
+        ):  # skip [0], which is the virtual screen
+            if (
+                monitor["left"] <= x < monitor["left"] + monitor["width"]
+                and monitor["top"] <= y < monitor["top"] + monitor["height"]
+            ):
+                return monitor, i
+
+        raise ScreenCaptureError(
+            "Could not capture the screens for unknown reason, resorting to primary virtual screen"
+        )
+
+    def match_monitor_to_overlay(self, monitor):
+        other_overlays = []
+        active_overlay = None
+        for _, overlay in self.overlay_window.items():
+            if (
+                (overlay.screen_geometry.x() == monitor["left"])
+                and (overlay.screen_geometry.y() == monitor["top"])
+                and (overlay.screen_geometry.width() == monitor["width"])
+                and (overlay.screen_geometry.height() == monitor["height"])
+            ):
+                active_overlay = overlay
+            else:
+                other_overlays.append(overlay)
+
+        if active_overlay is None:
+            raise ScreenCaptureError("Could not determine what the active overlay is.")
+        return active_overlay, other_overlays
 
     def _capture_loop(self):
         """Internal loop: capture screen, run inference, invoke callback if needed."""
         # Create an MSS grabber and select primary monitor
         sct = mss.mss()
-        monitor = sct.monitors[0]
-        prev_small = None     # last low-res grayscale for change detection
+
+        prev_small = None  # last low-res grayscale for change detection
 
         while not self._stop:
+            try:
+                monitor, i = self.get_monitor_from_mouse(sct)
+            except ScreenCaptureError:
+                monitor = sct.monitors[0]
             # Low-res screenshot for change detection
             frame = np.array(sct.grab(monitor))[..., :3]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (64, 64), interpolation=cv2.INTER_AREA)
 
             # Trigger detection only if significant screen change is detected
-            if prev_small is None or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh:
+            if (
+                prev_small is None
+                or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh
+            ):
+
+                # Identify correct screen and activate it, deactivate the other
+                active_overlay, other_overlays = self.match_monitor_to_overlay(monitor)
+                active_overlay.activate()
+                for ov in other_overlays:
+                    ov.reset()
+
                 prev_small = small.copy()
 
                 # Hide the overlay before full-resolution capture
                 if self.overlay_window:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "hide",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
+                    QtCore.QMetaObject.invokeMethod(
+                        active_overlay,
+                        "hide",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    )
+
                 time.sleep(0.03)  # allow time for the overlay to disappear
 
                 # Full-resolution capture without overlay
@@ -385,32 +464,58 @@ class TargetFinder:
 
                 # Re-show the overlay
                 if self.overlay_window:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "show",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
+                    QtCore.QMetaObject.invokeMethod(
+                        active_overlay,
+                        "show",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    )
+
+                # reset the other overlay
+                for ov in other_overlays:
+                    ov.reset()
 
                 # YOLO inference
-                results = self.model(full, conf=self.conf, iou=self.iou, verbose = False)[0]
+                results = self.model(full, conf=self.conf, iou=self.iou, verbose=False)[
+                    0
+                ]
                 boxes = results.boxes.xyxy.cpu().numpy()
                 scores = results.boxes.conf.cpu().numpy()
                 class_ids = results.boxes.cls.cpu().numpy()
 
                 # DPI-aware scaling
                 h_phy, w_phy = full.shape[:2]
-                screen_geom = QtWidgets.QApplication.primaryScreen().geometry()
+                screen_geom = active_overlay.screen_geometry
                 self.sx = screen_geom.width() / w_phy
                 self.sy = screen_geom.height() / h_phy
 
                 # Store detections as list of tuples for the overlay painter
-                self.detections = [(int(x1 * self.sx), int(y1 * self.sy), int((x2 - x1) * self.sx), int((y2 - y1) * self.sy), float(score),
-                                    int(cls_id)) for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, class_ids)]
+                self.detections = [
+                    (
+                        int(x1 * self.sx),
+                        int(y1 * self.sy),
+                        int((x2 - x1) * self.sx),
+                        int((y2 - y1) * self.sy),
+                        float(score),
+                        int(cls_id),
+                    )
+                    for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, class_ids)
+                ]
 
                 # Notify callback with dicts and (optionally) the frame
                 if self._on_change:
-                    det_dicts = self._build_dicts(boxes, scores, class_ids, self.sx, self.sy)
-                    added, removed = self._assign_ids_and_diff(self._prev_det_dicts, det_dicts)
+                    det_dicts = self._build_dicts(
+                        boxes, scores, class_ids, self.sx, self.sy
+                    )
+                    added, removed = self._assign_ids_and_diff(
+                        self._prev_det_dicts, det_dicts
+                    )
                     frame_to_send = None
                     if self._with_frame:
-                        frame_to_send = cv2.resize(full, (screen_geom.width(), screen_geom.height()), interpolation=cv2.INTER_AREA)
+                        frame_to_send = cv2.resize(
+                            full,
+                            (screen_geom.width(), screen_geom.height()),
+                            interpolation=cv2.INTER_AREA,
+                        )
                     try:
                         self._on_change(det_dicts, added, removed, frame_to_send)
                     except Exception:
@@ -418,36 +523,71 @@ class TargetFinder:
                     # Keep current detections for next-frame tracking
                     self._prev_det_dicts = det_dicts
 
-
             # Pause to limit loop frequency
             # Prevents saturating RAM and CPU with too many captures
             # On very powerful machines with lots of RAM we can set self.interval = 0
             time.sleep(self.interval)
 
 
+class MultiMonitorOverlay:
+    def __init__(self, app: QtWidgets.QApplication, detector):
+        self.overlays = []
+        for ns, screen in enumerate(app.screens()):
+            g = screen.geometry()
+            xshift = g.x()
+            yshift = g.y()
+            overlay = (OverlayWindow(detector, screen), ns, xshift, yshift)
+            self.overlays.append(overlay)
+
+        self.detector = detector
+        self.detector.start()
+
+    def show(self):
+        for overlay, ns, xshift, yshift in self.overlays:
+            g = overlay.screen_geometry
+            overlay.show()
+            overlay.move(xshift, yshift)  # explicitly place on the screen
+            overlay.resize(g.width(), g.height())  # scale correctly
+            overlay.raise_()
+            overlay.activateWindow()
+
+    def hide(self):
+        for overlay in self.overlays:
+            overlay.hide()
+
+
 class OverlayWindow(QtWidgets.QWidget):
     # Transparent full-screen overlay window for drawing bounding boxes. Colors are assigned per class ID.
     PALETTE = [
-        QtGui.QColor(0, 255, 0, 200),    # Button → green
-        QtGui.QColor(255, 0, 0, 200),    # ToggleButton → red
-        QtGui.QColor(0, 0, 255, 200),    # Hyperlink → blue
+        QtGui.QColor(0, 255, 0, 200),  # Button → green
+        QtGui.QColor(255, 0, 0, 200),  # ToggleButton → red
+        QtGui.QColor(0, 0, 255, 200),  # Hyperlink → blue
         QtGui.QColor(255, 255, 0, 200),  # Text → yellow
         QtGui.QColor(255, 0, 255, 200),  # TextInput → magenta
         QtGui.QColor(0, 255, 255, 200),  # Slider → cyan
     ]
 
-    def __init__(self, detector: TargetFinder):
+    def __init__(self, detector: TargetFinder, screen: QtGui.QScreen):
         # Construct an always-on-top, click-through, transparent overlay.
         super().__init__()
-        self.detector = detector
 
         # Link overlay to the detector so it can hide/show the window during capture
-        detector.overlay_window = self
+        self.detector = detector
+        self.detector.overlay_window.update({str(screen): self})
 
         # Full-screen geometry (Qt DPI-aware)
-        geom = QtWidgets.QApplication.primaryScreen().geometry()
-        self.setGeometry(geom)
+        self.setScreen(screen)
+        self.screen_geometry = screen.geometry()
+        self.resize(self.screen_geometry.size())
 
+        self.set_overlay_state()
+        # refresh to update the overlay
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.start(10)  # 10 ms
+        self.active = False
+
+    def set_overlay_state(self):
         # Window flags for frameless, always-on-top, click-through & transparent
         flags = (
             QtCore.Qt.WindowType.FramelessWindowHint
@@ -462,13 +602,8 @@ class OverlayWindow(QtWidgets.QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # Start the detection loop (background thread)
-        self.detector.start()
-
-        # refresh to update the overlay
-        self._timer = QtCore.QTimer(self)
-        self._timer.timeout.connect(self.update)
-        self._timer.start(10)  # 10 ms
+        # # Start the detection loop (background thread)
+        # self.detector.start()
 
     def paintEvent(self, event):
         # Paint bounding boxes and scores on the transparent overlay.
@@ -476,20 +611,29 @@ class OverlayWindow(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
 
-        for x, y, w, h, score, cls_id in self.detector.get_detections():
-            color = self.PALETTE[cls_id % len(self.PALETTE)]
-            pen = QtGui.QPen(color, 2)
-            painter.setPen(pen)
-            painter.drawRect(x, y, w, h)
+        if self.active:
 
-            # Label
-            label = f"{score:.2f}"
-            fm = painter.fontMetrics()
-            tw, th = fm.horizontalAdvance(label), fm.height()
-            painter.fillRect(x, y - th, tw + 4, th, QtGui.QColor(0, 0, 0, 120))
-            painter.drawText(x + 2, y - 2, label)
+            for x, y, w, h, score, cls_id in self.detector.get_detections():
+                color = self.PALETTE[cls_id % len(self.PALETTE)]
+                pen = QtGui.QPen(color, 2)
+                painter.setPen(pen)
+                painter.drawRect(x, y, w, h)
+
+                # Label
+                label = f"{score:.2f}"
+                fm = painter.fontMetrics()
+                tw, th = fm.horizontalAdvance(label), fm.height()
+                painter.fillRect(x, y - th, tw + 4, th, QtGui.QColor(0, 0, 0, 120))
+                painter.drawText(x + 2, y - 2, label)
 
         painter.end()
+
+    def activate(self):
+        self.active = True
+
+    def reset(self):
+        self.active = False
+        self.update()
 
 
 def show_detections(detector: TargetFinder):
@@ -499,7 +643,7 @@ def show_detections(detector: TargetFinder):
         detector (TargetFinder): The detector instance providing the detections.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    ov  = OverlayWindow(detector)
+    ov = MultiMonitorOverlay(app, detector)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     sys.exit(app.exec())
@@ -513,11 +657,30 @@ def main():
 
     """
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")
-    parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
-    parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
-    parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
-    parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
-    parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
+    parser.add_argument(
+        "--model-path", default=None, help="Path to the YOLO model .pt file"
+    )
+    parser.add_argument(
+        "--change-thresh",
+        type=int,
+        default=100,
+        help="Threshold for detecting screen changes",
+    )
+    parser.add_argument(
+        "--capture-interval",
+        type=float,
+        default=1 / 30,
+        help="Interval between screen captures (in seconds)",
+    )
+    parser.add_argument(
+        "--confidence",
+        type=float,
+        default=0.28,
+        help="YOLO confidence threshold (0.0–1.0)",
+    )
+    parser.add_argument(
+        "--iou", type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)"
+    )
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -525,9 +688,15 @@ def main():
         args.model_path = os.path.join(here, "best.pt")
 
     # Instantiate detector and start overlay
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+    det = TargetFinder(
+        args.model_path,
+        args.change_thresh,
+        args.capture_interval,
+        args.confidence,
+        args.iou,
+    )
     show_detections(det)
+
 
 if __name__ == "__main__":
     main()
-
