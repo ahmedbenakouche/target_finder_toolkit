@@ -9,7 +9,12 @@ As proof of concept, we include two interaction techniques built on top of Targe
 - **[Bubble Cursor](https://dl.acm.org/doi/10.1145/1054972.1055012)** 
 - **[Semantic Pointing](https://dl.acm.org/doi/10.1145/985692.985758)** 
 
-> **Note**: TargetFinder uses the `mss` library for ultra-fast screen capture and is cross-platform, meaning the core detection engine works across all operating systems. However, the **visual overlay rendering** via PyQt6, as well as system-level mechanisms such as mouse acceleration disabling (for Semantic Pointing) and cursor hiding, are currently tested only on **Windows** and **Linux (Ubuntu X11)**. Additional adaptation is required for other Linux environments or for macOS.
+> **Compatibility Note**  
+> TargetFinder uses the `mss` library for fast screen capture, and the detection engine is theoretically cross-platform.  
+> However, the system has been **validated only on Windows 10/11 and Linux (Ubuntu X11)**.
+> Operation is **not guaranteed on macOS**, where additional adaptations are required.  
+> Other Linux setups (e.g., distributions other than Ubuntu, or Wayland instead of X11) may also require adjustments.
+
 
 ---
 
