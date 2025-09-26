@@ -10,8 +10,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 - **[Semantic Pointing](https://dl.acm.org/doi/10.1145/985692.985758)** 
 
 > **Compatibility Note**  
-> TargetFinder uses the `mss` library for fast screen capture, and the detection engine is theoretically cross-platform.  
-> However, the system has been **validated only on Windows 10/11 and Linux (Ubuntu X11)**.
+> TargetFinder uses the `mss` library for fast screen capture, and the detection engine is theoretically cross-platform. However, the system has been **validated only on Windows 10/11 and Linux (Ubuntu X11)**.
 > Operation is **not guaranteed on macOS**, where additional adaptations are required.  
 > Other Linux setups (e.g., distributions other than Ubuntu, or Wayland instead of X11) may also require adjustments.
 
