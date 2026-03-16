@@ -1,0 +1,4 @@
+[console_scripts]
+bubblecursor = target_finder_toolkit.bubblecursor:main
+semanticpointing = target_finder_toolkit.semanticpointing:main
+targetfinder-gui = target_finder_toolkit.targetfinder:main

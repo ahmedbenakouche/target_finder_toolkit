@@ -1,0 +1,7 @@
+numpy
+opencv-python
+mss
+ultralytics
+PyQt6
+pyautogui
+pynput

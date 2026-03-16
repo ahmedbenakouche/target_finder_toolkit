@@ -30,7 +30,8 @@ from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
-import math
+
+
 
 __all__ = ["semantic_pointing", "main"]
 
@@ -55,6 +56,164 @@ __all__ = ["semantic_pointing", "main"]
 #     # Hors zone d’influence : 0
 #     return 0.0
 
+class ControlPanel(QtWidgets.QWidget):
+    """Floating parameter panel drawn manually, controlled by keyboard."""
+    def __init__(self,detector: TargetFinder):
+        super().__init__()
+        self.detector = detector
+
+        self.setWindowTitle("Semantic Pointing Controls")
+        self.setFixedSize(360,140)
+
+        flages = (
+            QtCore.Qt.WindowType.Tool
+            |   QtCore.Qt.WindowType.WindowStaysOnTopHint
+            |   QtCore.Qt.WindowType.FramelessWindowHint
+        )
+        self.setWindowFlags(flages)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        self.selected_index = 0
+
+        # paramater definitions
+        self.params = [
+            {
+                "key": "confidence",
+                "label": "Confidence",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.01,
+            },
+            {
+                "key": "change_thresh",
+                "label": "Change threshold",
+                "min": 0,
+                "max": 300,
+                "step": 5,
+            },
+        ]
+    def toggle_visible(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.show()
+            self.raise_()
+            self.update()
+    
+    def move_selection_up(self):
+        self.selected_index = max(0,self.selected_index - 1)
+        self.update()
+
+    def move_selection_down(self):
+        self.selected_index = min(len(self.params)- 1,self.selected_index + 1)
+        self.update()
+    
+    def adjust_current(self,direction):
+        params = self.params[self.selected_index]
+        key = params["key"]
+        step = params["step"]
+        min_val = params["min"]
+        max_val = params["max"]
+
+        if key == "confidence":
+            current = float(self.detector.conf)
+            new_value = current + direction * step
+            new_value = max(min_val, min(max_val,new_value))
+            self.detector.conf = round(new_value,2)
+
+        elif key == "change_thresh":
+            current = int(self.detector.change_thresh)
+            new_value = current + direction * step
+            new_value = max(min_val,min(max_val,new_value))
+            self.detector.change_thresh = int(new_value)
+
+        self.update()
+    
+    def _get_value(self,key):
+        if key == "confidence":
+            return float(self.detector.conf)
+        elif key == "change_thresh":
+            return int(self.detector.change_thresh)
+        return 0
+    
+    def _format_value(self, key, value):
+        if key == "confidence":
+            return f"{value:.2f}"
+        return str(int(value))
+    
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+
+        # background
+        bg_rect = self.rect()
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(QtGui.QColor(30,30,30,220))
+        painter.drawRoundedRect(bg_rect,12,12)
+
+        # title
+        painter.setPen(QtGui.QColor(255,255,255))
+        title_font = QtGui.QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.drawText(16,24,"Parameters")
+
+        # content
+        label_font = QtGui.QFont()
+        label_font.setPointSize(13)
+        painter.setFont(label_font)
+
+        start_y = 50
+        block_h = 55
+        bar_x = 110
+        bar_w = 170
+        bar_h = 10
+
+        for i,param in enumerate(self.params):
+            y = start_y + i * block_h
+            value = self._get_value(param["key"])
+            min_val = param["min"]
+            max_val = param["max"]
+            
+            if max_val > min_val:
+                ratio = (value - min_val) / (max_val - min_val)
+            else:
+                ratio = 0.0
+            ratio = max(0.0, min(1.0,ratio))
+
+            # selected row highlight
+            if i == self.selected_index:
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(QtGui.QColor(255, 255, 255, 25))
+                painter.drawRoundedRect(10, y - 20, self.width() - 20, 40, 8, 8)
+
+            # label
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            painter.drawText(20, y, param["label"])
+
+            # current value
+            current_text = self._format_value(param["key"], value)
+            text_rect = QtCore.QRect(bar_x, y - 20, bar_w, 20)
+            painter.setPen(QtGui.QColor(255,255,255))
+            painter.drawText(text_rect, QtCore.Qt.AlignmentFlag.AlignCenter, current_text)
+
+            # min / max
+            painter.setPen(QtGui.QColor(180, 180, 180))
+            painter.drawText(bar_x - 28, y + 18, self._format_value(param["key"], min_val))
+            painter.drawText(bar_x + bar_w + 8, y + 18, self._format_value(param["key"], max_val))
+
+            # bar background
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(QtGui.QColor(90, 90, 90))
+            painter.drawRoundedRect(bar_x, y + 8, bar_w, bar_h, 5, 5)
+
+            # filled bar
+            painter.setBrush(QtGui.QColor(80, 170, 255))
+            painter.drawRoundedRect(bar_x, y + 8, int(bar_w * ratio), bar_h, 5, 5)
+
+        painter.end()
+        
 class SemanticPointing(QtWidgets.QWidget):
     """
     PyQt overlay widget implementing the Semantic Pointing technique.
@@ -123,8 +282,13 @@ class SemanticPointing(QtWidgets.QWidget):
         # refresh to update drawing and especially manage the speed of fake cursor
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.update)
-        self._timer.start(10) # 10 ms
-
+        self._timer.start(30) # 10 ms
+        #Separate floating control window
+        self.control_panel = ControlPanel(self.detector)
+        self.control_panel.move(20,20)
+        self.control_panel.hide()
+        
+  
     # === Paint ===
     def paintEvent(self, event):
         if not self.enabled or not self.detector.get_detections():
@@ -138,7 +302,7 @@ class SemanticPointing(QtWidgets.QWidget):
         # If the real cursor is stuck at an edge
         if (real.x() <= 0 or real.x() >= self.geom.width() - 1
                 or real.y() <= 0 or real.y() >= self.geom.height() - 1):
-            QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y()))
+            QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y())) 
             real = QtCore.QPointF(QtGui.QCursor.pos())
             self.prev_real = real
 
@@ -245,6 +409,7 @@ class SemanticPointing(QtWidgets.QWidget):
     @QtCore.pyqtSlot()
     def toggle(self):
         self.enabled = not self.enabled
+
         if self.enabled:
             self.detector.start()
             hide_cursor_everywhere()
@@ -264,10 +429,32 @@ class SemanticPointing(QtWidgets.QWidget):
                 self.show()
                 QtWidgets.QApplication.processEvents()
         self.update() # repaint immediately
+    
+    def _set_overlay_clickthrough(self,enabled):
+        return
+
+    @QtCore.pyqtSlot()
+    def toggle_panel(self):
+        self.control_panel.toggle_visible()
+    @QtCore.pyqtSlot()
+    def panel_up(self):
+        self.control_panel.move_selection_up()
+    @QtCore.pyqtSlot()
+    def panel_down(self):
+        self.control_panel.move_selection_down()
+    @QtCore.pyqtSlot()
+    def panel_left(self):
+        self.control_panel.adjust_current(-1)
+    @QtCore.pyqtSlot()
+    def panel_right(self):
+        self.control_panel.adjust_current(1)
+
 
     # === Quit ===
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
+        if hasattr(self, "control_panel") and self.control_panel:
+            self.control_panel.close()
         restore_default_cursors()
         if self.disable_accel:
             restore_mouse_acceleration()
@@ -276,12 +463,27 @@ class SemanticPointing(QtWidgets.QWidget):
     def _start_keyboard_listener(self):
         def on_press(key):
             try:
-                if key.char == 'b':
+                if hasattr(key, "char") and key.char == 'b':
                     QtCore.QMetaObject.invokeMethod(self, "toggle", QtCore.Qt.ConnectionType.QueuedConnection)
-                elif key.char == 'q':
+                    return
+                if hasattr(key, "char") and key.char == 'q':
                     QtCore.QMetaObject.invokeMethod(self, "stop_and_quit", QtCore.Qt.ConnectionType.QueuedConnection)
+                    return
+                if hasattr(key, "char") and key.char == 's':
+                    QtCore.QMetaObject.invokeMethod(self, "toggle_panel", QtCore.Qt.ConnectionType.QueuedConnection)
+                    return
             except AttributeError:
                 pass
+            if self.control_panel.isVisible():
+                if key == keyboard.Key.up:
+                    QtCore.QMetaObject.invokeMethod(self, "panel_up", QtCore.Qt.ConnectionType.QueuedConnection)
+                elif key == keyboard.Key.down:
+                    QtCore.QMetaObject.invokeMethod(self, "panel_down", QtCore.Qt.ConnectionType.QueuedConnection)
+                elif key == keyboard.Key.left:
+                    QtCore.QMetaObject.invokeMethod(self, "panel_left", QtCore.Qt.ConnectionType.QueuedConnection)
+                elif key == keyboard.Key.right:
+                    QtCore.QMetaObject.invokeMethod(self, "panel_right", QtCore.Qt.ConnectionType.QueuedConnection)
+                
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 
@@ -352,8 +554,9 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
     hide_cursor_everywhere()
     if disable_accel:
         disable_mouse_acceleration()
-    ov  = SemanticPointing(detector, display, disable_accel)
+    ov = SemanticPointing(detector, display, disable_accel)
     ov.show()
+
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     exit_code = app.exec()
     restore_default_cursors()

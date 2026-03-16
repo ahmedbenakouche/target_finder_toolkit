@@ -95,14 +95,26 @@ class BubbleCursor(QtWidgets.QWidget):
     def paintEvent(self, event):
         if not self.bubble_enabled or not self.detector.get_detections():
             return
-
-        painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        
+        #painter = QtGui.QPainter(self)
+        #painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
 
         # Pointer position (logical coordinates)
         pos = QtGui.QCursor.pos()
         cx, cy = pos.x(), pos.y()
+
+        # Disable bubble cursor when hovering over detected text
+        over_text = False
+        for x, y, w, h, score, cls_id in self.detector.get_detections():
+            if cls_id == 3: # Text
+                if x <= cx <= x + w and y <= cy <= y + h:
+                    self._last_target = None
+                    over_text = True
+                    break
                 
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+
         # Compute distances from pointer to each box edge
         distances = []
         for x, y, w, h, *_ in self.detector.get_detections():
@@ -116,7 +128,8 @@ class BubbleCursor(QtWidgets.QWidget):
 
             distances.append((IntD, cx_box, cy_box, w, h))
 
-        if distances:
+        # Draw bubble only when not hovering over text
+        if distances and not over_text:
 
             distances.sort(key=lambda t: t[0])
             IntD1, tx, ty, w, h = distances[0]
@@ -159,23 +172,22 @@ class BubbleCursor(QtWidgets.QWidget):
             painter.setPen(pen)
             painter.drawPath(union_path)
 
-            # FAKE CURSOR
-            pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 220), 2)
-            painter.setPen(pen)
-            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
-            radius_cursor = 6
-            center = QtCore.QPointF(cx, cy)
-            painter.drawEllipse(center, radius_cursor, radius_cursor)
-            line_len = 4
-            gap = radius_cursor + 1
-            painter.drawLine(cx, cy - gap - line_len, cx, cy - gap)
-            painter.drawLine(cx, cy + gap, cx, cy + gap + line_len)
-            painter.drawLine(cx + gap, cy, cx + gap + line_len, cy)
-            painter.drawLine(cx - gap - line_len, cy, cx - gap, cy)
+        # FAKE CURSOR
+        pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 220), 2)
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        radius_cursor = 6
+        center = QtCore.QPointF(cx, cy)
+        painter.drawEllipse(center, radius_cursor, radius_cursor)
+        line_len = 4
+        gap = radius_cursor + 1
+        painter.drawLine(cx, cy - gap - line_len, cx, cy - gap)
+        painter.drawLine(cx, cy + gap, cx, cy + gap + line_len)
+        painter.drawLine(cx + gap, cy, cx + gap + line_len, cy)
+        painter.drawLine(cx - gap - line_len, cy, cx - gap, cy)
 
-            painter.end()
-        else:
-            return
+        painter.end()
+        
 
     # === Toggle bubble on/off ===
     @QtCore.pyqtSlot()
