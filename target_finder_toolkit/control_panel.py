@@ -2,6 +2,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -19,7 +20,7 @@ MODE_OPTIONS = {
     },
     "semantic": {
         "English": "Semantic Pointing",
-        "French": "Pointage semantique",
+        "French": "Pointage sémantique",
     },
 }
 
@@ -31,7 +32,7 @@ LANGUAGE_OPTIONS = {
     },
     "French": {
         "English": "French",
-        "French": "Francais",
+        "French": "Français",
         "badge": "🇫🇷",
     },
 }
@@ -67,14 +68,21 @@ UI_TEXTS = {
         "iou": "IoU (range: 0.0-1.0, default: 0.3)",
         "iou_desc": "Lower = keeps more overlapping boxes. Higher = merges overlaps more aggressively.",
         "display": "Display visual feedback (semantic only, range: off/on, default: off)",
+        "display_short": "Display visual feedback",
         "display_desc": "Shows semantic-pointing visual guides on screen when enabled.",
         "disable_accel": "Disable system mouse acceleration (semantic only, range: off/on, default: off)",
+        "disable_accel_short": "Disable system mouse acceleration",
         "disable_accel_desc": "Makes semantic pointing feel more stable, but changes mouse behavior while running.",
         "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming.",
         "contrast": "Contrast",
         "enable_tts": "Enable TTS",
         "language": "Language",
         "choose_language_dialog": "Choose a Language",
+        "confirm": "Confirm",
+        "cancel": "Cancel",
+        "enter_value_for": "Enter a value for {name}.",
+        "turn_on": "Turn on {name}",
+        "turn_off": "Turn off {name}",
         "stop": "Stop Running Mode",
         "ready": "Ready. Choose settings, then press Start / Apply.",
         "pending_apply": "Settings updated. Press Start / Apply to launch or refresh the selected technique.",
@@ -93,51 +101,58 @@ UI_TEXTS = {
     },
     "French": {
         "nav_mode": "Mode / Detection",
-        "nav_accessibility": "Accessibilite",
+        "nav_accessibility": "Accessibilité",
         "nav_audio": "Audio",
         "nav_language": "Langue",
         "page_mode": "Mode / Detection",
-        "page_accessibility": "Accessibilite",
+        "page_accessibility": "Accessibilité",
         "page_audio": "Audio",
         "page_language": "Langue",
-        "technique": "Technique (3 modes)",
+        "technique": "Technique (2 modes)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
         "mode_targetfinder": "Overlay TargetFinder",
         "mode_bubble": "Bubble Cursor",
-        "mode_semantic": "Pointage semantique",
-        "apply": "Demarrer / Appliquer",
-        "change_thresh": "Seuil de changement (plage : 0-100000, defaut : 100)",
-        "change_thresh_desc": "Plus haut = moins de rafraichissements pour de petits changements. Plus bas = reaction plus rapide.",
-        "capture_interval": "Intervalle de capture (plage : 0.001-10.0, defaut : 0.033)",
-        "capture_interval_desc": "Plus bas = verifications plus rapides et plus de charge CPU/GPU. Plus haut = mises a jour plus lentes.",
-        "confidence": "Confiance (plage : 0.0-1.0, defaut : 0.28)",
-        "confidence_desc": "Plus bas = garde plus de detections. Plus haut = garde seulement les detections plus sures.",
-        "iou": "IoU (plage : 0.0-1.0, defaut : 0.3)",
-        "iou_desc": "Plus bas = garde plus de boites qui se chevauchent. Plus haut = fusionne davantage les chevauchements.",
-        "display": "Afficher le retour visuel (semantique uniquement, plage : off/on, defaut : off)",
-        "display_desc": "Affiche les guides visuels du pointage semantique quand c'est active.",
-        "disable_accel": "Desactiver l'acceleration de la souris (semantique uniquement, plage : off/on, defaut : off)",
-        "disable_accel_desc": "Rend le pointage semantique plus stable, mais change la sensation de la souris pendant l'execution.",
-        "mode_note": "Overlay TargetFinder : affiche les boites detectees pour les tests. Bubble Cursor : agrandit la selection autour de la cible la plus proche. Pointage semantique : ralentit le pointeur pres des cibles pour mieux viser.",
+        "mode_semantic": "Pointage sémantique",
+        "apply": "Démarrer / Appliquer",
+        "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
+        "change_thresh_desc": "Plus haut = moins de rafraîchissements pour de petits changements. Plus bas = réaction plus rapide.",
+        "capture_interval": "Intervalle de capture (plage : 0.001-10.0, défaut : 0.033)",
+        "capture_interval_desc": "Plus bas = vérifications plus rapides et plus de charge CPU/GPU. Plus haut = mises à jour plus lentes.",
+        "confidence": "Confiance (plage : 0.0-1.0, défaut : 0.28)",
+        "confidence_desc": "Plus bas = garde plus de détections. Plus haut = garde seulement les détections plus sûres.",
+        "iou": "IoU (plage : 0.0-1.0, défaut : 0.3)",
+        "iou_desc": "Plus bas = garde plus de boîtes qui se chevauchent. Plus haut = fusionne davantage les chevauchements.",
+        "display": "Afficher le retour visuel (sémantique uniquement, plage : off/on, défaut : off)",
+        "display_short": "Afficher le retour visuel",
+        "display_desc": "Affiche les guides visuels du pointage sémantique quand c'est activé.",
+        "disable_accel": "Désactiver l'accélération de la souris (sémantique uniquement, plage : off/on, défaut : off)",
+        "disable_accel_short": "Désactiver l'accélération de la souris",
+        "disable_accel_desc": "Rend le pointage sémantique plus stable, mais change la sensation de la souris pendant l'exécution.",
+        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser.",
         "contrast": "Contrast",
-        "enable_tts": "Activer la synthese vocale",
+        "enable_tts": "Activer la synthèse vocale",
         "language": "Langue",
         "choose_language_dialog": "Choisir une langue",
-        "stop": "Arreter le mode en cours",
-        "ready": "Pret. Choisissez les reglages puis appuyez sur Demarrer / Appliquer.",
-        "pending_apply": "Reglages mis a jour. Appuyez sur Demarrer / Appliquer pour lancer ou actualiser la technique choisie.",
-        "select_mode_first": "Choisissez d'abord une technique puis appuyez sur Demarrer / Appliquer.",
+        "confirm": "Confirmer",
+        "cancel": "Annuler",
+        "enter_value_for": "Saisissez une valeur pour {name}.",
+        "turn_on": "Activer {name}",
+        "turn_off": "Désactiver {name}",
+        "stop": "Arrêter le mode en cours",
+        "ready": "Prêt. Choisissez les réglages puis appuyez sur Démarrer / Appliquer.",
+        "pending_apply": "Réglages mis à jour. Appuyez sur Démarrer / Appliquer pour lancer ou actualiser la technique choisie.",
+        "select_mode_first": "Choisissez d'abord une technique puis appuyez sur Démarrer / Appliquer.",
         "running_bubble": "Bubble Cursor est en cours.",
-        "running_semantic": "Le pointage semantique est en cours.",
+        "running_semantic": "Le pointage sémantique est en cours.",
         "running_targetfinder": "L'overlay TargetFinder est en cours.",
-        "stopped": "Le mode en cours a ete arrete.",
-        "no_running": "Aucun mode en cours n'a ete trouve.",
-        "panel_updated": "L'apparence du panneau a ete mise a jour.",
-        "tts_enabled": "La synthese vocale est activee.",
-        "tts_disabled": "La synthese vocale est desactivee.",
-        "tts_unavailable": "La synthese vocale n'est pas disponible sur ce systeme.",
-        "language_updated": "La langue de l'interface a ete mise a jour.",
+        "stopped": "Le mode en cours a été arrêté.",
+        "no_running": "Aucun mode en cours n'a été trouvé.",
+        "panel_updated": "L'apparence du panneau a été mise à jour.",
+        "tts_enabled": "La synthèse vocale est activée.",
+        "tts_disabled": "La synthèse vocale est désactivée.",
+        "tts_unavailable": "La synthèse vocale n'est pas disponible sur ce système.",
+        "language_updated": "La langue de l'interface a été mise à jour.",
         "q_hint": "Vous pouvez aussi appuyer sur q pour quitter le mode actif.",
     },
 }
@@ -178,8 +193,13 @@ class ControlPanel(QtWidgets.QWidget):
 
         self.process = None
         self._speech_process = None
+        self._mac_voice_names = None
         self._suspend_updates = True
         self._text_bindings = []
+        self._focus_prompt_keys = {}
+        self._help_prompt_keys = {}
+        self._widget_speech_texts = {}
+        self._last_auto_speech = ("", 0.0)
         self._hidden_config = PanelConfig()
         self._back_history = []
         self._forward_history = []
@@ -210,6 +230,9 @@ class ControlPanel(QtWidgets.QWidget):
         lang = self._language_code()
         return UI_TEXTS.get(lang, UI_TEXTS["English"]).get(key, key)
 
+    def _format_text(self, key: str, **kwargs) -> str:
+        return self._text(key).format(**kwargs)
+
     def _bind_text(self, widget, key: str):
         self._text_bindings.append((widget, key))
         widget.setText(self._text(key))
@@ -231,6 +254,24 @@ class ControlPanel(QtWidgets.QWidget):
     def _speak_control_name(self, text: str):
         if text:
             self._speak(text)
+
+    def _speak_auto_text(self, text: str, *, min_interval: float = 0.25):
+        if not text:
+            return
+        last_text, last_at = self._last_auto_speech
+        now = time.monotonic()
+        if text == last_text and (now - last_at) < min_interval:
+            return
+        self._last_auto_speech = (text, now)
+        self._speak(text)
+
+    def _help_text(self, text_key: str, description_key: str | None = None, action_key: str | None = None):
+        parts = [self._text(text_key)]
+        if description_key:
+            parts.append(self._text(description_key))
+        if action_key:
+            parts.append(self._text(action_key))
+        return " ".join(part for part in parts if part)
 
     def _language_speech_label(self, code: str):
         return LANGUAGE_OPTIONS[code][self._language_code()]
@@ -275,13 +316,27 @@ class ControlPanel(QtWidgets.QWidget):
         layout.addWidget(list_widget, 1)
 
         button_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
+        ok_button = button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        cancel_button = button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        if ok_button is not None:
+            ok_button.setText(self._text("confirm"))
+            ok_button.pressed.connect(lambda: self._speak_auto_text(self._text("confirm")))
+        if cancel_button is not None:
+            cancel_button.setText(self._text("cancel"))
+            cancel_button.pressed.connect(lambda: self._speak_auto_text(self._text("cancel")))
+        button_box.accepted.connect(dialog.accept)
         button_box.rejected.connect(dialog.reject)
         layout.addWidget(button_box)
 
-        list_widget.itemDoubleClicked.connect(dialog.accept)
-        list_widget.itemClicked.connect(lambda item: dialog.accept())
+        def speak_current_item(item):
+            if item is None:
+                return
+            self._speak_auto_text(item.text())
+
+        list_widget.itemClicked.connect(speak_current_item)
 
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return None
@@ -376,9 +431,16 @@ class ControlPanel(QtWidgets.QWidget):
             description.setWordWrap(True)
             self._bind_text(description, description_key)
             label_layout.addWidget(description)
+        else:
+            description = None
 
         layout.addWidget(label_column, 1)
         layout.addWidget(widget, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self._register_help_targets(
+            [row, label_column, label] + ([description] if description is not None else []),
+            text_key,
+            description_key,
+        )
         return row
 
     def _create_field_row(self, text_key: str, widget, description_key: str | None = None):
@@ -406,6 +468,8 @@ class ControlPanel(QtWidgets.QWidget):
             description.setWordWrap(True)
             self._bind_text(description, description_key)
             label_layout.addWidget(description)
+        else:
+            description = None
 
         if widget.objectName() == "SelectorButton":
             widget.setMinimumWidth(220)
@@ -416,6 +480,11 @@ class ControlPanel(QtWidgets.QWidget):
 
         layout.addWidget(label_column, 1)
         layout.addWidget(widget, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self._register_help_targets(
+            [row, label_column, label] + ([description] if description is not None else []),
+            text_key,
+            description_key,
+        )
         return row
 
     def _create_note(self, text_key: str):
@@ -524,22 +593,26 @@ class ControlPanel(QtWidgets.QWidget):
         self._refresh_mode_selector_text()
 
         self.change_thresh_spin = QtWidgets.QSpinBox()
+        self.change_thresh_spin.setKeyboardTracking(False)
         self.change_thresh_spin.setRange(0, 100000)
         self.change_thresh_spin.setValue(DEFAULT_CHANGE_THRESH)
 
         self.capture_interval_spin = QtWidgets.QDoubleSpinBox()
+        self.capture_interval_spin.setKeyboardTracking(False)
         self.capture_interval_spin.setDecimals(3)
         self.capture_interval_spin.setRange(0.001, 10.0)
         self.capture_interval_spin.setSingleStep(0.001)
         self.capture_interval_spin.setValue(DEFAULT_CAPTURE_INTERVAL)
 
         self.confidence_spin = QtWidgets.QDoubleSpinBox()
+        self.confidence_spin.setKeyboardTracking(False)
         self.confidence_spin.setDecimals(2)
         self.confidence_spin.setRange(0.0, 1.0)
         self.confidence_spin.setSingleStep(0.01)
         self.confidence_spin.setValue(DEFAULT_CONFIDENCE)
 
         self.iou_spin = QtWidgets.QDoubleSpinBox()
+        self.iou_spin.setKeyboardTracking(False)
         self.iou_spin.setDecimals(1)
         self.iou_spin.setRange(0.0, 1.0)
         self.iou_spin.setSingleStep(0.01)
@@ -627,6 +700,11 @@ class ControlPanel(QtWidgets.QWidget):
         self.high_contrast_cb.toggled.connect(self._handle_panel_style_change)
         self.enable_tts_cb.toggled.connect(self._handle_tts_change)
 
+        self._register_numeric_field(self.change_thresh_spin, "change_thresh")
+        self._register_numeric_field(self.capture_interval_spin, "capture_interval")
+        self._register_numeric_field(self.confidence_spin, "confidence")
+        self._register_numeric_field(self.iou_spin, "iou")
+
     # ---------------------------------
     # Navigation
     # ---------------------------------
@@ -688,7 +766,50 @@ class ControlPanel(QtWidgets.QWidget):
         self.start_button.setEnabled(self._mode_code() is not None)
         self.q_hint_label.setVisible(self.pages.currentIndex() == 0 and self._mode_code() is not None)
 
+    def _register_numeric_field(self, widget, text_key: str):
+        self._focus_prompt_keys[widget] = text_key
+        widget.installEventFilter(self)
+        line_edit = widget.lineEdit()
+        if line_edit is not None:
+            self._focus_prompt_keys[line_edit] = text_key
+            line_edit.installEventFilter(self)
+        widget.editingFinished.connect(lambda w=widget: self._handle_numeric_edit_finished(w))
+
+    def _register_help_targets(self, widgets, text_key: str, description_key: str | None = None):
+        for widget in widgets:
+            if widget is None:
+                continue
+            self._help_prompt_keys[widget] = (text_key, description_key)
+            widget.installEventFilter(self)
+
+    def _register_widget_speech(self, widget, text: str):
+        if widget is None:
+            return
+        self._widget_speech_texts[widget] = text
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QtCore.QEvent.Type.FocusIn:
+            text_key = self._focus_prompt_keys.get(watched)
+            if text_key:
+                self._speak_auto_text(
+                    self._format_text("enter_value_for", name=self._text(text_key))
+                )
+            direct_text = self._widget_speech_texts.get(watched)
+            if direct_text:
+                self._speak_auto_text(direct_text)
+        elif event.type() == QtCore.QEvent.Type.MouseButtonPress:
+            help_keys = self._help_prompt_keys.get(watched)
+            if help_keys:
+                text_key, description_key = help_keys
+                self._speak_auto_text(self._help_text(text_key, description_key))
+            direct_text = self._widget_speech_texts.get(watched)
+            if direct_text:
+                self._speak_auto_text(direct_text)
+        return super().eventFilter(watched, event)
+
     def _handle_mode_selection(self):
+        self._speak_auto_text(self._text("select_technique"))
         options = [
             ("targetfinder", self._mode_label("targetfinder")),
             ("bubble", self._mode_label("bubble")),
@@ -706,7 +827,6 @@ class ControlPanel(QtWidgets.QWidget):
         self._update_mode_dependent_fields()
         self._save_config()
         self._set_status("pending_apply")
-        self._speak_control_name(self._mode_label(selected))
 
     def _handle_runtime_option_change(self, *_args):
         if self._suspend_updates:
@@ -715,17 +835,27 @@ class ControlPanel(QtWidgets.QWidget):
         self._set_status("pending_apply")
         sender = self.sender()
         if sender is self.change_thresh_spin:
-            self._speak_control_name(self._text("change_thresh"))
+            self._speak_auto_text(self.change_thresh_spin.text())
         elif sender is self.capture_interval_spin:
-            self._speak_control_name(self._text("capture_interval"))
+            self._speak_auto_text(self.capture_interval_spin.text())
         elif sender is self.confidence_spin:
-            self._speak_control_name(self._text("confidence"))
+            self._speak_auto_text(self.confidence_spin.text())
         elif sender is self.iou_spin:
-            self._speak_control_name(self._text("iou"))
+            self._speak_auto_text(self.iou_spin.text())
         elif sender is self.display_cb:
-            self._speak_control_name(self._text("display"))
+            key = "turn_on" if self.display_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("display_short")))
         elif sender is self.disable_accel_cb:
-            self._speak_control_name(self._text("disable_accel"))
+            key = "turn_on" if self.disable_accel_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("disable_accel_short")))
+
+    def _handle_numeric_edit_finished(self, widget):
+        if self._suspend_updates:
+            return
+        widget.interpretText()
+        self._save_config()
+        self._set_status("pending_apply")
+        self._speak_auto_text(widget.text())
 
     def _handle_apply_clicked(self):
         cfg = self._save_config()
@@ -742,7 +872,8 @@ class ControlPanel(QtWidgets.QWidget):
         self._apply_panel_style()
         self._save_config()
         self._set_status("panel_updated")
-        self._speak_control_name(self._text("contrast"))
+        key = "turn_on" if self.high_contrast_cb.isChecked() else "turn_off"
+        self._speak_control_name(self._format_text(key, name=self._text("contrast")))
 
     def _handle_tts_change(self, checked: bool):
         if self._suspend_updates:
@@ -760,6 +891,7 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_control_name(self._text("enable_tts"))
 
     def _handle_language_selection(self):
+        self._speak_control_name(self._text("choose_language_dialog"))
         options = [
             ("English", self._language_label("English")),
             ("French", self._language_label("French")),
@@ -775,7 +907,6 @@ class ControlPanel(QtWidgets.QWidget):
         self._apply_language()
         self._save_config()
         self._set_status("language_updated")
-        self._speak_control_name(self._language_speech_label(selected))
 
     def _apply_panel_style(self):
         bg_main = "#ececef"
@@ -1196,8 +1327,38 @@ class ControlPanel(QtWidgets.QWidget):
     # ---------------------------
     # TTS
     # ---------------------------
+    def _mac_voice_name(self):
+        if sys.platform != "darwin" or not shutil.which("say"):
+            return None
+        if self._mac_voice_names is None:
+            try:
+                result = subprocess.run(
+                    ["say", "-v", "?"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self._mac_voice_names = {
+                    line.split(maxsplit=1)[0]
+                    for line in result.stdout.splitlines()
+                    if line.strip()
+                }
+            except OSError:
+                self._mac_voice_names = set()
+        preferred = {
+            "French": ["Thomas", "Aurelie", "Amelie"],
+            "English": ["Samantha", "Daniel", "Alex"],
+        }
+        for voice in preferred.get(self._language_code(), []):
+            if voice in self._mac_voice_names:
+                return voice
+        return None
+
     def _tts_command(self, message: str):
         if sys.platform == "darwin" and shutil.which("say"):
+            voice = self._mac_voice_name()
+            if voice:
+                return ["say", "-v", voice, message]
             return ["say", message]
         if sys.platform.startswith("linux"):
             if shutil.which("spd-say"):
@@ -1242,11 +1403,27 @@ class ControlPanel(QtWidgets.QWidget):
         except OSError:
             pass
 
+    def _stop_speech(self):
+        if self._speech_process is None:
+            return
+        try:
+            if self._speech_process.poll() is None:
+                self._speech_process.terminate()
+                self._speech_process.wait(timeout=1)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                self._speech_process.kill()
+            except OSError:
+                pass
+        finally:
+            self._speech_process = None
+
     # ---------------------------
     # Events
     # ---------------------------
     def closeEvent(self, event):
         self._stop_demo(silent=True)
+        self._stop_speech()
         super().closeEvent(event)
 
 
