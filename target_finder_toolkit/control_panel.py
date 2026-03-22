@@ -9,6 +9,10 @@ from PyQt6 import QtCore, QtWidgets
 
 
 MODE_OPTIONS = {
+    "targetfinder": {
+        "English": "TargetFinder Overlay",
+        "French": "Overlay TargetFinder",
+    },
     "bubble": {
         "English": "Bubble Cursor",
         "French": "Bubble Cursor",
@@ -47,25 +51,26 @@ UI_TEXTS = {
         "page_accessibility": "Accessibility",
         "page_audio": "Audio",
         "page_language": "Language",
-        "technique": "Technique (2 modes)",
+        "technique": "Technique (3 modes)",
         "select_technique": "Choose a technique",
         "choose_mode_dialog": "Choose a Technique",
+        "mode_targetfinder": "TargetFinder Overlay",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Semantic Pointing",
         "apply": "Start / Apply",
-        "change_thresh": "Change Threshold (default: 100)",
+        "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
         "change_thresh_desc": "Higher = fewer refreshes for small screen changes. Lower = reacts sooner.",
-        "capture_interval": "Capture Interval (default: 0.033)",
+        "capture_interval": "Capture Interval (range: 0.001-10.0, default: 0.033)",
         "capture_interval_desc": "Lower = faster checks and more CPU/GPU use. Higher = slower updates.",
-        "confidence": "Confidence (default: 0.28)",
+        "confidence": "Confidence (range: 0.0-1.0, default: 0.28)",
         "confidence_desc": "Lower = keeps more detections. Higher = keeps only more certain detections.",
-        "iou": "IoU (default: 0.3)",
+        "iou": "IoU (range: 0.0-1.0, default: 0.3)",
         "iou_desc": "Lower = keeps more overlapping boxes. Higher = merges overlaps more aggressively.",
-        "display": "Display visual feedback (semantic only, default: off)",
+        "display": "Display visual feedback (semantic only, range: off/on, default: off)",
         "display_desc": "Shows semantic-pointing visual guides on screen when enabled.",
-        "disable_accel": "Disable system mouse acceleration (semantic only, default: off)",
+        "disable_accel": "Disable system mouse acceleration (semantic only, range: off/on, default: off)",
         "disable_accel_desc": "Makes semantic pointing feel more stable, but changes mouse behavior while running.",
-        "mode_note": "Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming.",
+        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming.",
         "contrast": "Contrast",
         "enable_tts": "Enable TTS",
         "language": "Language",
@@ -76,6 +81,7 @@ UI_TEXTS = {
         "select_mode_first": "Choose a technique first, then press Start / Apply.",
         "running_bubble": "Bubble Cursor is running.",
         "running_semantic": "Semantic Pointing is running.",
+        "running_targetfinder": "TargetFinder Overlay is running.",
         "stopped": "Stopped the running mode.",
         "no_running": "No running mode was found.",
         "panel_updated": "Panel appearance updated.",
@@ -83,6 +89,7 @@ UI_TEXTS = {
         "tts_disabled": "Text-to-speech disabled.",
         "tts_unavailable": "Text-to-speech is not available on this system.",
         "language_updated": "Interface language updated.",
+        "q_hint": "You can also press q to quit the running mode.",
     },
     "French": {
         "nav_mode": "Mode / Detection",
@@ -93,25 +100,26 @@ UI_TEXTS = {
         "page_accessibility": "Accessibilite",
         "page_audio": "Audio",
         "page_language": "Langue",
-        "technique": "Technique (2 modes)",
+        "technique": "Technique (3 modes)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
+        "mode_targetfinder": "Overlay TargetFinder",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Pointage semantique",
         "apply": "Demarrer / Appliquer",
-        "change_thresh": "Seuil de changement (defaut : 100)",
+        "change_thresh": "Seuil de changement (plage : 0-100000, defaut : 100)",
         "change_thresh_desc": "Plus haut = moins de rafraichissements pour de petits changements. Plus bas = reaction plus rapide.",
-        "capture_interval": "Intervalle de capture (defaut : 0.033)",
+        "capture_interval": "Intervalle de capture (plage : 0.001-10.0, defaut : 0.033)",
         "capture_interval_desc": "Plus bas = verifications plus rapides et plus de charge CPU/GPU. Plus haut = mises a jour plus lentes.",
-        "confidence": "Confiance (defaut : 0.28)",
+        "confidence": "Confiance (plage : 0.0-1.0, defaut : 0.28)",
         "confidence_desc": "Plus bas = garde plus de detections. Plus haut = garde seulement les detections plus sures.",
-        "iou": "IoU (defaut : 0.3)",
+        "iou": "IoU (plage : 0.0-1.0, defaut : 0.3)",
         "iou_desc": "Plus bas = garde plus de boites qui se chevauchent. Plus haut = fusionne davantage les chevauchements.",
-        "display": "Afficher le retour visuel (semantique uniquement, defaut : off)",
+        "display": "Afficher le retour visuel (semantique uniquement, plage : off/on, defaut : off)",
         "display_desc": "Affiche les guides visuels du pointage semantique quand c'est active.",
-        "disable_accel": "Desactiver l'acceleration de la souris (semantique uniquement, defaut : off)",
+        "disable_accel": "Desactiver l'acceleration de la souris (semantique uniquement, plage : off/on, defaut : off)",
         "disable_accel_desc": "Rend le pointage semantique plus stable, mais change la sensation de la souris pendant l'execution.",
-        "mode_note": "Bubble Cursor : agrandit la selection autour de la cible la plus proche. Pointage semantique : ralentit le pointeur pres des cibles pour mieux viser.",
+        "mode_note": "Overlay TargetFinder : affiche les boites detectees pour les tests. Bubble Cursor : agrandit la selection autour de la cible la plus proche. Pointage semantique : ralentit le pointeur pres des cibles pour mieux viser.",
         "contrast": "Contrast",
         "enable_tts": "Activer la synthese vocale",
         "language": "Langue",
@@ -122,6 +130,7 @@ UI_TEXTS = {
         "select_mode_first": "Choisissez d'abord une technique puis appuyez sur Demarrer / Appliquer.",
         "running_bubble": "Bubble Cursor est en cours.",
         "running_semantic": "Le pointage semantique est en cours.",
+        "running_targetfinder": "L'overlay TargetFinder est en cours.",
         "stopped": "Le mode en cours a ete arrete.",
         "no_running": "Aucun mode en cours n'a ete trouve.",
         "panel_updated": "L'apparence du panneau a ete mise a jour.",
@@ -129,6 +138,7 @@ UI_TEXTS = {
         "tts_disabled": "La synthese vocale est desactivee.",
         "tts_unavailable": "La synthese vocale n'est pas disponible sur ce systeme.",
         "language_updated": "La langue de l'interface a ete mise a jour.",
+        "q_hint": "Vous pouvez aussi appuyer sur q pour quitter le mode actif.",
     },
 }
 
@@ -482,6 +492,12 @@ class ControlPanel(QtWidgets.QWidget):
         self.info_label.setObjectName("InfoLabel")
         right_layout.addWidget(self.info_label)
 
+        self.q_hint_label = QtWidgets.QLabel()
+        self.q_hint_label.setWordWrap(True)
+        self.q_hint_label.setObjectName("InfoLabel")
+        self._bind_text(self.q_hint_label, "q_hint")
+        right_layout.addWidget(self.q_hint_label)
+
         button_row = QtWidgets.QHBoxLayout()
         self.start_button = QtWidgets.QPushButton()
         self.start_button.setObjectName("ActionButton")
@@ -621,6 +637,7 @@ class ControlPanel(QtWidgets.QWidget):
         is_mode_page = index == 0
         self.start_button.setVisible(is_mode_page)
         self.stop_button.setVisible(is_mode_page)
+        self.q_hint_label.setVisible(is_mode_page and self._mode_code() is not None)
 
     def _navigate_to_page(self, index: int):
         current = self.pages.currentIndex()
@@ -669,9 +686,11 @@ class ControlPanel(QtWidgets.QWidget):
         self.display_cb.setEnabled(semantic_enabled)
         self.disable_accel_cb.setEnabled(semantic_enabled)
         self.start_button.setEnabled(self._mode_code() is not None)
+        self.q_hint_label.setVisible(self.pages.currentIndex() == 0 and self._mode_code() is not None)
 
     def _handle_mode_selection(self):
         options = [
+            ("targetfinder", self._mode_label("targetfinder")),
             ("bubble", self._mode_label("bubble")),
             ("semantic", self._mode_label("semantic")),
         ]
@@ -1061,7 +1080,7 @@ class ControlPanel(QtWidgets.QWidget):
             high_contrast_mode=self.high_contrast_cb.isChecked(),
             stronger_visual_cue=self._hidden_config.stronger_visual_cue,
             single_click_as_double_click=self._hidden_config.single_click_as_double_click,
-            preset="Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "",
+            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "",
             enable_tts=self.enable_tts_cb.isChecked(),
             language=self._language_code(),
         )
@@ -1077,7 +1096,9 @@ class ControlPanel(QtWidgets.QWidget):
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
-        if cfg.enable_bubble_cursor or cfg.preset == "Bubble Only":
+        if cfg.preset == "TargetFinder":
+            self._selected_mode = "targetfinder"
+        elif cfg.enable_bubble_cursor or cfg.preset == "Bubble Only":
             self._selected_mode = "bubble"
         elif cfg.enable_semantic_pointing or cfg.preset == "Semantic Only":
             self._selected_mode = "semantic"
@@ -1104,6 +1125,10 @@ class ControlPanel(QtWidgets.QWidget):
         valid_fields = {field.name for field in fields(PanelConfig)}
         filtered = {key: value for key, value in data.items() if key in valid_fields}
         cfg = PanelConfig(**filtered)
+        cfg.change_thresh = DEFAULT_CHANGE_THRESH
+        cfg.capture_interval = DEFAULT_CAPTURE_INTERVAL
+        cfg.confidence = DEFAULT_CONFIDENCE
+        cfg.iou = DEFAULT_IOU
         cfg.enable_bubble_cursor = False
         cfg.enable_semantic_pointing = False
         cfg.display = False
@@ -1118,7 +1143,12 @@ class ControlPanel(QtWidgets.QWidget):
     # Command / Process
     # ---------------------------
     def _build_command(self, cfg: PanelConfig):
-        module_name = "target_finder_toolkit.bubblecursor" if cfg.enable_bubble_cursor else "target_finder_toolkit.semanticpointing"
+        if cfg.preset == "TargetFinder":
+            module_name = "target_finder_toolkit.targetfinder"
+        elif cfg.enable_bubble_cursor:
+            module_name = "target_finder_toolkit.bubblecursor"
+        else:
+            module_name = "target_finder_toolkit.semanticpointing"
         cmd = [sys.executable, "-m", module_name]
         cmd += ["--change-thresh", str(cfg.change_thresh)]
         cmd += ["--capture-interval", str(cfg.capture_interval)]
@@ -1137,7 +1167,9 @@ class ControlPanel(QtWidgets.QWidget):
     def _launch_demo_for_config(self, cfg: PanelConfig, *, speak: bool):
         cmd = self._build_command(cfg)
         self.process = subprocess.Popen(cmd, cwd=str(self.project_root))
-        if cfg.enable_bubble_cursor:
+        if cfg.preset == "TargetFinder":
+            self._set_status("running_targetfinder", speak=speak)
+        elif cfg.enable_bubble_cursor:
             self._set_status("running_bubble", speak=speak)
         else:
             self._set_status("running_semantic", speak=speak)

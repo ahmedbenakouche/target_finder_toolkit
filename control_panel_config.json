@@ -5,16 +5,16 @@
   "show_class_labels": false,
   "confidence": 0.28,
   "change_thresh": 100,
-  "capture_interval": 0.0333,
-  "iou": 0.29,
+  "capture_interval": 0.9,
+  "iou": 0.3,
   "display": false,
   "disable_accel": false,
-  "enable_bubble_cursor": true,
+  "enable_bubble_cursor": false,
   "enable_semantic_pointing": false,
   "high_contrast_mode": false,
   "stronger_visual_cue": false,
   "single_click_as_double_click": false,
-  "preset": "Bubble Only",
+  "preset": "TargetFinder",
   "enable_tts": false,
-  "language": "French"
+  "language": "English"
 }

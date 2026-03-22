@@ -25,6 +25,7 @@ import mss
 from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
+from pynput import keyboard
 
 __all__ = ["TargetFinder", "show_detections", "main"]
 
@@ -440,6 +441,7 @@ class OverlayWindow(QtWidgets.QWidget):
         # Construct an always-on-top, click-through, transparent overlay.
         super().__init__()
         self.detector = detector
+        self._keyboard_listener = None
 
         # Link overlay to the detector so it can hide/show the window during capture
         detector.overlay_window = self
@@ -469,6 +471,27 @@ class OverlayWindow(QtWidgets.QWidget):
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(10)  # 10 ms
+        self._start_keyboard_listener()
+
+    @QtCore.pyqtSlot()
+    def stop_and_quit(self):
+        self.detector.stop()
+        QtWidgets.QApplication.quit()
+
+    def _start_keyboard_listener(self):
+        def on_press(key):
+            try:
+                if hasattr(key, "char") and key.char == "q":
+                    QtCore.QMetaObject.invokeMethod(
+                        self,
+                        "stop_and_quit",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    )
+            except AttributeError:
+                pass
+
+        self._keyboard_listener = keyboard.Listener(on_press=on_press)
+        self._keyboard_listener.start()
 
     def paintEvent(self, event):
         # Paint bounding boxes and scores on the transparent overlay.
