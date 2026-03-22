@@ -15,7 +15,8 @@ Notes
   to control acceleration.
 - Linux (X11): uses XFixes to hide/show the cursor and `xinput` to flip accel profiles
   (libinput/evdev). Wayland is not supported here.
-- macOS: currently no-op stubs (could be implemented via Quartz/Cocoa).
+- macOS: cursor hide/show implemented via ApplicationServices;
+    mouse acceleration handling is best-effort and perference-based
 """
 
 
@@ -292,12 +293,15 @@ else:
     import subprocess
 
     _MAC_MOUSE_ACCEL_BACKUP = None
+    _MAC_MOUSE_SCALING_EXISTED = None
 
     def _mac_read_mouse_scaling():
         """
         Read the current mac OS mouse scaling value from .GlobalPreferences.
         Returns:
-            float | None
+            tuple[bool, float | None]
+            - first value: whether the key exists
+            - second value: the numeric value if available
         """
         try:
             result = subprocess.run(
@@ -307,9 +311,15 @@ else:
                 text=True,
                 check=True
             )
-            return float(result.stdout.strip())
+            return True, float(result.stdout.strip())
+        except subprocess.CalledProcessError:
+            # Key does not exist (or defaults read failed in the usual way)
+            return False, None
+        except ValueError:
+            # Key exists but could not be parsed as float
+            return True, None
         except Exception:
-            return None
+            return False, None
     def _mac_write_mouse_scaling(value):
         """
         Write macOS mouse scaling value to .GlovalPreferences.
@@ -334,33 +344,68 @@ else:
         except Exception:
             return False
     
+    def _mac_delete_mouse_scaling():
+        """
+        Delete th macOS mouse scaling key from .GlobalPreferences.
+        Returns:
+            bool
+        """
+        try:
+            subprocess.run(
+                ["defaults", "delete", ".GlobalPreferences", "com.apple.mouse.scaling"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True  
+            )
+
+            subprocess.run(
+                ["killall", "cfprefsd"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return True
+        except Exception:
+            return False
+    
     def disable_mouse_acceleration():
         """
         Best-effort macOS implementation.
 
-        Historical command-line pratice is to set:
-            com.apple.mouse.scaling = -1
-        to disable acceleration, ut behavior can vary across macOS versions.
+        This stores whether the key existed and its previous value,
+        then writes a best-effort value for reduced mouse accelerations.
         """
         global _MAC_MOUSE_ACCEL_BACKUP
+        global _MAC_MOUSE_SCALING_EXISTED
 
         if sys.platform != "darwin":
             return
   
-        if _MAC_MOUSE_ACCEL_BACKUP is None: # read current acceleration
-            _MAC_MOUSE_ACCEL_BACKUP = _mac_read_mouse_scaling()
+        if _MAC_MOUSE_SCALING_EXISTED is None: # read current acceleration
+            existed, value = _mac_read_mouse_scaling()
+            _MAC_MOUSE_SCALING_EXISTED = existed
+            _MAC_MOUSE_ACCEL_BACKUP = value
         
         _mac_write_mouse_scaling(-1.0)
 
     def restore_mouse_acceleration():
         """
-        Restore the previously saved macOS mouse scaling value.
+        Restore the previously macOS mouse scaling state.
         """
         global _MAC_MOUSE_ACCEL_BACKUP
+        global _MAC_MOUSE_SCALING_EXISTED
 
         if sys.platform != "darwin":
             return
+        
+        if _MAC_MOUSE_SCALING_EXISTED is None:
+            return
+        
+        if _MAC_MOUSE_SCALING_EXISTED:
+            if _MAC_MOUSE_ACCEL_BACKUP is not None:
+                _mac_write_mouse_scaling(_MAC_MOUSE_ACCEL_BACKUP)
+        else:
+            _mac_delete_mouse_scaling()
 
-        if _MAC_MOUSE_ACCEL_BACKUP is not None:
-            _mac_write_mouse_scaling(_MAC_MOUSE_ACCEL_BACKUP)
-            _MAC_MOUSE_ACCEL_BACKUP = None
+    
+        _MAC_MOUSE_ACCEL_BACKUP = None
+        _MAC_MOUSE_SCALING_EXISTED = None
