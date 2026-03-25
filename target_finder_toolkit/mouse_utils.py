@@ -15,7 +15,8 @@ Notes
   to control acceleration.
 - Linux (X11): uses XFixes to hide/show the cursor and `xinput` to flip accel profiles
   (libinput/evdev). Wayland is not supported here.
-- macOS: currently no-op stubs (could be implemented via Quartz/Cocoa).
+- macOS: cursor hide/show is implemented via ApplicationServices;
+  mouse acceleration handling is best-effort and preference-based.
 """
 
 
@@ -107,12 +108,40 @@ elif sys.platform.startswith("linux"):
         libX11.XFlush(_X11_DISPLAY)
 
 else:
-    # For macOS pas ...
-    def hide_cursor_everywhere():
-        pass
+    # macOS implementation using ApplicationServices
+    import ctypes
+    _CURSOR_HIDDEN = False
+    try:
+        _app_services = ctypes.cdll.LoadLibrary(
+                "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+            )
 
-    def restore_default_cursors():
-        pass
+        _app_services.CGMainDisplayID.restype = ctypes.c_uint32
+        _app_services.CGDisplayHideCursor.argtypes = [ctypes.c_uint32]
+        _app_services.CGDisplayHideCursor.restype = ctypes.c_int
+        _app_services.CGDisplayShowCursor.argtypes = [ctypes.c_uint32]
+        _app_services.CGDisplayShowCursor.restype = ctypes.c_int
+
+        def hide_cursor_everywhere():
+            global _CURSOR_HIDDEN
+            if _CURSOR_HIDDEN:
+                return
+            display_id = _app_services.CGMainDisplayID()
+            _app_services.CGDisplayHideCursor(display_id)
+            _CURSOR_HIDDEN = True
+
+        def restore_default_cursors():
+            global _CURSOR_HIDDEN
+            if not _CURSOR_HIDDEN:
+                return
+            display_id = _app_services.CGMainDisplayID()
+            _app_services.CGDisplayShowCursor(display_id)
+            _CURSOR_HIDDEN = False
+    except Exception:
+        def hide_cursor_everywhere():
+            pass
+        def restore_default_cursors():
+            pass
 
 
 # 2) Mouse acceleration functions
@@ -260,9 +289,136 @@ elif sys.platform.startswith("linux"):
         _AFFECTED_DEVICES.clear()
 
 else:
-    # For macOS pas ...
+    # For macOS 
+    import subprocess
+
+    _MAC_MOUSE_ACCEL_BACKUP = None
+    _MAC_MOUSE_SCALING_EXISTED = None
+
+    def _mac_read_mouse_scaling():
+        """
+        Read the current macOS mouse scaling value from the global
+        preferences domain (`.GlobalPreferences`).
+
+        Returns:
+            tuple[bool, float | None]
+            - first value: whether the key exists
+            - second value: the numeric value if available
+        """
+        try:
+            result = subprocess.run(
+                ["defaults", "read", ".GlobalPreferences", "com.apple.mouse.scaling"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True
+            )
+            return True, float(result.stdout.strip())
+        except subprocess.CalledProcessError:
+            # Key does not exist (or defaults read failed in the usual way)
+            return False, None
+        except ValueError:
+            # Key exists but could not be parsed as float
+            return True, None
+        except Exception:
+            return False, None
+    def _mac_write_mouse_scaling(value):
+        """
+        Write a macOS mouse scaling value to `.GlobalPreferences`.
+
+        Returns:
+            bool
+        """
+        try:
+            subprocess.run(
+                ["defaults", "write", ".GlobalPreferences", "com.apple.mouse.scaling", "-float", str(value)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
+
+            # Try to refresh preference daemon so the change is noticed sooner
+            subprocess.run(
+                ["killall", "cfprefsd"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return True
+        except Exception:
+            return False
+    
+    def _mac_delete_mouse_scaling():
+        """
+        Delete the macOS mouse scaling key from `.GlobalPreferences`.
+
+        Returns:
+            bool
+        """
+        try:
+            subprocess.run(
+                ["defaults", "delete", ".GlobalPreferences", "com.apple.mouse.scaling"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True  
+            )
+
+            subprocess.run(
+                ["killall", "cfprefsd"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return True
+        except Exception:
+            return False
+    
     def disable_mouse_acceleration():
-        pass
+        """
+        Best-effort macOS implementation.
+
+        This stores whether the `com.apple.mouse.scaling` key existed and
+        its previous value, then writes a value intended to reduce mouse
+        acceleration.
+
+        Note:
+            This relies on a global preference key rather than a dedicated
+            public API for disabling acceleration. The actual effect may vary
+            depending on the macOS version, pointing device, and system setup.
+        """
+        global _MAC_MOUSE_ACCEL_BACKUP
+        global _MAC_MOUSE_SCALING_EXISTED
+
+        if sys.platform != "darwin":
+            return
+  
+        if _MAC_MOUSE_SCALING_EXISTED is None: # read current acceleration
+            existed, value = _mac_read_mouse_scaling()
+            _MAC_MOUSE_SCALING_EXISTED = existed
+            _MAC_MOUSE_ACCEL_BACKUP = value
+        
+        _mac_write_mouse_scaling(-1.0)
 
     def restore_mouse_acceleration():
-        pass
+        """
+        Restore the previous macOS mouse scaling state.
+
+        If the key existed before `disable_mouse_acceleration()`, its previous
+        value is written back. Otherwise, the key is removed.
+        """
+        global _MAC_MOUSE_ACCEL_BACKUP
+        global _MAC_MOUSE_SCALING_EXISTED
+
+        if sys.platform != "darwin":
+            return
+        
+        if _MAC_MOUSE_SCALING_EXISTED is None:
+            return
+        
+        if _MAC_MOUSE_SCALING_EXISTED:
+            if _MAC_MOUSE_ACCEL_BACKUP is not None:
+                _mac_write_mouse_scaling(_MAC_MOUSE_ACCEL_BACKUP)
+        else:
+            _mac_delete_mouse_scaling()
+
+    
+        _MAC_MOUSE_ACCEL_BACKUP = None
+        _MAC_MOUSE_SCALING_EXISTED = None
