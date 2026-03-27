@@ -155,6 +155,7 @@ class TargetFinder:
 
         # Control flags for the background loop
         self._stop = False
+        self.hide_overlay_during_capture = True
         self.overlay_window = None  # will be set by OverlayWindow
 
         # Tracking state to keep stable IDs between frames
@@ -374,17 +375,17 @@ class TargetFinder:
             if prev_small is None or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh:
                 prev_small = small.copy()
 
-                # Hide the overlay before full-resolution capture
-                if self.overlay_window:
+                # Hide the overlay before full-resolution capture when needed.
+                if self.overlay_window and self.hide_overlay_during_capture:
                     QtCore.QMetaObject.invokeMethod(self.overlay_window, "hide",
                         QtCore.Qt.ConnectionType.QueuedConnection)
-                time.sleep(0.03)  # allow time for the overlay to disappear
+                    time.sleep(0.03)  # allow time for the overlay to disappear
 
                 # Full-resolution capture without overlay
                 full = np.array(sct.grab(monitor))[..., :3]
 
                 # Re-show the overlay
-                if self.overlay_window:
+                if self.overlay_window and self.hide_overlay_during_capture:
                     QtCore.QMetaObject.invokeMethod(self.overlay_window, "show",
                         QtCore.Qt.ConnectionType.QueuedConnection)
 

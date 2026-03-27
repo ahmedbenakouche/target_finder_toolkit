@@ -60,8 +60,11 @@ class BubbleCursor(QtWidgets.QWidget):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
+        if sys.platform == "darwin":
+            self.detector.hide_overlay_during_capture = False
         self._last_target = None  # to store the active target
         self._mouse_listener = None
+        self._last_rehide_at = 0.0
         self.bubble_enabled = True
         self._start_mouse_listener()
         self._start_keyboard_listener()
@@ -74,9 +77,10 @@ class BubbleCursor(QtWidgets.QWidget):
         flags = (
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
-            | QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.WindowTransparentForInput
         )
+        if sys.platform != "darwin":
+            flags |= QtCore.Qt.WindowType.Tool
         if sys.platform.startswith("linux"):
             flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
 
@@ -90,6 +94,26 @@ class BubbleCursor(QtWidgets.QWidget):
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(10) # 10 ms
+        self._cursor_refresh_timer = None
+        if sys.platform == "darwin":
+            self._cursor_refresh_timer = QtCore.QTimer(self)
+            self._cursor_refresh_timer.timeout.connect(self._rehide_cursor)
+            self._cursor_refresh_timer.start(30)
+
+    def _screen_for_point(self, x: int, y: int):
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return QtWidgets.QApplication.primaryScreen()
+        return app.screenAt(QtCore.QPoint(int(x), int(y))) or QtWidgets.QApplication.primaryScreen()
+
+    def _in_system_reserved_area(self, x: int, y: int) -> bool:
+        if sys.platform != "darwin":
+            return False
+        screen = self._screen_for_point(x, y)
+        if screen is None:
+            return False
+        point = QtCore.QPoint(int(x), int(y))
+        return not screen.availableGeometry().contains(point)
 
     # === Paint ===
     def paintEvent(self, event):
@@ -207,18 +231,50 @@ class BubbleCursor(QtWidgets.QWidget):
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 
+    @QtCore.pyqtSlot()
+    def _rehide_cursor(self):
+        if not self.bubble_enabled:
+            return
+        hide_cursor_everywhere()
+        if sys.platform == "darwin":
+            QtCore.QTimer.singleShot(0, hide_cursor_everywhere)
+            QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
+            QtCore.QTimer.singleShot(75, hide_cursor_everywhere)
+
     # === Global mouse listener + click simulation ===
     def _start_mouse_listener(self):
+        def queue_rehide(force=False):
+            if sys.platform != "darwin":
+                return
+            now = time.monotonic()
+            if not force and now - self._last_rehide_at < 0.008:
+                return
+            self._last_rehide_at = now
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_rehide_cursor",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+            )
+
+        def on_move(x, y):
+            queue_rehide()
+
         def on_click(x, y, button, pressed):
+            if button == button.left:
+                queue_rehide(force=True)
             if pressed and button == button.left:
+                if self._in_system_reserved_area(x, y):
+                    return
                 # simulate in the Qt thread
                 QtCore.QMetaObject.invokeMethod(self, "_simulate_click", QtCore.Qt.ConnectionType.QueuedConnection,
                     QtCore.Q_ARG(int, x), QtCore.Q_ARG(int, y))
-        self._mouse_listener = mouse.Listener(on_click=on_click)
+        self._mouse_listener = mouse.Listener(on_move=on_move, on_click=on_click)
         self._mouse_listener.start()
 
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
+        if self._in_system_reserved_area(orig_x, orig_y):
+            return
         if self._last_target and self.bubble_enabled:
             tx, ty, w, h = self._last_target
 
@@ -237,6 +293,7 @@ class BubbleCursor(QtWidgets.QWidget):
                 # to prevent the script from crashing when the mouse hits a corner
                 pass
             finally:
+                self._rehide_cursor()
                 self._start_mouse_listener() # restart the listener
 
 

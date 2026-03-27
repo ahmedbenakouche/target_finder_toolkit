@@ -25,6 +25,7 @@ Notes
 # -----------------------------
 
 import sys
+import threading
 from PyQt6 import QtWidgets, QtGui, QtCore
 
 if sys.platform.startswith("win"):
@@ -111,31 +112,92 @@ else:
     # macOS implementation using ApplicationServices
     import ctypes
     _CURSOR_HIDDEN = False
+    _CURSOR_MONITOR_STOP = None
+    _CURSOR_MONITOR_THREAD = None
+    _NS_CURSOR_HIDE_COUNT = 0
     try:
+        try:
+            from AppKit import NSCursor as _NSCursor
+        except Exception:
+            _NSCursor = None
+
         _app_services = ctypes.cdll.LoadLibrary(
                 "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
             )
 
         _app_services.CGMainDisplayID.restype = ctypes.c_uint32
+        _app_services.CGCursorIsVisible.restype = ctypes.c_bool
         _app_services.CGDisplayHideCursor.argtypes = [ctypes.c_uint32]
         _app_services.CGDisplayHideCursor.restype = ctypes.c_int
         _app_services.CGDisplayShowCursor.argtypes = [ctypes.c_uint32]
         _app_services.CGDisplayShowCursor.restype = ctypes.c_int
 
+        def _hide_ns_cursor():
+            global _NS_CURSOR_HIDE_COUNT
+            if _NSCursor is None:
+                return
+            try:
+                _NSCursor.hide()
+                _NS_CURSOR_HIDE_COUNT += 1
+            except Exception:
+                pass
+
+        def _restore_ns_cursor():
+            global _NS_CURSOR_HIDE_COUNT
+            if _NSCursor is None:
+                return
+            while _NS_CURSOR_HIDE_COUNT > 0:
+                try:
+                    _NSCursor.unhide()
+                except Exception:
+                    break
+                _NS_CURSOR_HIDE_COUNT -= 1
+
+        def _hide_cursor_if_visible():
+            display_id = _app_services.CGMainDisplayID()
+            if _app_services.CGCursorIsVisible():
+                _app_services.CGDisplayHideCursor(display_id)
+
+        def _cursor_monitor_loop(stop_event):
+            while True:
+                if _CURSOR_HIDDEN:
+                    _hide_cursor_if_visible()
+                if stop_event.wait(0.01):
+                    break
+
         def hide_cursor_everywhere():
             global _CURSOR_HIDDEN
-            if _CURSOR_HIDDEN:
-                return
-            display_id = _app_services.CGMainDisplayID()
-            _app_services.CGDisplayHideCursor(display_id)
+            global _CURSOR_MONITOR_STOP
+            global _CURSOR_MONITOR_THREAD
+            was_hidden = _CURSOR_HIDDEN
             _CURSOR_HIDDEN = True
+            _hide_ns_cursor()
+            _hide_cursor_if_visible()
+            if was_hidden and _CURSOR_MONITOR_THREAD is not None and _CURSOR_MONITOR_THREAD.is_alive():
+                return
+            if _CURSOR_MONITOR_THREAD is None or not _CURSOR_MONITOR_THREAD.is_alive():
+                _CURSOR_MONITOR_STOP = threading.Event()
+                _CURSOR_MONITOR_THREAD = threading.Thread(
+                    target=_cursor_monitor_loop,
+                    args=(_CURSOR_MONITOR_STOP,),
+                    daemon=True,
+                )
+                _CURSOR_MONITOR_THREAD.start()
 
         def restore_default_cursors():
             global _CURSOR_HIDDEN
+            global _CURSOR_MONITOR_STOP
+            global _CURSOR_MONITOR_THREAD
             if not _CURSOR_HIDDEN:
                 return
+            if _CURSOR_MONITOR_STOP is not None:
+                _CURSOR_MONITOR_STOP.set()
+            _CURSOR_MONITOR_STOP = None
+            _CURSOR_MONITOR_THREAD = None
             display_id = _app_services.CGMainDisplayID()
-            _app_services.CGDisplayShowCursor(display_id)
+            if not _app_services.CGCursorIsVisible():
+                _app_services.CGDisplayShowCursor(display_id)
+            _restore_ns_cursor()
             _CURSOR_HIDDEN = False
     except Exception:
         def hide_cursor_everywhere():
