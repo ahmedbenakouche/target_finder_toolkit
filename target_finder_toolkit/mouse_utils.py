@@ -15,8 +15,8 @@ Notes
   to control acceleration.
 - Linux (X11): uses XFixes to hide/show the cursor and `xinput` to flip accel profiles
   (libinput/evdev). Wayland is not supported here.
-- macOS: cursor hide/show implemented via ApplicationServices;
-    mouse acceleration handling is best-effort and perference-based
+- macOS: cursor hide/show is implemented via ApplicationServices;
+  mouse acceleration handling is best-effort and preference-based.
 """
 
 
@@ -25,6 +25,7 @@ Notes
 # -----------------------------
 
 import sys
+import threading
 from PyQt6 import QtWidgets, QtGui, QtCore
 
 if sys.platform.startswith("win"):
@@ -111,31 +112,92 @@ else:
     # macOS implementation using ApplicationServices
     import ctypes
     _CURSOR_HIDDEN = False
+    _CURSOR_MONITOR_STOP = None
+    _CURSOR_MONITOR_THREAD = None
+    _NS_CURSOR_HIDE_COUNT = 0
     try:
+        try:
+            from AppKit import NSCursor as _NSCursor
+        except Exception:
+            _NSCursor = None
+
         _app_services = ctypes.cdll.LoadLibrary(
                 "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
             )
 
         _app_services.CGMainDisplayID.restype = ctypes.c_uint32
+        _app_services.CGCursorIsVisible.restype = ctypes.c_bool
         _app_services.CGDisplayHideCursor.argtypes = [ctypes.c_uint32]
         _app_services.CGDisplayHideCursor.restype = ctypes.c_int
         _app_services.CGDisplayShowCursor.argtypes = [ctypes.c_uint32]
         _app_services.CGDisplayShowCursor.restype = ctypes.c_int
 
+        def _hide_ns_cursor():
+            global _NS_CURSOR_HIDE_COUNT
+            if _NSCursor is None:
+                return
+            try:
+                _NSCursor.hide()
+                _NS_CURSOR_HIDE_COUNT += 1
+            except Exception:
+                pass
+
+        def _restore_ns_cursor():
+            global _NS_CURSOR_HIDE_COUNT
+            if _NSCursor is None:
+                return
+            while _NS_CURSOR_HIDE_COUNT > 0:
+                try:
+                    _NSCursor.unhide()
+                except Exception:
+                    break
+                _NS_CURSOR_HIDE_COUNT -= 1
+
+        def _hide_cursor_if_visible():
+            display_id = _app_services.CGMainDisplayID()
+            if _app_services.CGCursorIsVisible():
+                _app_services.CGDisplayHideCursor(display_id)
+
+        def _cursor_monitor_loop(stop_event):
+            while True:
+                if _CURSOR_HIDDEN:
+                    _hide_cursor_if_visible()
+                if stop_event.wait(0.01):
+                    break
+
         def hide_cursor_everywhere():
             global _CURSOR_HIDDEN
-            if _CURSOR_HIDDEN:
-                return
-            display_id = _app_services.CGMainDisplayID()
-            _app_services.CGDisplayHideCursor(display_id)
+            global _CURSOR_MONITOR_STOP
+            global _CURSOR_MONITOR_THREAD
+            was_hidden = _CURSOR_HIDDEN
             _CURSOR_HIDDEN = True
+            _hide_ns_cursor()
+            _hide_cursor_if_visible()
+            if was_hidden and _CURSOR_MONITOR_THREAD is not None and _CURSOR_MONITOR_THREAD.is_alive():
+                return
+            if _CURSOR_MONITOR_THREAD is None or not _CURSOR_MONITOR_THREAD.is_alive():
+                _CURSOR_MONITOR_STOP = threading.Event()
+                _CURSOR_MONITOR_THREAD = threading.Thread(
+                    target=_cursor_monitor_loop,
+                    args=(_CURSOR_MONITOR_STOP,),
+                    daemon=True,
+                )
+                _CURSOR_MONITOR_THREAD.start()
 
         def restore_default_cursors():
             global _CURSOR_HIDDEN
+            global _CURSOR_MONITOR_STOP
+            global _CURSOR_MONITOR_THREAD
             if not _CURSOR_HIDDEN:
                 return
+            if _CURSOR_MONITOR_STOP is not None:
+                _CURSOR_MONITOR_STOP.set()
+            _CURSOR_MONITOR_STOP = None
+            _CURSOR_MONITOR_THREAD = None
             display_id = _app_services.CGMainDisplayID()
-            _app_services.CGDisplayShowCursor(display_id)
+            if not _app_services.CGCursorIsVisible():
+                _app_services.CGDisplayShowCursor(display_id)
+            _restore_ns_cursor()
             _CURSOR_HIDDEN = False
     except Exception:
         def hide_cursor_everywhere():
@@ -291,13 +353,14 @@ elif sys.platform.startswith("linux"):
 else:
     # For macOS 
     import subprocess
-
     _MAC_MOUSE_ACCEL_BACKUP = None
     _MAC_MOUSE_SCALING_EXISTED = None
 
     def _mac_read_mouse_scaling():
         """
-        Read the current mac OS mouse scaling value from .GlobalPreferences.
+        Read the current macOS mouse scaling value from the global
+        preferences domain (`.GlobalPreferences`).
+
         Returns:
             tuple[bool, float | None]
             - first value: whether the key exists
@@ -322,7 +385,8 @@ else:
             return False, None
     def _mac_write_mouse_scaling(value):
         """
-        Write macOS mouse scaling value to .GlovalPreferences.
+        Write a macOS mouse scaling value to `.GlobalPreferences`.
+
         Returns:
             bool
         """
@@ -346,7 +410,8 @@ else:
     
     def _mac_delete_mouse_scaling():
         """
-        Delete th macOS mouse scaling key from .GlobalPreferences.
+        Delete the macOS mouse scaling key from `.GlobalPreferences`.
+
         Returns:
             bool
         """
@@ -371,8 +436,14 @@ else:
         """
         Best-effort macOS implementation.
 
-        This stores whether the key existed and its previous value,
-        then writes a best-effort value for reduced mouse accelerations.
+        This stores whether the `com.apple.mouse.scaling` key existed and
+        its previous value, then writes a value intended to reduce mouse
+        acceleration.
+
+        Note:
+            This relies on a global preference key rather than a dedicated
+            public API for disabling acceleration. The actual effect may vary
+            depending on the macOS version, pointing device, and system setup.
         """
         global _MAC_MOUSE_ACCEL_BACKUP
         global _MAC_MOUSE_SCALING_EXISTED
@@ -389,7 +460,10 @@ else:
 
     def restore_mouse_acceleration():
         """
-        Restore the previously macOS mouse scaling state.
+        Restore the previous macOS mouse scaling state.
+
+        If the key existed before `disable_mouse_acceleration()`, its previous
+        value is written back. Otherwise, the key is removed.
         """
         global _MAC_MOUSE_ACCEL_BACKUP
         global _MAC_MOUSE_SCALING_EXISTED
