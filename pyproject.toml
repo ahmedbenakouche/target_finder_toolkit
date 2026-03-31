@@ -32,6 +32,7 @@ keywords = ["yolo", "gui", "widgets", "detection", "hci"]
 targetfinder-gui = "target_finder_toolkit.targetfinder:main"
 bubblecursor     = "target_finder_toolkit.bubblecursor:main"
 semanticpointing = "target_finder_toolkit.semanticpointing:main"
+dynaspot         = "target_finder_toolkit.dynaspot:main"
 
 [project.urls]
 Repository = "https://anonymous.4open.science/r/target_finder_toolkit-9A81/README.md"

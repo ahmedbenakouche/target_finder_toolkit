@@ -22,6 +22,10 @@ MODE_OPTIONS = {
         "English": "Semantic Pointing",
         "French": "Pointage sémantique",
     },
+    "dynaspot": {
+        "English": "DynaSpot",
+        "French": "DynaSpot",
+    },
 }
 
 LANGUAGE_OPTIONS = {
@@ -52,15 +56,20 @@ UI_TEXTS = {
         "page_accessibility": "Accessibility",
         "page_audio": "Audio",
         "page_language": "Language",
-        "technique": "Technique (3 modes)",
+        "technique": "Technique (4 modes)",
         "select_technique": "Choose a technique",
         "choose_mode_dialog": "Choose a Technique",
         "mode_targetfinder": "TargetFinder Overlay",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Semantic Pointing",
+        "mode_dynaspot": "DynaSpot",
         "apply": "Start / Apply",
         "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
         "change_thresh_desc": "Higher = fewer refreshes for small screen changes. Lower = reacts sooner.",
+        "model_path": "YOLO Model (.pt file)",
+        "model_path_desc": "Leave empty to use the packaged best.pt. Choose another trained .pt file to switch models.",
+        "browse": "Browse",
+        "use_default_model": "Use packaged best.pt",
         "capture_interval": "Capture Interval (range: 0.001-10.0, default: 0.033)",
         "capture_interval_desc": "Lower = faster checks and more CPU/GPU use. Higher = slower updates.",
         "confidence": "Confidence (range: 0.0-1.0, default: 0.28)",
@@ -73,7 +82,7 @@ UI_TEXTS = {
         "disable_accel": "Disable system mouse acceleration (semantic only, range: off/on, default: off)",
         "disable_accel_short": "Disable system mouse acceleration",
         "disable_accel_desc": "Makes semantic pointing feel more stable, but changes mouse behavior while running.",
-        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming.",
+        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: grows a circular activation area as pointer speed increases, while staying point-like at low speed.",
         "contrast": "Contrast",
         "enable_tts": "Enable TTS",
         "language": "Language",
@@ -90,8 +99,10 @@ UI_TEXTS = {
         "running_bubble": "Bubble Cursor is running.",
         "running_semantic": "Semantic Pointing is running.",
         "running_targetfinder": "TargetFinder Overlay is running.",
+        "running_dynaspot": "DynaSpot is running.",
         "stopped": "Stopped the running mode.",
         "no_running": "No running mode was found.",
+        "invalid_model_path": "The selected model file was not found.",
         "panel_updated": "Panel appearance updated.",
         "tts_enabled": "Text-to-speech enabled.",
         "tts_disabled": "Text-to-speech disabled.",
@@ -108,15 +119,20 @@ UI_TEXTS = {
         "page_accessibility": "Accessibilité",
         "page_audio": "Audio",
         "page_language": "Langue",
-        "technique": "Technique (2 modes)",
+        "technique": "Technique (4 modes)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
         "mode_targetfinder": "Overlay TargetFinder",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Pointage sémantique",
+        "mode_dynaspot": "DynaSpot",
         "apply": "Démarrer / Appliquer",
         "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
         "change_thresh_desc": "Plus haut = moins de rafraîchissements pour de petits changements. Plus bas = réaction plus rapide.",
+        "model_path": "Modèle YOLO (fichier .pt)",
+        "model_path_desc": "Laissez vide pour utiliser le fichier best.pt intégré. Choisissez un autre fichier .pt entraîné pour changer de modèle.",
+        "browse": "Parcourir",
+        "use_default_model": "Utiliser le best.pt intégré",
         "capture_interval": "Intervalle de capture (plage : 0.001-10.0, défaut : 0.033)",
         "capture_interval_desc": "Plus bas = vérifications plus rapides et plus de charge CPU/GPU. Plus haut = mises à jour plus lentes.",
         "confidence": "Confiance (plage : 0.0-1.0, défaut : 0.28)",
@@ -129,7 +145,7 @@ UI_TEXTS = {
         "disable_accel": "Désactiver l'accélération de la souris (sémantique uniquement, plage : off/on, défaut : off)",
         "disable_accel_short": "Désactiver l'accélération de la souris",
         "disable_accel_desc": "Rend le pointage sémantique plus stable, mais change la sensation de la souris pendant l'exécution.",
-        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser.",
+        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : agrandit une zone d’activation circulaire quand la vitesse du pointeur augmente, tout en restant ponctuel à faible vitesse.",
         "contrast": "Contrast",
         "enable_tts": "Activer la synthèse vocale",
         "language": "Langue",
@@ -146,8 +162,10 @@ UI_TEXTS = {
         "running_bubble": "Bubble Cursor est en cours.",
         "running_semantic": "Le pointage sémantique est en cours.",
         "running_targetfinder": "L'overlay TargetFinder est en cours.",
+        "running_dynaspot": "DynaSpot est en cours.",
         "stopped": "Le mode en cours a été arrêté.",
         "no_running": "Aucun mode en cours n'a été trouvé.",
+        "invalid_model_path": "Le fichier du modèle sélectionné est introuvable.",
         "panel_updated": "L'apparence du panneau a été mise à jour.",
         "tts_enabled": "La synthèse vocale est activée.",
         "tts_disabled": "La synthèse vocale est désactivée.",
@@ -169,11 +187,13 @@ class PanelConfig:
     change_thresh: int = DEFAULT_CHANGE_THRESH
     capture_interval: float = DEFAULT_CAPTURE_INTERVAL
     iou: float = DEFAULT_IOU
+    model_path: str = ""
     display: bool = False
     disable_accel: bool = False
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
+    enable_dynaspot: bool = False
 
     high_contrast_mode: bool = False
     stronger_visual_cue: bool = False
@@ -244,6 +264,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._refresh_mode_selector_text()
         if hasattr(self, "language_selector_button"):
             self._refresh_language_selector_text()
+        if hasattr(self, "model_path_edit"):
+            self.model_path_edit.setPlaceholderText(self._text("use_default_model"))
 
     def _set_status(self, key: str, *, speak: bool = False):
         message = self._text(key)
@@ -474,6 +496,9 @@ class ControlPanel(QtWidgets.QWidget):
         if widget.objectName() == "SelectorButton":
             widget.setMinimumWidth(220)
             widget.setMaximumWidth(240)
+        elif widget.objectName() == "ModelPicker":
+            widget.setMinimumWidth(320)
+            widget.setMaximumWidth(420)
         else:
             widget.setMinimumWidth(150)
             widget.setMaximumWidth(170)
@@ -592,6 +617,24 @@ class ControlPanel(QtWidgets.QWidget):
         self.mode_selector_button.setObjectName("SelectorButton")
         self._refresh_mode_selector_text()
 
+        self.model_path_edit = QtWidgets.QLineEdit()
+        self.model_path_edit.setReadOnly(True)
+        self.model_path_edit.setPlaceholderText(self._text("use_default_model"))
+        self.model_path_edit.setMinimumWidth(220)
+        self.model_path_edit.setClearButtonEnabled(False)
+
+        self.model_browse_button = QtWidgets.QPushButton()
+        self.model_browse_button.setObjectName("SmallActionButton")
+        self._bind_text(self.model_browse_button, "browse")
+
+        self.model_picker = QtWidgets.QWidget()
+        self.model_picker.setObjectName("ModelPicker")
+        model_picker_layout = QtWidgets.QHBoxLayout(self.model_picker)
+        model_picker_layout.setContentsMargins(0, 0, 0, 0)
+        model_picker_layout.setSpacing(8)
+        model_picker_layout.addWidget(self.model_path_edit, 1)
+        model_picker_layout.addWidget(self.model_browse_button)
+
         self.change_thresh_spin = QtWidgets.QSpinBox()
         self.change_thresh_spin.setKeyboardTracking(False)
         self.change_thresh_spin.setRange(0, 100000)
@@ -622,6 +665,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.disable_accel_cb = self._create_switch()
 
         rows = [
+            self._create_field_row("model_path", self.model_picker, "model_path_desc"),
+            self._create_separator(),
             self._create_field_row("technique", self.mode_selector_button, "mode_note"),
             self._create_separator(),
             self._create_field_row("change_thresh", self.change_thresh_spin, "change_thresh_desc"),
@@ -688,6 +733,7 @@ class ControlPanel(QtWidgets.QWidget):
     def _connect_signals(self):
         self.mode_selector_button.clicked.connect(self._handle_mode_selection)
         self.language_selector_button.clicked.connect(self._handle_language_selection)
+        self.model_browse_button.clicked.connect(self._handle_model_browse)
         self.start_button.clicked.connect(self._handle_apply_clicked)
         self.stop_button.clicked.connect(self._stop_demo)
         self.change_thresh_spin.valueChanged.connect(self._handle_runtime_option_change)
@@ -704,6 +750,11 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.capture_interval_spin, "capture_interval")
         self._register_numeric_field(self.confidence_spin, "confidence")
         self._register_numeric_field(self.iou_spin, "iou")
+        self._register_help_targets(
+            [self.model_picker, self.model_path_edit, self.model_browse_button],
+            "model_path",
+            "model_path_desc",
+        )
 
     # ---------------------------------
     # Navigation
@@ -814,6 +865,7 @@ class ControlPanel(QtWidgets.QWidget):
             ("targetfinder", self._mode_label("targetfinder")),
             ("bubble", self._mode_label("bubble")),
             ("semantic", self._mode_label("semantic")),
+            ("dynaspot", self._mode_label("dynaspot")),
         ]
         selected = self._show_selection_dialog(
             self._text("choose_mode_dialog"),
@@ -858,6 +910,11 @@ class ControlPanel(QtWidgets.QWidget):
         self._speak_auto_text(widget.text())
 
     def _handle_apply_clicked(self):
+        focus_widget = self.focusWidget()
+        if focus_widget is not None:
+            focus_widget.clearFocus()
+        QtWidgets.QApplication.processEvents()
+        self._commit_numeric_inputs()
         cfg = self._save_config()
         if self._mode_code() is None:
             self._set_status("select_mode_first")
@@ -907,6 +964,19 @@ class ControlPanel(QtWidgets.QWidget):
         self._apply_language()
         self._save_config()
         self._set_status("language_updated")
+
+    def _handle_model_browse(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self._text("model_path"),
+            str(self.project_root),
+            "PyTorch model (*.pt)",
+        )
+        if not path:
+            return
+        self.model_path_edit.setText(path)
+        self._save_config()
+        self._set_status("pending_apply")
 
     def _apply_panel_style(self):
         bg_main = "#ececef"
@@ -1111,6 +1181,39 @@ class ControlPanel(QtWidgets.QWidget):
                 background: {action_btn_hover};
             }}
 
+            QLineEdit {{
+                background: {input_bg};
+                border: 1px solid {border_soft};
+                border-radius: 10px;
+                min-height: 34px;
+                font-size: 14px;
+                padding: 2px 8px;
+                selection-background-color: {bg_nav_checked};
+            }}
+
+            QLineEdit:read-only {{
+                background: {input_bg};
+                color: {text_main};
+            }}
+
+            QWidget#ModelPicker {{
+                background: transparent;
+            }}
+
+            QPushButton#SmallActionButton {{
+                background: {action_btn_bg};
+                border: 1px solid {border_soft};
+                border-radius: 10px;
+                min-height: 34px;
+                padding: 4px 10px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+
+            QPushButton#SmallActionButton:hover {{
+                background: {action_btn_hover};
+            }}
+
             QComboBox, QSpinBox, QDoubleSpinBox {{
                 background: {input_bg};
                 border: 1px solid {border_soft};
@@ -1193,7 +1296,17 @@ class ControlPanel(QtWidgets.QWidget):
     # ---------------------
     # Config
     # ---------------------
+    def _commit_numeric_inputs(self):
+        for widget in (
+            self.change_thresh_spin,
+            self.capture_interval_spin,
+            self.confidence_spin,
+            self.iou_spin,
+        ):
+            widget.interpretText()
+
     def _collect_config(self) -> PanelConfig:
+        self._commit_numeric_inputs()
         mode = self._mode_code()
         return PanelConfig(
             ignore_text=self._hidden_config.ignore_text,
@@ -1204,14 +1317,16 @@ class ControlPanel(QtWidgets.QWidget):
             change_thresh=self.change_thresh_spin.value(),
             capture_interval=self.capture_interval_spin.value(),
             iou=self.iou_spin.value(),
+            model_path=self.model_path_edit.text().strip(),
             display=self.display_cb.isChecked(),
             disable_accel=self.disable_accel_cb.isChecked(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
+            enable_dynaspot=mode == "dynaspot",
             high_contrast_mode=self.high_contrast_cb.isChecked(),
             stronger_visual_cue=self._hidden_config.stronger_visual_cue,
             single_click_as_double_click=self._hidden_config.single_click_as_double_click,
-            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "",
+            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "DynaSpot" if mode == "dynaspot" else "",
             enable_tts=self.enable_tts_cb.isChecked(),
             language=self._language_code(),
         )
@@ -1222,6 +1337,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.capture_interval_spin.setValue(cfg.capture_interval)
         self.confidence_spin.setValue(cfg.confidence)
         self.iou_spin.setValue(cfg.iou)
+        self.model_path_edit.setText(cfg.model_path)
         self.display_cb.setChecked(cfg.display)
         self.disable_accel_cb.setChecked(cfg.disable_accel)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
@@ -1233,6 +1349,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._selected_mode = "bubble"
         elif cfg.enable_semantic_pointing or cfg.preset == "Semantic Only":
             self._selected_mode = "semantic"
+        elif cfg.enable_dynaspot or cfg.preset == "DynaSpot":
+            self._selected_mode = "dynaspot"
         else:
             self._selected_mode = None
 
@@ -1260,8 +1378,10 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.capture_interval = DEFAULT_CAPTURE_INTERVAL
         cfg.confidence = DEFAULT_CONFIDENCE
         cfg.iou = DEFAULT_IOU
+        cfg.model_path = ""
         cfg.enable_bubble_cursor = False
         cfg.enable_semantic_pointing = False
+        cfg.enable_dynaspot = False
         cfg.display = False
         cfg.disable_accel = False
         cfg.high_contrast_mode = False
@@ -1278,6 +1398,8 @@ class ControlPanel(QtWidgets.QWidget):
             module_name = "target_finder_toolkit.targetfinder"
         elif cfg.enable_bubble_cursor:
             module_name = "target_finder_toolkit.bubblecursor"
+        elif cfg.enable_dynaspot:
+            module_name = "target_finder_toolkit.dynaspot"
         else:
             module_name = "target_finder_toolkit.semanticpointing"
         cmd = [sys.executable, "-m", module_name]
@@ -1285,6 +1407,8 @@ class ControlPanel(QtWidgets.QWidget):
         cmd += ["--capture-interval", str(cfg.capture_interval)]
         cmd += ["--confidence", str(cfg.confidence)]
         cmd += ["--iou", str(cfg.iou)]
+        if cfg.model_path:
+            cmd += ["--model-path", cfg.model_path]
 
         if cfg.enable_semantic_pointing and cfg.display:
             cmd.append("--display")
@@ -1296,12 +1420,17 @@ class ControlPanel(QtWidgets.QWidget):
         return self.process is not None and self.process.poll() is None
 
     def _launch_demo_for_config(self, cfg: PanelConfig, *, speak: bool):
+        if cfg.model_path and not Path(cfg.model_path).is_file():
+            self._set_status("invalid_model_path", speak=speak)
+            return
         cmd = self._build_command(cfg)
         self.process = subprocess.Popen(cmd, cwd=str(self.project_root))
         if cfg.preset == "TargetFinder":
             self._set_status("running_targetfinder", speak=speak)
         elif cfg.enable_bubble_cursor:
             self._set_status("running_bubble", speak=speak)
+        elif cfg.enable_dynaspot:
+            self._set_status("running_dynaspot", speak=speak)
         else:
             self._set_status("running_semantic", speak=speak)
 

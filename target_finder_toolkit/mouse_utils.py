@@ -353,12 +353,16 @@ elif sys.platform.startswith("linux"):
 else:
     # For macOS 
     import subprocess
-    _MAC_MOUSE_ACCEL_BACKUP = None
-    _MAC_MOUSE_SCALING_EXISTED = None
+    _MAC_ACCEL_KEYS = (
+        "com.apple.mouse.scaling",
+        "com.apple.trackpad.scaling",
+    )
+    _MAC_ACCEL_BACKUP = {}
+    _MAC_ACCEL_KEYS_INITIALIZED = False
 
-    def _mac_read_mouse_scaling():
+    def _mac_read_scaling_key(key):
         """
-        Read the current macOS mouse scaling value from the global
+        Read the current macOS scaling value from the global
         preferences domain (`.GlobalPreferences`).
 
         Returns:
@@ -368,7 +372,7 @@ else:
         """
         try:
             result = subprocess.run(
-                ["defaults", "read", ".GlobalPreferences", "com.apple.mouse.scaling"],
+                ["defaults", "read", ".GlobalPreferences", key],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -383,51 +387,53 @@ else:
             return True, None
         except Exception:
             return False, None
-    def _mac_write_mouse_scaling(value):
+
+    def _mac_refresh_prefsd():
+        try:
+            subprocess.run(
+                ["killall", "cfprefsd"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except Exception:
+            pass
+
+    def _mac_write_scaling_key(key, value, *, refresh=True):
         """
-        Write a macOS mouse scaling value to `.GlobalPreferences`.
+        Write a macOS scaling value to `.GlobalPreferences`.
 
         Returns:
             bool
         """
         try:
             subprocess.run(
-                ["defaults", "write", ".GlobalPreferences", "com.apple.mouse.scaling", "-float", str(value)],
+                ["defaults", "write", ".GlobalPreferences", key, "-float", str(value)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=True
             )
-
-            # Try to refresh preference daemon so the change is noticed sooner
-            subprocess.run(
-                ["killall", "cfprefsd"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            if refresh:
+                _mac_refresh_prefsd()
             return True
         except Exception:
             return False
     
-    def _mac_delete_mouse_scaling():
+    def _mac_delete_scaling_key(key, *, refresh=True):
         """
-        Delete the macOS mouse scaling key from `.GlobalPreferences`.
+        Delete a macOS scaling key from `.GlobalPreferences`.
 
         Returns:
             bool
         """
         try:
             subprocess.run(
-                ["defaults", "delete", ".GlobalPreferences", "com.apple.mouse.scaling"],
+                ["defaults", "delete", ".GlobalPreferences", key],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=True  
             )
-
-            subprocess.run(
-                ["killall", "cfprefsd"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            if refresh:
+                _mac_refresh_prefsd()
             return True
         except Exception:
             return False
@@ -436,50 +442,57 @@ else:
         """
         Best-effort macOS implementation.
 
-        This stores whether the `com.apple.mouse.scaling` key existed and
-        its previous value, then writes a value intended to reduce mouse
-        acceleration.
+        This stores whether the macOS mouse / trackpad scaling keys existed
+        and their previous values, then writes values intended to reduce
+        pointer acceleration.
 
         Note:
             This relies on a global preference key rather than a dedicated
             public API for disabling acceleration. The actual effect may vary
             depending on the macOS version, pointing device, and system setup.
         """
-        global _MAC_MOUSE_ACCEL_BACKUP
-        global _MAC_MOUSE_SCALING_EXISTED
+        global _MAC_ACCEL_BACKUP
+        global _MAC_ACCEL_KEYS_INITIALIZED
 
         if sys.platform != "darwin":
             return
   
-        if _MAC_MOUSE_SCALING_EXISTED is None: # read current acceleration
-            existed, value = _mac_read_mouse_scaling()
-            _MAC_MOUSE_SCALING_EXISTED = existed
-            _MAC_MOUSE_ACCEL_BACKUP = value
-        
-        _mac_write_mouse_scaling(-1.0)
+        if not _MAC_ACCEL_KEYS_INITIALIZED:
+            _MAC_ACCEL_BACKUP = {}
+            for key in _MAC_ACCEL_KEYS:
+                existed, value = _mac_read_scaling_key(key)
+                _MAC_ACCEL_BACKUP[key] = (existed, value)
+            _MAC_ACCEL_KEYS_INITIALIZED = True
+
+        for key in _MAC_ACCEL_KEYS:
+            _mac_write_scaling_key(key, -1.0, refresh=False)
+        _mac_refresh_prefsd()
 
     def restore_mouse_acceleration():
         """
-        Restore the previous macOS mouse scaling state.
+        Restore the previous macOS mouse / trackpad scaling state.
 
-        If the key existed before `disable_mouse_acceleration()`, its previous
+        If a key existed before `disable_mouse_acceleration()`, its previous
         value is written back. Otherwise, the key is removed.
         """
-        global _MAC_MOUSE_ACCEL_BACKUP
-        global _MAC_MOUSE_SCALING_EXISTED
+        global _MAC_ACCEL_BACKUP
+        global _MAC_ACCEL_KEYS_INITIALIZED
 
         if sys.platform != "darwin":
             return
         
-        if _MAC_MOUSE_SCALING_EXISTED is None:
+        if not _MAC_ACCEL_KEYS_INITIALIZED:
             return
         
-        if _MAC_MOUSE_SCALING_EXISTED:
-            if _MAC_MOUSE_ACCEL_BACKUP is not None:
-                _mac_write_mouse_scaling(_MAC_MOUSE_ACCEL_BACKUP)
-        else:
-            _mac_delete_mouse_scaling()
+        for key in _MAC_ACCEL_KEYS:
+            existed, value = _MAC_ACCEL_BACKUP.get(key, (False, None))
+            if existed:
+                if value is not None:
+                    _mac_write_scaling_key(key, value, refresh=False)
+            else:
+                _mac_delete_scaling_key(key, refresh=False)
+        _mac_refresh_prefsd()
 
     
-        _MAC_MOUSE_ACCEL_BACKUP = None
-        _MAC_MOUSE_SCALING_EXISTED = None
+        _MAC_ACCEL_BACKUP = {}
+        _MAC_ACCEL_KEYS_INITIALIZED = False

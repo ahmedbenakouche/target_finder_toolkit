@@ -167,6 +167,7 @@ class TargetFinder:
         self._on_change = None      # callable or None
         self._with_frame = False    # whether to forward the frame to callback
         self._diff_iou = 0.5        # IoU threshold for added/removed + ID conservation
+        self._last_inference_signature = (self.conf, self.iou)
 
     def set_callback(self, fn, with_frame=False, diff_iou=0.5):
         """Register a callback invoked after each detection update.
@@ -367,14 +368,18 @@ class TargetFinder:
         prev_small = None     # last low-res grayscale for change detection
 
         while not self._stop:
+            current_signature = (self.conf, self.iou)
+            params_changed = current_signature != self._last_inference_signature
+
             # Low-res screenshot for change detection
             frame = np.array(sct.grab(monitor))[..., :3]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (64, 64), interpolation=cv2.INTER_AREA)
 
             # Trigger detection only if significant screen change is detected
-            if prev_small is None or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh:
+            if params_changed or prev_small is None or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh:
                 prev_small = small.copy()
+                self._last_inference_signature = current_signature
 
                 # Hide the overlay before full-resolution capture when needed.
                 if self.overlay_window and self.hide_overlay_during_capture:

@@ -1,4 +1,5 @@
 [console_scripts]
 bubblecursor = target_finder_toolkit.bubblecursor:main
+dynaspot = target_finder_toolkit.dynaspot:main
 semanticpointing = target_finder_toolkit.semanticpointing:main
 targetfinder-gui = target_finder_toolkit.targetfinder:main
