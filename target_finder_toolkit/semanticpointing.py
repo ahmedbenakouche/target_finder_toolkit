@@ -322,11 +322,21 @@ class SemanticPointing(QtWidgets.QWidget):
         filt_x, filt_y = raw_x, raw_y
         real = QtCore.QPointF(raw_real)
 
-        # If the real cursor is stuck at an edge
-        if (sys.platform != "darwin"
-                and (raw_real.x() <= 0 or raw_real.x() >= self.geom.width() - 1
-                or raw_real.y() <= 0 or raw_real.y() >= self.geom.height() - 1)):
-            QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y())) 
+        edge_hit = (
+            sys.platform != "darwin"
+            and (
+                raw_real.x() <= 0
+                or raw_real.x() >= self.geom.width() - 1
+                or raw_real.y() <= 0
+                or raw_real.y() >= self.geom.height() - 1
+            )
+        )
+
+        # If the real cursor is stuck at an edge, keep the original correction path only
+        # for the unfiltered case. With One Euro on absolute positions, forcing the real
+        # cursor back to fake_pos creates a feedback loop that looks like boundary bounce.
+        if edge_hit and self.cursor_filter is None:
+            QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y()))
             raw_real = QtCore.QPointF(QtGui.QCursor.pos())
             raw_x, raw_y = raw_real.x(), raw_real.y()
             real = QtCore.QPointF(raw_real)
@@ -343,8 +353,11 @@ class SemanticPointing(QtWidgets.QWidget):
             dx, dy = raw_dx, raw_dy
             if self.cursor_filter is not None and not self._is_macos:
                 filt_x, filt_y = self.cursor_filter.filter(raw_x, raw_y)
-                dx = filt_x - self.filtered_input_pos.x()
-                dy = filt_y - self.filtered_input_pos.y()
+                if edge_hit:
+                    dx = dy = 0
+                else:
+                    dx = filt_x - self.filtered_input_pos.x()
+                    dy = filt_y - self.filtered_input_pos.y()
                 self.filtered_input_pos = QtCore.QPointF(filt_x, filt_y)
         else:
             dx = dy = 0

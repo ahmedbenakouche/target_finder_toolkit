@@ -858,11 +858,14 @@ class ControlPanel(QtWidgets.QWidget):
     def _mode_code(self):
         return self._selected_mode
 
+    def _update_action_buttons(self):
+        self.start_button.setEnabled(self._mode_code() is not None and not self._is_demo_running())
+
     def _update_mode_dependent_fields(self):
         semantic_enabled = self._mode_code() == "semantic"
         self.display_cb.setEnabled(semantic_enabled)
         self.disable_accel_cb.setEnabled(semantic_enabled)
-        self.start_button.setEnabled(self._mode_code() is not None)
+        self._update_action_buttons()
         self.q_hint_label.setVisible(self.pages.currentIndex() == 0 and self._mode_code() is not None)
 
     def _register_numeric_field(self, widget, text_key: str):
@@ -1500,12 +1503,14 @@ class ControlPanel(QtWidgets.QWidget):
     def _poll_process_state(self):
         if self.process is None:
             self._process_watch_timer.stop()
+            self._update_action_buttons()
             return
         if self.process.poll() is None:
             return
         self.process = None
         self._process_watch_timer.stop()
         restore_default_cursors()
+        self._update_action_buttons()
         self._set_status("stopped", speak=False)
 
     def _launch_demo_for_config(self, cfg: PanelConfig, *, speak: bool):
@@ -1515,6 +1520,7 @@ class ControlPanel(QtWidgets.QWidget):
         cmd = self._build_command(cfg)
         self.process = subprocess.Popen(cmd, cwd=str(self.project_root))
         self._process_watch_timer.start()
+        self._update_action_buttons()
         if cfg.preset == "TargetFinder":
             self._set_status("running_targetfinder", speak=speak)
         elif cfg.enable_bubble_cursor:
@@ -1529,6 +1535,7 @@ class ControlPanel(QtWidgets.QWidget):
             self.process = None
             self._process_watch_timer.stop()
             restore_default_cursors()
+            self._update_action_buttons()
             if not silent:
                 self._set_status("no_running", speak=False)
             return
@@ -1543,6 +1550,7 @@ class ControlPanel(QtWidgets.QWidget):
             self.process = None
             self._process_watch_timer.stop()
             restore_default_cursors()
+            self._update_action_buttons()
 
         if not silent:
             self._set_status("stopped", speak=self.enable_tts_cb.isChecked())
