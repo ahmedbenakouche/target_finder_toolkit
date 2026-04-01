@@ -9,6 +9,7 @@ from pathlib import Path
 from PyQt6 import QtCore, QtWidgets
 from target_finder_toolkit.filters import FILTER_OPTIONS
 from target_finder_toolkit.logging_utils import make_default_log_path
+from target_finder_toolkit.mouse_utils import restore_default_cursors
 
 
 MODE_OPTIONS = {
@@ -250,6 +251,9 @@ class ControlPanel(QtWidgets.QWidget):
         self._selected_language = "English"
         self.project_root = Path(__file__).resolve().parent.parent
         self.config_path = self.project_root / "control_panel_config.json"
+        self._process_watch_timer = QtCore.QTimer(self)
+        self._process_watch_timer.setInterval(300)
+        self._process_watch_timer.timeout.connect(self._poll_process_state)
 
         self._build_ui()
         self._connect_signals()
@@ -1493,12 +1497,24 @@ class ControlPanel(QtWidgets.QWidget):
     def _is_demo_running(self):
         return self.process is not None and self.process.poll() is None
 
+    def _poll_process_state(self):
+        if self.process is None:
+            self._process_watch_timer.stop()
+            return
+        if self.process.poll() is None:
+            return
+        self.process = None
+        self._process_watch_timer.stop()
+        restore_default_cursors()
+        self._set_status("stopped", speak=False)
+
     def _launch_demo_for_config(self, cfg: PanelConfig, *, speak: bool):
         if cfg.model_path and not Path(cfg.model_path).is_file():
             self._set_status("invalid_model_path", speak=speak)
             return
         cmd = self._build_command(cfg)
         self.process = subprocess.Popen(cmd, cwd=str(self.project_root))
+        self._process_watch_timer.start()
         if cfg.preset == "TargetFinder":
             self._set_status("running_targetfinder", speak=speak)
         elif cfg.enable_bubble_cursor:
@@ -1511,6 +1527,8 @@ class ControlPanel(QtWidgets.QWidget):
     def _stop_demo(self, silent: bool = False):
         if not self._is_demo_running():
             self.process = None
+            self._process_watch_timer.stop()
+            restore_default_cursors()
             if not silent:
                 self._set_status("no_running", speak=False)
             return
@@ -1523,6 +1541,8 @@ class ControlPanel(QtWidgets.QWidget):
             self.process.wait(timeout=3)
         finally:
             self.process = None
+            self._process_watch_timer.stop()
+            restore_default_cursors()
 
         if not silent:
             self._set_status("stopped", speak=self.enable_tts_cb.isChecked())
@@ -1625,6 +1645,7 @@ class ControlPanel(QtWidgets.QWidget):
     # Events
     # ---------------------------
     def closeEvent(self, event):
+        self._process_watch_timer.stop()
         self._stop_demo(silent=True)
         self._stop_speech()
         super().closeEvent(event)
