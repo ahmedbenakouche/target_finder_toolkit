@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import signal
+import atexit
 import threading
 import numpy as np
 import cv2
@@ -33,6 +34,9 @@ from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
 from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["bubble_cursor", "main"]
+
+
+_CURSOR_RESTORE_REGISTERED = False
 
 class BubbleCursor(QtWidgets.QWidget):
     """
@@ -426,7 +430,11 @@ def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):
     Returns:
         None: Blocks until the Qt application is closed.
     """
+    global _CURSOR_RESTORE_REGISTERED
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    if not _CURSOR_RESTORE_REGISTERED:
+        atexit.register(restore_default_cursors)
+        _CURSOR_RESTORE_REGISTERED = True
     ov = BubbleCursor(detector, cursor_filter=cursor_filter, logger=logger)
     ov.show()
     if sys.platform == "darwin":

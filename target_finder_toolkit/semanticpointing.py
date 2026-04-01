@@ -342,10 +342,10 @@ class SemanticPointing(QtWidgets.QWidget):
             self.prev_real = raw_real
             dx, dy = raw_dx, raw_dy
             if self.cursor_filter is not None and not self._is_macos:
-                dx, dy = self.cursor_filter.filter(raw_dx, raw_dy)
-                self.filtered_input_pos.setX(self.filtered_input_pos.x() + dx)
-                self.filtered_input_pos.setY(self.filtered_input_pos.y() + dy)
-                filt_x, filt_y = self.filtered_input_pos.x(), self.filtered_input_pos.y()
+                filt_x, filt_y = self.cursor_filter.filter(raw_x, raw_y)
+                dx = filt_x - self.filtered_input_pos.x()
+                dy = filt_y - self.filtered_input_pos.y()
+                self.filtered_input_pos = QtCore.QPointF(filt_x, filt_y)
         else:
             dx = dy = 0
 
