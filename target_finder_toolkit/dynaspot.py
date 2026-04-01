@@ -24,6 +24,8 @@ import argparse
 
 from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
+from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
+from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["dynaspot", "main"]
 
@@ -46,12 +48,14 @@ class DynaSpot(QtWidgets.QWidget):
     SHRINK_SMOOTHING = 0.18
     TEXT_MARGIN = 20
 
-    def __init__(self, detector: TargetFinder):
+    def __init__(self, detector: TargetFinder, cursor_filter=None, logger=None):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
         if sys.platform == "darwin":
             self.detector.hide_overlay_during_capture = False
+        self.cursor_filter = cursor_filter
+        self.logger = logger
 
         self._mouse_listener = None
         self._keyboard_listener = None
@@ -188,9 +192,12 @@ class DynaSpot(QtWidgets.QWidget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
 
         pos = QtGui.QCursor.pos()
-        cx, cy = pos.x(), pos.y()
+        raw_x, raw_y = float(pos.x()), float(pos.y())
+        cx, cy = raw_x, raw_y
+        if self.cursor_filter is not None:
+            cx, cy = self.cursor_filter.filter(raw_x, raw_y)
 
-        self._update_spot_radius(QtCore.QPointF(pos))
+        self._update_spot_radius(QtCore.QPointF(cx, cy))
         target = self._select_target(cx, cy, detections) if detections else None
 
         if target is None:
@@ -219,6 +226,17 @@ class DynaSpot(QtWidgets.QWidget):
             painter.drawEllipse(QtCore.QPointF(cx, cy), inner_radius, inner_radius)
 
         self._draw_fake_cursor(painter, cx, cy)
+        if self.logger is not None:
+            self.logger.log_cursor_sample(
+                raw_x=raw_x,
+                raw_y=raw_y,
+                filtered_x=cx,
+                filtered_y=cy,
+                technique="dynaspot",
+                filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
+                dynaspot_radius=round(float(self._spot_radius), 3),
+                has_target=self._last_target is not None,
+            )
         painter.end()
 
     def _draw_fake_cursor(self, painter, cx, cy):
@@ -235,10 +253,10 @@ class DynaSpot(QtWidgets.QWidget):
         painter.drawEllipse(center, radius_cursor, radius_cursor)
         line_len = 4
         gap = radius_cursor + 1
-        painter.drawLine(cx, cy - gap - line_len, cx, cy - gap)
-        painter.drawLine(cx, cy + gap, cx, cy + gap + line_len)
-        painter.drawLine(cx + gap, cy, cx + gap + line_len, cy)
-        painter.drawLine(cx - gap - line_len, cy, cx - gap, cy)
+        painter.drawLine(QtCore.QLineF(cx, cy - gap - line_len, cx, cy - gap))
+        painter.drawLine(QtCore.QLineF(cx, cy + gap, cx, cy + gap + line_len))
+        painter.drawLine(QtCore.QLineF(cx + gap, cy, cx + gap + line_len, cy))
+        painter.drawLine(QtCore.QLineF(cx - gap - line_len, cy, cx - gap, cy))
 
     @QtCore.pyqtSlot()
     def toggle_dynaspot(self):
@@ -256,6 +274,9 @@ class DynaSpot(QtWidgets.QWidget):
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
         restore_default_cursors()
+        if self.logger is not None:
+            self.logger.log_session_end(reason="quit")
+            self.logger.close()
         os._exit(0)
 
     def _start_keyboard_listener(self):
@@ -324,6 +345,13 @@ class DynaSpot(QtWidgets.QWidget):
 
         tx, ty, w, h = self._last_target
         if tx - w / 2 <= orig_x <= tx + w / 2 and ty - h / 2 <= orig_y <= ty + h / 2:
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="dynaspot",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                )
             return
 
         self._mouse_listener.stop()
@@ -335,18 +363,28 @@ class DynaSpot(QtWidgets.QWidget):
         except pyautogui.FailSafeException:
             pass
         finally:
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="dynaspot",
+                    raw=[orig_x, orig_y],
+                    effective=[round(tx, 3), round(ty, 3)],
+                    redirected=True,
+                )
             self._rehide_cursor()
             self._start_mouse_listener()
 
 
-def dynaspot(detector: TargetFinder):
+def dynaspot(detector: TargetFinder, cursor_filter=None, logger=None):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     hide_cursor_everywhere()
-    ov = DynaSpot(detector)
+    ov = DynaSpot(detector, cursor_filter=cursor_filter, logger=logger)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     exit_code = app.exec()
     restore_default_cursors()
+    if logger is not None:
+        logger.log_session_end(reason="app_exit")
+        logger.close()
     sys.exit(exit_code)
 
 
@@ -357,6 +395,9 @@ def main():
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
+    parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
+    parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -364,7 +405,20 @@ def main():
         args.model_path = os.path.join(here, "best.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    dynaspot(det)
+    cursor_filter = PointFilter2D(args.filter)
+    logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
+    if logger is not None:
+        logger.log_session_start(
+            technique="dynaspot",
+            filter_name=args.filter,
+            model_path=args.model_path,
+            change_thresh=args.change_thresh,
+            capture_interval=args.capture_interval,
+            confidence=args.confidence,
+            iou=args.iou,
+        )
+        det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
+    dynaspot(det, cursor_filter=cursor_filter, logger=logger)
 
 
 if __name__ == "__main__":

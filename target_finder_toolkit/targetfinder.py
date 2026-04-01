@@ -26,6 +26,8 @@ from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
 from pynput import keyboard
+from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
+from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["TargetFinder", "show_detections", "main"]
 
@@ -443,11 +445,13 @@ class OverlayWindow(QtWidgets.QWidget):
         QtGui.QColor(0, 255, 255, 200),  # Slider → cyan
     ]
 
-    def __init__(self, detector: TargetFinder):
+    def __init__(self, detector: TargetFinder, cursor_filter=None, logger=None):
         # Construct an always-on-top, click-through, transparent overlay.
         super().__init__()
         self.detector = detector
         self._keyboard_listener = None
+        self.cursor_filter = cursor_filter
+        self.logger = logger
 
         # Link overlay to the detector so it can hide/show the window during capture
         detector.overlay_window = self
@@ -482,6 +486,9 @@ class OverlayWindow(QtWidgets.QWidget):
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
         self.detector.stop()
+        if self.logger is not None:
+            self.logger.log_session_end(reason="quit")
+            self.logger.close()
         QtWidgets.QApplication.quit()
 
     def _start_keyboard_listener(self):
@@ -504,6 +511,21 @@ class OverlayWindow(QtWidgets.QWidget):
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        pos = QtGui.QCursor.pos()
+        raw_x, raw_y = float(pos.x()), float(pos.y())
+        filt_x, filt_y = (raw_x, raw_y)
+        if self.cursor_filter is not None:
+            filt_x, filt_y = self.cursor_filter.filter(raw_x, raw_y)
+        if self.logger is not None:
+            self.logger.log_cursor_sample(
+                raw_x=raw_x,
+                raw_y=raw_y,
+                filtered_x=filt_x,
+                filtered_y=filt_y,
+                technique="targetfinder",
+                filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
+                detection_count=len(self.detector.get_detections()),
+            )
 
         for x, y, w, h, score, cls_id in self.detector.get_detections():
             color = self.PALETTE[cls_id % len(self.PALETTE)]
@@ -521,14 +543,14 @@ class OverlayWindow(QtWidgets.QWidget):
         painter.end()
 
 
-def show_detections(detector: TargetFinder):
+def show_detections(detector: TargetFinder, cursor_filter=None, logger=None):
     """Launch a PyQt application showing detections in a transparent overlay window.
 
     Args:
         detector (TargetFinder): The detector instance providing the detections.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    ov  = OverlayWindow(detector)
+    ov  = OverlayWindow(detector, cursor_filter=cursor_filter, logger=logger)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     sys.exit(app.exec())
@@ -547,6 +569,9 @@ def main():
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
+    parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
+    parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -555,7 +580,20 @@ def main():
 
     # Instantiate detector and start overlay
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    show_detections(det)
+    cursor_filter = PointFilter2D(args.filter)
+    logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
+    if logger is not None:
+        logger.log_session_start(
+            technique="targetfinder",
+            filter_name=args.filter,
+            model_path=args.model_path,
+            change_thresh=args.change_thresh,
+            capture_interval=args.capture_interval,
+            confidence=args.confidence,
+            iou=args.iou,
+        )
+        det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
+    show_detections(det, cursor_filter=cursor_filter, logger=logger)
 
 if __name__ == "__main__":
     main()

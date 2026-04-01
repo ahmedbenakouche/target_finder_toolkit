@@ -29,7 +29,8 @@ from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
-from importlib import resources
+from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
+from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["bubble_cursor", "main"]
 
@@ -56,12 +57,14 @@ class BubbleCursor(QtWidgets.QWidget):
       to the nearest detected target.
     - The real cursor is hidden and replaced by a drawn "fake" cursor.
     """
-    def __init__(self, detector: TargetFinder):
+    def __init__(self, detector: TargetFinder, cursor_filter=None, logger=None):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
         if sys.platform == "darwin":
             self.detector.hide_overlay_during_capture = False
+        self.cursor_filter = cursor_filter
+        self.logger = logger
         self._last_target = None  # to store the active target
         self._mouse_listener = None
         self._last_rehide_at = 0.0
@@ -126,7 +129,13 @@ class BubbleCursor(QtWidgets.QWidget):
 
         # Pointer position (logical coordinates)
         pos = QtGui.QCursor.pos()
-        cx, cy = pos.x(), pos.y()
+        if self.cursor_filter is None:
+            cx, cy = pos.x(), pos.y()
+            raw_x, raw_y = float(cx), float(cy)
+        else:
+            raw_x, raw_y = float(pos.x()), float(pos.y())
+            cx, cy = raw_x, raw_y
+            cx, cy = self.cursor_filter.filter(raw_x, raw_y)
 
         text_margin = 20
         cursor_on_non_text = False
@@ -211,6 +220,17 @@ class BubbleCursor(QtWidgets.QWidget):
         painter.setPen(pen)
         painter.drawPath(union_path)
         self._draw_fake_cursor(painter,cx,cy)
+        if self.logger is not None:
+            self.logger.log_cursor_sample(
+                raw_x=raw_x,
+                raw_y=raw_y,
+                filtered_x=cx,
+                filtered_y=cy,
+                technique="bubble",
+                filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
+                bubble_radius=round(float(radius), 3),
+                has_target=self._last_target is not None,
+            )
         painter.end()
         return
 
@@ -225,10 +245,10 @@ class BubbleCursor(QtWidgets.QWidget):
         painter.drawEllipse(center, radius_cursor, radius_cursor)
         line_len = 4
         gap = radius_cursor + 1
-        painter.drawLine(cx, cy - gap - line_len, cx, cy - gap)
-        painter.drawLine(cx, cy + gap, cx, cy + gap + line_len)
-        painter.drawLine(cx + gap, cy, cx + gap + line_len, cy)
-        painter.drawLine(cx - gap - line_len, cy, cx - gap, cy)
+        painter.drawLine(QtCore.QLineF(cx, cy - gap - line_len, cx, cy - gap))
+        painter.drawLine(QtCore.QLineF(cx, cy + gap, cx, cy + gap + line_len))
+        painter.drawLine(QtCore.QLineF(cx + gap, cy, cx + gap + line_len, cy))
+        painter.drawLine(QtCore.QLineF(cx - gap - line_len, cy, cx - gap, cy))
     
 
     # === Toggle bubble on/off ===
@@ -247,6 +267,9 @@ class BubbleCursor(QtWidgets.QWidget):
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
         restore_default_cursors()
+        if self.logger is not None:
+            self.logger.log_session_end(reason="quit")
+            self.logger.close()
         os._exit(0)
 
     def _start_keyboard_listener(self):
@@ -273,9 +296,21 @@ class BubbleCursor(QtWidgets.QWidget):
 
     # === Global mouse listener + click simulation ===
     def _start_mouse_listener(self):
+        if sys.platform != "darwin":
+            def on_click(x, y, button, pressed):
+                if pressed and button == button.left:
+                    QtCore.QMetaObject.invokeMethod(
+                        self,
+                        "_simulate_click",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(int, x),
+                        QtCore.Q_ARG(int, y),
+                    )
+            self._mouse_listener = mouse.Listener(on_click=on_click)
+            self._mouse_listener.start()
+            return
+
         def queue_rehide(force=False):
-            if sys.platform != "darwin":
-                return
             now = time.monotonic()
             if not force and now - self._last_rehide_at < 0.008:
                 return
@@ -310,6 +345,13 @@ class BubbleCursor(QtWidgets.QWidget):
 
             # If click inside detected rectangle let it pass
             if tx-w/2 <= orig_x <= tx+w/2 and ty-h/2 <= orig_y <= ty+h/2:
+                if self.logger is not None:
+                    self.logger.log_click(
+                        technique="bubble",
+                        raw=[orig_x, orig_y],
+                        effective=[orig_x, orig_y],
+                        redirected=False,
+                    )
                 return
 
             # Otherwise simulate target click
@@ -323,11 +365,18 @@ class BubbleCursor(QtWidgets.QWidget):
                 # to prevent the script from crashing when the mouse hits a corner
                 pass
             finally:
+                if self.logger is not None:
+                    self.logger.log_click(
+                        technique="bubble",
+                        raw=[orig_x, orig_y],
+                        effective=[round(tx, 3), round(ty, 3)],
+                        redirected=True,
+                    )
                 self._rehide_cursor()
                 self._start_mouse_listener() # restart the listener
 
 
-def bubble_cursor(detector: TargetFinder):
+def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):
     """Launch the Bubble Cursor overlay.
 
     This replaces the system cursor with a dynamic "bubble" that
@@ -342,11 +391,14 @@ def bubble_cursor(detector: TargetFinder):
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     hide_cursor_everywhere()
-    ov = BubbleCursor(detector)
+    ov = BubbleCursor(detector, cursor_filter=cursor_filter, logger=logger)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     exit_code = app.exec()
     restore_default_cursors()
+    if logger is not None:
+        logger.log_session_end(reason="app_exit")
+        logger.close()
     sys.exit(exit_code)
 
 
@@ -381,6 +433,9 @@ def main():
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
+    parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
+    parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -388,7 +443,20 @@ def main():
         args.model_path = os.path.join(here, "best.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    bubble_cursor(det)
+    cursor_filter = PointFilter2D(args.filter) if args.filter != "none" else None
+    logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
+    if logger is not None:
+        logger.log_session_start(
+            technique="bubble",
+            filter_name=args.filter,
+            model_path=args.model_path,
+            change_thresh=args.change_thresh,
+            capture_interval=args.capture_interval,
+            confidence=args.confidence,
+            iou=args.iou,
+        )
+        det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
+    bubble_cursor(det, cursor_filter=cursor_filter, logger=logger)
 
 if __name__ == "__main__":
     main()

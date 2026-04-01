@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from PyQt6 import QtCore, QtWidgets
+from target_finder_toolkit.filters import FILTER_OPTIONS
+from target_finder_toolkit.logging_utils import make_default_log_path
 
 
 MODE_OPTIONS = {
@@ -59,6 +61,14 @@ UI_TEXTS = {
         "technique": "Technique (4 modes)",
         "select_technique": "Choose a technique",
         "choose_mode_dialog": "Choose a Technique",
+        "filter": "Filter",
+        "select_filter": "Choose a filter",
+        "choose_filter_dialog": "Choose a Filter",
+        "filter_none": "None",
+        "filter_one_euro": "One Euro",
+        "filter_desc": "Apply an optional cursor filter before the selected technique uses pointer input.",
+        "record_data": "Record session data",
+        "record_data_desc": "Save structured JSONL logs with cursor samples, clicks, and detection changes for later analysis.",
         "mode_targetfinder": "TargetFinder Overlay",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Semantic Pointing",
@@ -122,6 +132,14 @@ UI_TEXTS = {
         "technique": "Technique (4 modes)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
+        "filter": "Filtre",
+        "select_filter": "Choisir un filtre",
+        "choose_filter_dialog": "Choisir un filtre",
+        "filter_none": "Aucun",
+        "filter_one_euro": "One Euro",
+        "filter_desc": "Appliquer un filtre optionnel au pointeur avant que la technique sélectionnée n'utilise l'entrée souris.",
+        "record_data": "Enregistrer les données",
+        "record_data_desc": "Enregistrer des journaux JSONL structurés avec la trajectoire du pointeur, les clics et les changements de détection.",
         "mode_targetfinder": "Overlay TargetFinder",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Pointage sémantique",
@@ -188,6 +206,8 @@ class PanelConfig:
     capture_interval: float = DEFAULT_CAPTURE_INTERVAL
     iou: float = DEFAULT_IOU
     model_path: str = ""
+    filter_name: str = "none"
+    enable_logging: bool = False
     display: bool = False
     disable_accel: bool = False
 
@@ -226,6 +246,7 @@ class ControlPanel(QtWidgets.QWidget):
         self._prev_buttons = []
         self._next_buttons = []
         self._selected_mode = None
+        self._selected_filter = "none"
         self._selected_language = "English"
         self.project_root = Path(__file__).resolve().parent.parent
         self.config_path = self.project_root / "control_panel_config.json"
@@ -262,6 +283,8 @@ class ControlPanel(QtWidgets.QWidget):
             widget.setText(self._text(key))
         if hasattr(self, "mode_selector_button"):
             self._refresh_mode_selector_text()
+        if hasattr(self, "filter_selector_button"):
+            self._refresh_filter_selector_text()
         if hasattr(self, "language_selector_button"):
             self._refresh_language_selector_text()
         if hasattr(self, "model_path_edit"):
@@ -303,12 +326,21 @@ class ControlPanel(QtWidgets.QWidget):
             return self._text("select_technique")
         return MODE_OPTIONS[code][self._language_code()]
 
+    def _filter_label(self, code: str | None):
+        if not code:
+            return self._text("select_filter")
+        key = f"filter_{code}"
+        return self._text(key) if key in UI_TEXTS[self._language_code()] else code
+
     def _language_label(self, code: str):
         item = LANGUAGE_OPTIONS[code]
         return f"{item['badge']} {item[self._language_code()]}"
 
     def _refresh_mode_selector_text(self):
         self.mode_selector_button.setText(f"{self._mode_label(self._selected_mode)}  ▼")
+
+    def _refresh_filter_selector_text(self):
+        self.filter_selector_button.setText(f"{self._filter_label(self._selected_filter)}  ▼")
 
     def _refresh_language_selector_text(self):
         self.language_selector_button.setText(f"{self._language_label(self._selected_language)}  ▼")
@@ -617,6 +649,10 @@ class ControlPanel(QtWidgets.QWidget):
         self.mode_selector_button.setObjectName("SelectorButton")
         self._refresh_mode_selector_text()
 
+        self.filter_selector_button = QtWidgets.QPushButton()
+        self.filter_selector_button.setObjectName("SelectorButton")
+        self._refresh_filter_selector_text()
+
         self.model_path_edit = QtWidgets.QLineEdit()
         self.model_path_edit.setReadOnly(True)
         self.model_path_edit.setPlaceholderText(self._text("use_default_model"))
@@ -663,11 +699,14 @@ class ControlPanel(QtWidgets.QWidget):
 
         self.display_cb = self._create_switch()
         self.disable_accel_cb = self._create_switch()
+        self.log_data_cb = self._create_switch()
 
         rows = [
             self._create_field_row("model_path", self.model_picker, "model_path_desc"),
             self._create_separator(),
             self._create_field_row("technique", self.mode_selector_button, "mode_note"),
+            self._create_separator(),
+            self._create_field_row("filter", self.filter_selector_button, "filter_desc"),
             self._create_separator(),
             self._create_field_row("change_thresh", self.change_thresh_spin, "change_thresh_desc"),
             self._create_separator(),
@@ -680,6 +719,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_switch_row("display", self.display_cb, "display_desc"),
             self._create_separator(),
             self._create_switch_row("disable_accel", self.disable_accel_cb, "disable_accel_desc"),
+            self._create_separator(),
+            self._create_switch_row("record_data", self.log_data_cb, "record_data_desc"),
         ]
 
         for row in rows:
@@ -732,6 +773,7 @@ class ControlPanel(QtWidgets.QWidget):
     # --------------------------------
     def _connect_signals(self):
         self.mode_selector_button.clicked.connect(self._handle_mode_selection)
+        self.filter_selector_button.clicked.connect(self._handle_filter_selection)
         self.language_selector_button.clicked.connect(self._handle_language_selection)
         self.model_browse_button.clicked.connect(self._handle_model_browse)
         self.start_button.clicked.connect(self._handle_apply_clicked)
@@ -742,6 +784,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.iou_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.display_cb.toggled.connect(self._handle_runtime_option_change)
         self.disable_accel_cb.toggled.connect(self._handle_runtime_option_change)
+        self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
 
         self.high_contrast_cb.toggled.connect(self._handle_panel_style_change)
         self.enable_tts_cb.toggled.connect(self._handle_tts_change)
@@ -755,6 +798,7 @@ class ControlPanel(QtWidgets.QWidget):
             "model_path",
             "model_path_desc",
         )
+        self._register_help_targets([self.filter_selector_button], "filter", "filter_desc")
 
     # ---------------------------------
     # Navigation
@@ -880,6 +924,21 @@ class ControlPanel(QtWidgets.QWidget):
         self._save_config()
         self._set_status("pending_apply")
 
+    def _handle_filter_selection(self):
+        self._speak_auto_text(self._text("select_filter"))
+        options = [(key, self._filter_label(key)) for key in FILTER_OPTIONS]
+        selected = self._show_selection_dialog(
+            self._text("choose_filter_dialog"),
+            options,
+            self._selected_filter,
+        )
+        if selected is None:
+            return
+        self._selected_filter = selected
+        self._refresh_filter_selector_text()
+        self._save_config()
+        self._set_status("pending_apply")
+
     def _handle_runtime_option_change(self, *_args):
         if self._suspend_updates:
             return
@@ -900,6 +959,9 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.disable_accel_cb:
             key = "turn_on" if self.disable_accel_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("disable_accel_short")))
+        elif sender is self.log_data_cb:
+            key = "turn_on" if self.log_data_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("record_data")))
 
     def _handle_numeric_edit_finished(self, widget):
         if self._suspend_updates:
@@ -1318,6 +1380,8 @@ class ControlPanel(QtWidgets.QWidget):
             capture_interval=self.capture_interval_spin.value(),
             iou=self.iou_spin.value(),
             model_path=self.model_path_edit.text().strip(),
+            filter_name=self._selected_filter,
+            enable_logging=self.log_data_cb.isChecked(),
             display=self.display_cb.isChecked(),
             disable_accel=self.disable_accel_cb.isChecked(),
             enable_bubble_cursor=mode == "bubble",
@@ -1338,6 +1402,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.confidence_spin.setValue(cfg.confidence)
         self.iou_spin.setValue(cfg.iou)
         self.model_path_edit.setText(cfg.model_path)
+        self._selected_filter = cfg.filter_name if cfg.filter_name in FILTER_OPTIONS else "none"
+        self.log_data_cb.setChecked(cfg.enable_logging)
         self.display_cb.setChecked(cfg.display)
         self.disable_accel_cb.setChecked(cfg.disable_accel)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
@@ -1358,6 +1424,7 @@ class ControlPanel(QtWidgets.QWidget):
 
         self._apply_language()
         self._apply_panel_style()
+        self._refresh_filter_selector_text()
         self._update_mode_dependent_fields()
 
     def _save_config(self):
@@ -1379,6 +1446,8 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.confidence = DEFAULT_CONFIDENCE
         cfg.iou = DEFAULT_IOU
         cfg.model_path = ""
+        cfg.filter_name = "none"
+        cfg.enable_logging = False
         cfg.enable_bubble_cursor = False
         cfg.enable_semantic_pointing = False
         cfg.enable_dynaspot = False
@@ -1407,8 +1476,13 @@ class ControlPanel(QtWidgets.QWidget):
         cmd += ["--capture-interval", str(cfg.capture_interval)]
         cmd += ["--confidence", str(cfg.confidence)]
         cmd += ["--iou", str(cfg.iou)]
+        cmd += ["--filter", cfg.filter_name]
         if cfg.model_path:
             cmd += ["--model-path", cfg.model_path]
+        if cfg.enable_logging:
+            mode_name = cfg.preset or self._mode_code() or "session"
+            log_path = make_default_log_path(self.project_root, mode_name)
+            cmd += ["--log-file", str(log_path), "--log-cursor-hz", "30"]
 
         if cfg.enable_semantic_pointing and cfg.display:
             cmd.append("--display")

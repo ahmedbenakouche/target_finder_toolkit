@@ -136,6 +136,8 @@ else:
             global _NS_CURSOR_HIDE_COUNT
             if _NSCursor is None:
                 return
+            if threading.current_thread() is not threading.main_thread():
+                return
             try:
                 _NSCursor.hide()
                 _NS_CURSOR_HIDE_COUNT += 1
@@ -145,6 +147,8 @@ else:
         def _restore_ns_cursor():
             global _NS_CURSOR_HIDE_COUNT
             if _NSCursor is None:
+                return
+            if threading.current_thread() is not threading.main_thread():
                 return
             while _NS_CURSOR_HIDE_COUNT > 0:
                 try:
@@ -171,7 +175,8 @@ else:
             global _CURSOR_MONITOR_THREAD
             was_hidden = _CURSOR_HIDDEN
             _CURSOR_HIDDEN = True
-            _hide_ns_cursor()
+            if threading.current_thread() is threading.main_thread():
+                _hide_ns_cursor()
             _hide_cursor_if_visible()
             if was_hidden and _CURSOR_MONITOR_THREAD is not None and _CURSOR_MONITOR_THREAD.is_alive():
                 return
@@ -197,7 +202,8 @@ else:
             display_id = _app_services.CGMainDisplayID()
             if not _app_services.CGCursorIsVisible():
                 _app_services.CGDisplayShowCursor(display_id)
-            _restore_ns_cursor()
+            if threading.current_thread() is threading.main_thread():
+                _restore_ns_cursor()
             _CURSOR_HIDDEN = False
     except Exception:
         def hide_cursor_everywhere():

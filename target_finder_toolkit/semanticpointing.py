@@ -30,6 +30,8 @@ from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
+from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
+from target_finder_toolkit.logging_utils import SessionLogger
 
 
 
@@ -241,11 +243,13 @@ class SemanticPointing(QtWidgets.QWidget):
     - The Qt timer is set to 10 ms for smooth cursor rendering;
       this does not increase the detector’s inference frequency.
     """
-    def __init__(self, detector: TargetFinder, display = False, disable_accel = False):
+    def __init__(self, detector: TargetFinder, display = False, disable_accel = False, cursor_filter=None, logger=None):
         super().__init__()
         self._is_macos = sys.platform == "darwin"
         self.display = display
         self.disable_accel = disable_accel
+        self.cursor_filter = cursor_filter
+        self.logger = logger
         self.detector = detector
         detector.overlay_window = self
         if self._is_macos and self.display:
@@ -311,7 +315,12 @@ class SemanticPointing(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
 
-        real = QtCore.QPointF(QtGui.QCursor.pos())
+        raw_real = QtCore.QPointF(QtGui.QCursor.pos())
+        raw_x, raw_y = raw_real.x(), raw_real.y()
+        filt_x, filt_y = raw_x, raw_y
+        if self.cursor_filter is not None and not self._simulating_click:
+            filt_x, filt_y = self.cursor_filter.filter(raw_x, raw_y)
+        real = QtCore.QPointF(filt_x, filt_y)
 
         # If the real cursor is stuck at an edge
         if (sys.platform != "darwin"
@@ -366,6 +375,18 @@ class SemanticPointing(QtWidgets.QWidget):
             QtGui.QCursor.setPos(sync_point)
             real = QtCore.QPointF(sync_point)
         self.prev_real = real
+        if self.logger is not None:
+            self.logger.log_cursor_sample(
+                raw_x=raw_x,
+                raw_y=raw_y,
+                filtered_x=filt_x,
+                filtered_y=filt_y,
+                technique="semantic",
+                filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
+                fake_x=round(self.fake_pos.x(), 3),
+                fake_y=round(self.fake_pos.y(), 3),
+                scale=round(float(s), 4),
+            )
 
         # If display flag is set highlight the target widget and its semantic area
         if self.display:
@@ -514,6 +535,9 @@ class SemanticPointing(QtWidgets.QWidget):
         restore_default_cursors()
         if self.disable_accel:
             restore_mouse_acceleration()
+        if self.logger is not None:
+            self.logger.log_session_end(reason="quit")
+            self.logger.close()
         self.close()
         app = QtWidgets.QApplication.instance()
         if app is not None:
@@ -560,6 +584,13 @@ class SemanticPointing(QtWidgets.QWidget):
 
         def on_click(x, y, button, pressed):
             if button == button.left and self._is_macos and pressed:
+                if self.logger is not None:
+                    self.logger.log_click(
+                        technique="semantic",
+                        raw=[x, y],
+                        effective=[round(self.fake_pos.x(), 3), round(self.fake_pos.y(), 3)],
+                        redirected=False,
+                    )
                 QtCore.QMetaObject.invokeMethod(self, "_rehide_cursor", QtCore.Qt.ConnectionType.QueuedConnection)
                 return
             if pressed and button == button.left:
@@ -596,6 +627,13 @@ class SemanticPointing(QtWidgets.QWidget):
                     self._set_overlay_clickthrough(False)
                 self._simulating_click = False # deactivate the flag and resynchronize
                 self.prev_real = QtCore.QPointF(QtGui.QCursor.pos())
+                if self.logger is not None:
+                    self.logger.log_click(
+                        technique="semantic",
+                        raw=[round(self.prev_real.x(), 3), round(self.prev_real.y(), 3)],
+                        effective=[round(self.fake_pos.x(), 3), round(self.fake_pos.y(), 3)],
+                        redirected=True,
+                    )
                 if self._is_macos:
                     self._rehide_cursor()
                     self.raise_()
@@ -603,7 +641,7 @@ class SemanticPointing(QtWidgets.QWidget):
                         self.control_panel.raise_()
                 self._start_mouse_listener() # restart the listener
 
-def semantic_pointing(detector: TargetFinder, display = False, disable_accel=False):
+def semantic_pointing(detector: TargetFinder, display = False, disable_accel=False, cursor_filter=None, logger=None):
     """Launch the Semantic Pointing overlay with a given detector.
 
     The overlay draws a **fake cursor** whose speed dynamically changes
@@ -628,7 +666,7 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
     hide_cursor_everywhere()
     if disable_accel:
         disable_mouse_acceleration()
-    ov = SemanticPointing(detector, display, disable_accel)
+    ov = SemanticPointing(detector, display, disable_accel, cursor_filter=cursor_filter, logger=logger)
     ov.show()
 
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
@@ -637,6 +675,9 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
     restore_default_cursors()
     if disable_accel:
         restore_mouse_acceleration()
+    if logger is not None:
+        logger.log_session_end(reason="app_exit")
+        logger.close()
     sys.exit(exit_code)
 
 
@@ -676,6 +717,9 @@ def main():
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     parser.add_argument('--disable-accel', action='store_true', help="Disable system mouse acceleration")
     parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
+    parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
+    parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -683,7 +727,22 @@ def main():
         args.model_path = os.path.join(here, "best.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    semantic_pointing(det, args.display, args.disable_accel)
+    cursor_filter = PointFilter2D(args.filter)
+    logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
+    if logger is not None:
+        logger.log_session_start(
+            technique="semantic",
+            filter_name=args.filter,
+            model_path=args.model_path,
+            change_thresh=args.change_thresh,
+            capture_interval=args.capture_interval,
+            confidence=args.confidence,
+            iou=args.iou,
+            display=args.display,
+            disable_accel=args.disable_accel,
+        )
+        det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
+    semantic_pointing(det, args.display, args.disable_accel, cursor_filter=cursor_filter, logger=logger)
 
 if __name__ == "__main__":
     main()
