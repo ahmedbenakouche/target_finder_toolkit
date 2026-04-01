@@ -24,6 +24,11 @@ class LowPassFilter:
         self._value = self.alpha * float(value) + (1.0 - self.alpha) * self._value
         return self._value
 
+    def reset(self, value: float) -> float:
+        self._initialized = True
+        self._value = float(value)
+        return self._value
+
     @property
     def value(self) -> float:
         return self._value
@@ -64,6 +69,13 @@ class OneEuroFilter1D:
         cutoff = self.min_cutoff + self.beta * abs(edx)
         return self._x.filter(float(value), self._alpha(cutoff))
 
+    def reset(self, value: float, timestamp: float | None = None) -> float:
+        now = time.monotonic() if timestamp is None else float(timestamp)
+        self._last_time = now
+        self._x.reset(float(value))
+        self._dx.reset(0.0)
+        return float(value)
+
 
 class PointFilter2D:
     def __init__(
@@ -97,3 +109,8 @@ class PointFilter2D:
         if not self.enabled:
             return float(x), float(y)
         return self._fx.filter(x, timestamp), self._fy.filter(y, timestamp)
+
+    def reset(self, x: float, y: float, timestamp: float | None = None) -> tuple[float, float]:
+        if not self.enabled:
+            return float(x), float(y)
+        return self._fx.reset(x, timestamp), self._fy.reset(y, timestamp)

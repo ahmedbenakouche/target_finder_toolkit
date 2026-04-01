@@ -331,15 +331,20 @@ class SemanticPointing(QtWidgets.QWidget):
             )
         )
 
-        # If the real cursor is stuck at an edge, keep the original correction path only
-        # for the unfiltered case. With One Euro on absolute positions, forcing the real
-        # cursor back to fake_pos creates a feedback loop that looks like boundary bounce.
-        if edge_hit and self.cursor_filter is None:
-            QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y()))
+        # Keep the original Windows/Linux edge-reset behavior so the real cursor
+        # does not get trapped at the physical screen border. When a filter is
+        # enabled, reset its state to the fake cursor position as well to avoid
+        # a feedback loop on the next frame.
+        if edge_hit:
+            reset_x = float(self.fake_pos.x())
+            reset_y = float(self.fake_pos.y())
+            QtGui.QCursor.setPos(int(reset_x), int(reset_y))
             raw_real = QtCore.QPointF(QtGui.QCursor.pos())
             raw_x, raw_y = raw_real.x(), raw_real.y()
             real = QtCore.QPointF(raw_real)
             self.prev_real = raw_real
+            if self.cursor_filter is not None:
+                self.cursor_filter.reset(reset_x, reset_y)
 
         # update delta
         # during click simulation the real cursor is at a different position implying a movement of fake cursor
