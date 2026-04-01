@@ -61,8 +61,6 @@ class BubbleCursor(QtWidgets.QWidget):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
-        if sys.platform == "darwin":
-            self.detector.hide_overlay_during_capture = False
         self.cursor_filter = cursor_filter
         self.logger = logger
         self._last_target = None  # to store the active target
@@ -429,9 +427,13 @@ def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):
         None: Blocks until the Qt application is closed.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    hide_cursor_everywhere()
     ov = BubbleCursor(detector, cursor_filter=cursor_filter, logger=logger)
     ov.show()
+    if sys.platform == "darwin":
+        QtCore.QTimer.singleShot(0, hide_cursor_everywhere)
+        QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
+    else:
+        hide_cursor_everywhere()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     exit_code = app.exec()
     restore_default_cursors()

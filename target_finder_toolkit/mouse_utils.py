@@ -138,6 +138,8 @@ else:
                 return
             if threading.current_thread() is not threading.main_thread():
                 return
+            if QtWidgets.QApplication.instance() is None:
+                return
             try:
                 _NSCursor.hide()
                 _NS_CURSOR_HIDE_COUNT += 1
@@ -149,6 +151,8 @@ else:
             if _NSCursor is None:
                 return
             if threading.current_thread() is not threading.main_thread():
+                return
+            if QtWidgets.QApplication.instance() is None:
                 return
             while _NS_CURSOR_HIDE_COUNT > 0:
                 try:

@@ -268,6 +268,7 @@ class SemanticPointing(QtWidgets.QWidget):
         init = QtCore.QPointF(QtGui.QCursor.pos())
         self.prev_real = init
         self.fake_pos = QtCore.QPointF(init)
+        self.filtered_input_pos = QtCore.QPointF(init)
         self.s = 2  # semantic index reflecting desired speed
 
         # Full-screen geometry (Qt DPI-aware)
@@ -309,8 +310,9 @@ class SemanticPointing(QtWidgets.QWidget):
   
     # === Paint ===
     def paintEvent(self, event):
-        if not self.enabled or not self.detector.get_detections():
+        if not self.enabled:
             return
+        detections = self.detector.get_detections()
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -318,31 +320,38 @@ class SemanticPointing(QtWidgets.QWidget):
         raw_real = QtCore.QPointF(QtGui.QCursor.pos())
         raw_x, raw_y = raw_real.x(), raw_real.y()
         filt_x, filt_y = raw_x, raw_y
-        if self.cursor_filter is not None and not self._simulating_click:
-            filt_x, filt_y = self.cursor_filter.filter(raw_x, raw_y)
-        real = QtCore.QPointF(filt_x, filt_y)
+        real = QtCore.QPointF(raw_real)
 
         # If the real cursor is stuck at an edge
         if (sys.platform != "darwin"
-                and (real.x() <= 0 or real.x() >= self.geom.width() - 1
-                or real.y() <= 0 or real.y() >= self.geom.height() - 1)):
+                and (raw_real.x() <= 0 or raw_real.x() >= self.geom.width() - 1
+                or raw_real.y() <= 0 or raw_real.y() >= self.geom.height() - 1)):
             QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y())) 
-            real = QtCore.QPointF(QtGui.QCursor.pos())
-            self.prev_real = real
+            raw_real = QtCore.QPointF(QtGui.QCursor.pos())
+            raw_x, raw_y = raw_real.x(), raw_real.y()
+            real = QtCore.QPointF(raw_real)
+            self.prev_real = raw_real
+            self.filtered_input_pos = QtCore.QPointF(raw_real)
 
         # update delta
         # during click simulation the real cursor is at a different position implying a movement of fake cursor
         # that should be ignored
         if not self._simulating_click:
-            dx = real.x() - self.prev_real.x()
-            dy = real.y() - self.prev_real.y()
-            self.prev_real = real
+            raw_dx = raw_real.x() - self.prev_real.x()
+            raw_dy = raw_real.y() - self.prev_real.y()
+            self.prev_real = raw_real
+            dx, dy = raw_dx, raw_dy
+            if self.cursor_filter is not None and not self._is_macos:
+                dx, dy = self.cursor_filter.filter(raw_dx, raw_dy)
+                self.filtered_input_pos.setX(self.filtered_input_pos.x() + dx)
+                self.filtered_input_pos.setY(self.filtered_input_pos.y() + dy)
+                filt_x, filt_y = self.filtered_input_pos.x(), self.filtered_input_pos.y()
         else:
             dx = dy = 0
 
         # Sum bell-shaped weights for all detected widgets
         total_bell = 0.0
-        for (x, y, w, h, score, cls_id) in self.detector.get_detections():
+        for (x, y, w, h, score, cls_id) in detections:
             cx = x + w / 2
             cy = y + h / 2
             ux = abs(self.fake_pos.x() - cx) / w
@@ -375,6 +384,8 @@ class SemanticPointing(QtWidgets.QWidget):
             QtGui.QCursor.setPos(sync_point)
             real = QtCore.QPointF(sync_point)
         self.prev_real = real
+        if self.cursor_filter is None or self._is_macos:
+            self.filtered_input_pos = QtCore.QPointF(real)
         if self.logger is not None:
             self.logger.log_cursor_sample(
                 raw_x=raw_x,
@@ -390,7 +401,7 @@ class SemanticPointing(QtWidgets.QWidget):
 
         # If display flag is set highlight the target widget and its semantic area
         if self.display:
-            for (x, y, w, h, score, cls_id) in self.detector.get_detections():
+            for (x, y, w, h, score, cls_id) in detections:
                 rect = QtCore.QRectF(x, y, w, h)
                 if rect.contains(self.fake_pos):
                     cx = x + w / 2
@@ -542,6 +553,32 @@ class SemanticPointing(QtWidgets.QWidget):
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.quit()
+
+    def closeEvent(self, event):
+        self.enabled = False
+        self.detector.stop()
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
+        if self._keyboard_listener is not None:
+            try:
+                self._keyboard_listener.stop()
+            except Exception:
+                pass
+            self._keyboard_listener = None
+        if hasattr(self, "_timer") and self._timer is not None:
+            self._timer.stop()
+        if self._cursor_refresh_timer is not None:
+            self._cursor_refresh_timer.stop()
+        if hasattr(self, "control_panel") and self.control_panel:
+            self.control_panel.close()
+        restore_default_cursors()
+        if self.disable_accel:
+            restore_mouse_acceleration()
+        super().closeEvent(event)
 
     def _start_keyboard_listener(self):
         def on_press(key):
@@ -727,7 +764,7 @@ def main():
         args.model_path = os.path.join(here, "best.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    cursor_filter = PointFilter2D(args.filter)
+    cursor_filter = PointFilter2D(args.filter) if args.filter != "none" else None
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
         logger.log_session_start(
