@@ -268,7 +268,6 @@ class SemanticPointing(QtWidgets.QWidget):
         init = QtCore.QPointF(QtGui.QCursor.pos())
         self.prev_real = init
         self.fake_pos = QtCore.QPointF(init)
-        self.filtered_input_pos = QtCore.QPointF(init)
         self.s = 2  # semantic index reflecting desired speed
 
         # Full-screen geometry (Qt DPI-aware)
@@ -341,7 +340,6 @@ class SemanticPointing(QtWidgets.QWidget):
             raw_x, raw_y = raw_real.x(), raw_real.y()
             real = QtCore.QPointF(raw_real)
             self.prev_real = raw_real
-            self.filtered_input_pos = QtCore.QPointF(raw_real)
 
         # update delta
         # during click simulation the real cursor is at a different position implying a movement of fake cursor
@@ -351,14 +349,6 @@ class SemanticPointing(QtWidgets.QWidget):
             raw_dy = raw_real.y() - self.prev_real.y()
             self.prev_real = raw_real
             dx, dy = raw_dx, raw_dy
-            if self.cursor_filter is not None and not self._is_macos:
-                filt_x, filt_y = self.cursor_filter.filter(raw_x, raw_y)
-                if edge_hit:
-                    dx = dy = 0
-                else:
-                    dx = filt_x - self.filtered_input_pos.x()
-                    dy = filt_y - self.filtered_input_pos.y()
-                self.filtered_input_pos = QtCore.QPointF(filt_x, filt_y)
         else:
             dx = dy = 0
 
@@ -387,6 +377,12 @@ class SemanticPointing(QtWidgets.QWidget):
         new_x = self.fake_pos.x() + dx / s
         new_y = self.fake_pos.y() + dy / s
 
+        if self.cursor_filter is not None and not self._is_macos:
+            filt_x, filt_y = self.cursor_filter.filter(new_x, new_y)
+            new_x, new_y = filt_x, filt_y
+        else:
+            filt_x, filt_y = new_x, new_y
+
         # Clamp within screen bounds
         clamped_x = max(0, min(new_x, self.geom.width() - 1))
         clamped_y = max(0, min(new_y, self.geom.height() - 1))
@@ -397,8 +393,6 @@ class SemanticPointing(QtWidgets.QWidget):
             QtGui.QCursor.setPos(sync_point)
             real = QtCore.QPointF(sync_point)
         self.prev_real = real
-        if self.cursor_filter is None or self._is_macos:
-            self.filtered_input_pos = QtCore.QPointF(real)
         if self.logger is not None:
             self.logger.log_cursor_sample(
                 raw_x=raw_x,
