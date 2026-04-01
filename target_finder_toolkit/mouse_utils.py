@@ -25,7 +25,6 @@ Notes
 # -----------------------------
 
 import sys
-import threading
 from PyQt6 import QtWidgets, QtGui, QtCore
 
 if sys.platform.startswith("win"):
@@ -111,6 +110,7 @@ elif sys.platform.startswith("linux"):
 else:
     # macOS implementation using ApplicationServices
     import ctypes
+    import threading
     _CURSOR_HIDDEN = False
     _CURSOR_MONITOR_STOP = None
     _CURSOR_MONITOR_THREAD = None

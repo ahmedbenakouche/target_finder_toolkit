@@ -266,11 +266,50 @@ class BubbleCursor(QtWidgets.QWidget):
     # === Quit ===
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
+        self.bubble_enabled = False
+        self.detector.stop()
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
+        if self._keyboard_listener is not None:
+            try:
+                self._keyboard_listener.stop()
+            except Exception:
+                pass
+            self._keyboard_listener = None
+        if self._cursor_refresh_timer is not None:
+            self._cursor_refresh_timer.stop()
         restore_default_cursors()
         if self.logger is not None:
             self.logger.log_session_end(reason="quit")
             self.logger.close()
-        os._exit(0)
+        self.close()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def closeEvent(self, event):
+        self.bubble_enabled = False
+        self.detector.stop()
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
+        if self._keyboard_listener is not None:
+            try:
+                self._keyboard_listener.stop()
+            except Exception:
+                pass
+            self._keyboard_listener = None
+        if self._cursor_refresh_timer is not None:
+            self._cursor_refresh_timer.stop()
+        restore_default_cursors()
+        super().closeEvent(event)
 
     def _start_keyboard_listener(self):
         def on_press(key):
