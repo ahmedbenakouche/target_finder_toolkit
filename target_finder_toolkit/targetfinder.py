@@ -472,7 +472,6 @@ class OverlayWindow(QtWidgets.QWidget):
         if not self._is_macos:
             flags |= QtCore.Qt.WindowType.Tool
         if sys.platform.startswith("linux"):
-            # Avoid window manager interference on some X11 setups
             flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
 
         self.setWindowFlags(flags)
