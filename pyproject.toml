@@ -20,6 +20,12 @@ dependencies = [
   "pynput",
 ]
 
+[project.optional-dependencies]
+macos = [
+    "pyobjc-framework-Quartz>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+]
+
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
