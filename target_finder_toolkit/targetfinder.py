@@ -336,13 +336,26 @@ class TargetFinder:
             self._next_id += 1
 
         # Optionally save annotated image (PNG)
+        # Colorblind-safe palette (Wong 2011) — BGR order for OpenCV
+        _ANNOTATE_PALETTE = {
+            0: (0, 159, 230),    # Button → Orange
+            1: (233, 180, 86),   # ToggleButton → Sky Blue
+            2: (115, 158, 0),    # Hyperlink → Bluish Green
+            3: (66, 228, 240),   # Text → Yellow
+            4: (178, 114, 0),    # TextInput → Blue
+            5: (0, 94, 213),     # Slider → Vermillion
+        }
         if save_annotated:
             annotated = img_bgr.copy()
             for d in detections:
                 x, y, w, h = int(d["x"]), int(d["y"]), int(d["width"]), int(d["height"])
-                cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                color = _ANNOTATE_PALETTE.get(d["class_id"], (0, 255, 0))
+                cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 2)
                 label = f"{d['class_name']}:{d['score']:.2f}"
-                cv2.putText(annotated, label, (x, max(0, y - 5)),
+                # 라벨 배경 (가독성)
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(annotated, (x, max(0, y - th - 6)), (x + tw + 4, max(0, y - 1)), color, -1)
+                cv2.putText(annotated, label, (x + 2, max(0, y - 4)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
             out_path = image_path.rsplit(".", 1)[0] + "_annotated.png"
