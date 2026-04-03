@@ -1,37 +1,12 @@
-import math
 import time
+
+from OneEuroFilter import OneEuroFilter
 
 
 FILTER_OPTIONS = {
     "none": "None",
     "one_euro": "One Euro",
 }
-
-
-class LowPassFilter:
-    def __init__(self, alpha: float):
-        self.alpha = float(alpha)
-        self._initialized = False
-        self._value = 0.0
-
-    def filter(self, value: float, alpha: float | None = None) -> float:
-        if alpha is not None:
-            self.alpha = float(alpha)
-        if not self._initialized:
-            self._initialized = True
-            self._value = float(value)
-            return self._value
-        self._value = self.alpha * float(value) + (1.0 - self.alpha) * self._value
-        return self._value
-
-    def reset(self, value: float) -> float:
-        self._initialized = True
-        self._value = float(value)
-        return self._value
-
-    @property
-    def value(self) -> float:
-        return self._value
 
 
 class OneEuroFilter1D:
@@ -43,38 +18,28 @@ class OneEuroFilter1D:
         beta: float = 0.02,
         d_cutoff: float = 1.0,
     ):
-        self.freq = float(freq)
-        self.min_cutoff = float(min_cutoff)
-        self.beta = float(beta)
-        self.d_cutoff = float(d_cutoff)
-        self._x = LowPassFilter(1.0)
-        self._dx = LowPassFilter(1.0)
-        self._last_time = None
-
-    def _alpha(self, cutoff: float) -> float:
-        te = 1.0 / max(self.freq, 1e-6)
-        tau = 1.0 / (2.0 * math.pi * cutoff)
-        return 1.0 / (1.0 + tau / te)
+        self._filter = OneEuroFilter(
+            freq=float(freq),
+            mincutoff=float(min_cutoff),
+            beta=float(beta),
+            dcutoff=float(d_cutoff),
+        )
+        self._last_value = None
 
     def filter(self, value: float, timestamp: float | None = None) -> float:
         now = time.monotonic() if timestamp is None else float(timestamp)
-        if self._last_time is not None:
-            dt = max(now - self._last_time, 1e-6)
-            self.freq = 1.0 / dt
-        self._last_time = now
-
-        prev_x = self._x.value if self._x._initialized else float(value)
-        dx = (float(value) - prev_x) * self.freq
-        edx = self._dx.filter(dx, self._alpha(self.d_cutoff))
-        cutoff = self.min_cutoff + self.beta * abs(edx)
-        return self._x.filter(float(value), self._alpha(cutoff))
+        filtered = self._filter.filter(float(value), now)
+        self._last_value = float(filtered)
+        return self._last_value
 
     def reset(self, value: float, timestamp: float | None = None) -> float:
         now = time.monotonic() if timestamp is None else float(timestamp)
-        self._last_time = now
-        self._x.reset(float(value))
-        self._dx.reset(0.0)
-        return float(value)
+        self._filter.reset(float(value))
+        self._last_value = float(value)
+        # Re-prime the official filter at the current timestamp so the next
+        # sample does not reuse stale time or derivative state.
+        self._filter.filter(float(value), now)
+        return self._last_value
 
 
 class PointFilter2D:
