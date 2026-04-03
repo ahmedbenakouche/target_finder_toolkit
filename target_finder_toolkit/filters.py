@@ -18,11 +18,15 @@ class OneEuroFilter1D:
         beta: float = 0.02,
         d_cutoff: float = 1.0,
     ):
+        self._freq = float(freq)
+        self._min_cutoff = float(min_cutoff)
+        self._beta = float(beta)
+        self._d_cutoff = float(d_cutoff)
         self._filter = OneEuroFilter(
-            freq=float(freq),
-            mincutoff=float(min_cutoff),
-            beta=float(beta),
-            dcutoff=float(d_cutoff),
+            freq=self._freq,
+            mincutoff=self._min_cutoff,
+            beta=self._beta,
+            dcutoff=self._d_cutoff,
         )
         self._last_value = None
 
@@ -34,7 +38,12 @@ class OneEuroFilter1D:
 
     def reset(self, value: float, timestamp: float | None = None) -> float:
         now = time.monotonic() if timestamp is None else float(timestamp)
-        self._filter.reset(float(value))
+        self._filter = OneEuroFilter(
+            freq=self._freq,
+            mincutoff=self._min_cutoff,
+            beta=self._beta,
+            dcutoff=self._d_cutoff,
+        )
         self._last_value = float(value)
         # Re-prime the official filter at the current timestamp so the next
         # sample does not reuse stale time or derivative state.
