@@ -5,3 +5,4 @@ ultralytics
 PyQt6
 pyautogui
 pynput
+OneEuroFilter

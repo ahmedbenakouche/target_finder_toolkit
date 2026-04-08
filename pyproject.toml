@@ -18,6 +18,7 @@ dependencies = [
   "PyQt6",
   "pyautogui",
   "pynput",
+  "OneEuroFilter",
 ]
 
 classifiers = [

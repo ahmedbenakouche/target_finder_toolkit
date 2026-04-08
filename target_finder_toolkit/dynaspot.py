@@ -48,7 +48,21 @@ class DynaSpot(QtWidgets.QWidget):
     SHRINK_SMOOTHING = 0.18
     TEXT_MARGIN = 20
 
-    def __init__(self, detector: TargetFinder, cursor_filter=None, logger=None):
+    def __init__(
+        self,
+        detector: TargetFinder,
+        cursor_filter=None,
+        logger=None,
+        *,
+        min_speed: float | None = None,
+        max_speed: float | None = None,
+        min_radius: float | None = None,
+        max_radius: float | None = None,
+        lag: float | None = None,
+        reduce_time: float | None = None,
+        growth_smoothing: float | None = None,
+        shrink_smoothing: float | None = None,
+    ):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
@@ -56,6 +70,14 @@ class DynaSpot(QtWidgets.QWidget):
             self.detector.hide_overlay_during_capture = False
         self.cursor_filter = cursor_filter
         self.logger = logger
+        self.min_speed = float(self.MIN_SPEED if min_speed is None else min_speed)
+        self.max_speed = float(self.MAX_SPEED if max_speed is None else max_speed)
+        self.min_radius = float(self.MIN_RADIUS if min_radius is None else min_radius)
+        self.max_radius = float(self.MAX_RADIUS if max_radius is None else max_radius)
+        self.lag = float(self.LAG if lag is None else lag)
+        self.reduce_time = float(self.REDUCE_TIME if reduce_time is None else reduce_time)
+        self.growth_smoothing = float(self.GROWTH_SMOOTHING if growth_smoothing is None else growth_smoothing)
+        self.shrink_smoothing = float(self.SHRINK_SMOOTHING if shrink_smoothing is None else shrink_smoothing)
 
         self._mouse_listener = None
         self._keyboard_listener = None
@@ -65,7 +87,8 @@ class DynaSpot(QtWidgets.QWidget):
         self.enabled = True
         self._simulating_click = False
         self._last_target = None
-        self._spot_radius = self.MIN_RADIUS
+        self._last_target_info = None
+        self._spot_radius = self.min_radius
         self._last_cursor_pos = QtCore.QPointF(QtGui.QCursor.pos())
         now = time.monotonic()
         self._last_sample_at = now
@@ -130,22 +153,22 @@ class DynaSpot(QtWidgets.QWidget):
         if moved:
             self._last_motion_at = now
             self._shrink_start_at = None
-            if speed <= self.MIN_SPEED:
-                target_radius = self.MIN_RADIUS
+            if speed <= self.min_speed:
+                target_radius = self.min_radius
             else:
-                speed_ratio = min(1.0, (speed - self.MIN_SPEED) / max(1.0, self.MAX_SPEED - self.MIN_SPEED))
+                speed_ratio = min(1.0, (speed - self.min_speed) / max(1.0, self.max_speed - self.min_speed))
                 eased_ratio = 1.0 - (1.0 - speed_ratio) ** 2
-                target_radius = self.MIN_RADIUS + eased_ratio * (self.MAX_RADIUS - self.MIN_RADIUS)
-            self._spot_radius += (target_radius - self._spot_radius) * self.GROWTH_SMOOTHING
+                target_radius = self.min_radius + eased_ratio * (self.max_radius - self.min_radius)
+            self._spot_radius += (target_radius - self._spot_radius) * self.growth_smoothing
         else:
             idle_for = now - self._last_motion_at
-            if idle_for >= self.LAG:
+            if idle_for >= self.lag:
                 if self._shrink_start_at is None:
                     self._shrink_start_at = now
                     self._shrink_start_radius = self._spot_radius
-                progress = min(1.0, (now - self._shrink_start_at) / self.REDUCE_TIME)
-                target_radius = self.MIN_RADIUS + (self._shrink_start_radius - self.MIN_RADIUS) * (1.0 - progress)
-                self._spot_radius += (target_radius - self._spot_radius) * self.SHRINK_SMOOTHING
+                progress = min(1.0, (now - self._shrink_start_at) / max(self.reduce_time, 1e-6))
+                target_radius = self.min_radius + (self._shrink_start_radius - self.min_radius) * (1.0 - progress)
+                self._spot_radius += (target_radius - self._spot_radius) * self.shrink_smoothing
 
         self._last_sample_at = now
         self._last_cursor_pos = QtCore.QPointF(cursor_pos)
@@ -202,6 +225,7 @@ class DynaSpot(QtWidgets.QWidget):
 
         if target is None:
             self._last_target = None
+            self._last_target_info = None
         else:
             tx, ty, w, h, _cls_id = target
             self._last_target = (
@@ -210,8 +234,11 @@ class DynaSpot(QtWidgets.QWidget):
                 w / self.detector.sx,
                 h / self.detector.sy,
             )
-        if self._spot_radius > self.MIN_RADIUS + 0.5:
-            radius_ratio = min(1.0, (self._spot_radius - self.MIN_RADIUS) / max(1.0, self.MAX_RADIUS - self.MIN_RADIUS))
+            self._last_target_info = self.detector.find_detection_by_geometry(
+                tx, ty, w, h, class_id=_cls_id
+            )
+        if self._spot_radius > self.min_radius + 0.5:
+            radius_ratio = min(1.0, (self._spot_radius - self.min_radius) / max(1.0, self.max_radius - self.min_radius))
             ring_alpha = int(135 + 75 * radius_ratio)
             fill_alpha = int(10 + 26 * radius_ratio)
             pen = QtGui.QPen(QtGui.QColor(70, 255, 120, ring_alpha), 3)
@@ -240,7 +267,7 @@ class DynaSpot(QtWidgets.QWidget):
         painter.end()
 
     def _draw_fake_cursor(self, painter, cx, cy):
-        active = self._spot_radius > self.MIN_RADIUS + 0.5
+        active = self._spot_radius > self.min_radius + 0.5
         pen = QtGui.QPen(
             QtGui.QColor(255, 255, 255, 240 if active else 220),
             2,
@@ -268,7 +295,7 @@ class DynaSpot(QtWidgets.QWidget):
             self.detector.stop()
             restore_default_cursors()
             self._last_target = None
-            self._spot_radius = self.MIN_RADIUS
+            self._spot_radius = self.min_radius
         self.update()
 
     @QtCore.pyqtSlot()
@@ -390,6 +417,7 @@ class DynaSpot(QtWidgets.QWidget):
                     raw=[orig_x, orig_y],
                     effective=[orig_x, orig_y],
                     redirected=False,
+                    target=self._last_target_info,
                 )
             return
 
@@ -408,15 +436,21 @@ class DynaSpot(QtWidgets.QWidget):
                     raw=[orig_x, orig_y],
                     effective=[round(tx, 3), round(ty, 3)],
                     redirected=True,
+                    target=self._last_target_info,
                 )
             self._rehide_cursor()
             self._start_mouse_listener()
 
 
-def dynaspot(detector: TargetFinder, cursor_filter=None, logger=None):
+def dynaspot(
+    detector: TargetFinder,
+    cursor_filter=None,
+    logger=None,
+    **dynaspot_kwargs,
+):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     hide_cursor_everywhere()
-    ov = DynaSpot(detector, cursor_filter=cursor_filter, logger=logger)
+    ov = DynaSpot(detector, cursor_filter=cursor_filter, logger=logger, **dynaspot_kwargs)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     exit_code = app.exec()
@@ -437,6 +471,14 @@ def main():
     parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
     parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
+    parser.add_argument('--min-speed', type=float, default=DynaSpot.MIN_SPEED, help="Minimum speed before the DynaSpot radius starts growing")
+    parser.add_argument('--max-speed', type=float, default=DynaSpot.MAX_SPEED, help="Speed at which the DynaSpot radius reaches its maximum")
+    parser.add_argument('--min-radius', type=float, default=DynaSpot.MIN_RADIUS, help="Minimum DynaSpot radius")
+    parser.add_argument('--max-radius', type=float, default=DynaSpot.MAX_RADIUS, help="Maximum DynaSpot radius")
+    parser.add_argument('--lag', type=float, default=DynaSpot.LAG, help="Delay before the radius begins shrinking after motion stops")
+    parser.add_argument('--reduce-time', type=float, default=DynaSpot.REDUCE_TIME, help="Time used to shrink the radius back toward its minimum")
+    parser.add_argument('--growth-smoothing', type=float, default=DynaSpot.GROWTH_SMOOTHING, help="Smoothing factor applied while the spot grows")
+    parser.add_argument('--shrink-smoothing', type=float, default=DynaSpot.SHRINK_SMOOTHING, help="Smoothing factor applied while the spot shrinks")
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -455,9 +497,29 @@ def main():
             capture_interval=args.capture_interval,
             confidence=args.confidence,
             iou=args.iou,
+            min_speed=args.min_speed,
+            max_speed=args.max_speed,
+            min_radius=args.min_radius,
+            max_radius=args.max_radius,
+            lag=args.lag,
+            reduce_time=args.reduce_time,
+            growth_smoothing=args.growth_smoothing,
+            shrink_smoothing=args.shrink_smoothing,
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
-    dynaspot(det, cursor_filter=cursor_filter, logger=logger)
+    dynaspot(
+        det,
+        cursor_filter=cursor_filter,
+        logger=logger,
+        min_speed=args.min_speed,
+        max_speed=args.max_speed,
+        min_radius=args.min_radius,
+        max_radius=args.max_radius,
+        lag=args.lag,
+        reduce_time=args.reduce_time,
+        growth_smoothing=args.growth_smoothing,
+        shrink_smoothing=args.shrink_smoothing,
+    )
 
 
 if __name__ == "__main__":

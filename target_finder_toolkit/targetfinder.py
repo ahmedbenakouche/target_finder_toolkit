@@ -163,6 +163,7 @@ class TargetFinder:
 
         # Tracking state to keep stable IDs between frames
         self._prev_det_dicts = []   # previous frame detection dicts (with "id")
+        self._latest_det_dicts = [] # latest frame detection dicts (with "id")
         self._next_id = 1           # next stable ID to assign
 
         # Callback configuration
@@ -234,6 +235,85 @@ class TargetFinder:
             ``[(x, y, w, h, score, class_id) ...]``.
         """
         return self.detections
+
+    def get_detection_dicts(self):
+        """Return current detections as dictionaries with stable IDs when available."""
+        return [dict(det) for det in self._latest_det_dicts]
+
+    @staticmethod
+    def _compact_detection(det):
+        if det is None:
+            return None
+        return {
+            "id": det.get("id"),
+            "x": det.get("x"),
+            "y": det.get("y"),
+            "w": det.get("width"),
+            "h": det.get("height"),
+            "score": round(float(det.get("score", 0.0)), 4),
+            "class": det.get("class_name"),
+            "class_id": det.get("class_id"),
+        }
+
+    def find_detection_for_point(self, x, y, *, include_text=True, fallback_nearest=False):
+        """Return the best matching detection for a logical-screen point."""
+        candidates = []
+        for det in self._latest_det_dicts:
+            if not include_text and det.get("class_id") == 3:
+                continue
+            dx = float(det["x"])
+            dy = float(det["y"])
+            dw = float(det["width"])
+            dh = float(det["height"])
+            if dx <= x <= dx + dw and dy <= y <= dy + dh:
+                area = dw * dh
+                candidates.append((area, -float(det.get("score", 0.0)), det))
+
+        if candidates:
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            return self._compact_detection(candidates[0][2])
+
+        if not fallback_nearest:
+            return None
+
+        nearest = []
+        for det in self._latest_det_dicts:
+            if not include_text and det.get("class_id") == 3:
+                continue
+            cx = float(det["x"]) + float(det["width"]) / 2.0
+            cy = float(det["y"]) + float(det["height"]) / 2.0
+            center_dist = (cx - x) ** 2 + (cy - y) ** 2
+            area = float(det["width"]) * float(det["height"])
+            nearest.append((center_dist, area, -float(det.get("score", 0.0)), det))
+
+        if not nearest:
+            return None
+
+        nearest.sort(key=lambda item: (item[0], item[1], item[2]))
+        return self._compact_detection(nearest[0][3])
+
+    def find_detection_by_geometry(self, cx, cy, w, h, *, class_id=None, tolerance=3.0):
+        """Match a detection by center/size in logical coordinates."""
+        matches = []
+        for det in self._latest_det_dicts:
+            if class_id is not None and det.get("class_id") != class_id:
+                continue
+            det_cx = float(det["x"]) + float(det["width"]) / 2.0
+            det_cy = float(det["y"]) + float(det["height"]) / 2.0
+            if (
+                abs(det_cx - cx) <= tolerance
+                and abs(det_cy - cy) <= tolerance
+                and abs(float(det["width"]) - w) <= tolerance * 2.0
+                and abs(float(det["height"]) - h) <= tolerance * 2.0
+            ):
+                area = float(det["width"]) * float(det["height"])
+                matches.append((area, -float(det.get("score", 0.0)), det))
+
+        if not matches:
+            return None
+
+        matches.sort(key=lambda item: (item[0], item[1]))
+        return self._compact_detection(matches[0][2])
 
     def _build_dicts(self, boxes_xyxy, scores, class_ids, scale_x, scale_y):
         """Convert raw YOLO outputs to detection dicts.
@@ -417,6 +497,7 @@ class TargetFinder:
                 if self._on_change:
                     det_dicts = self._build_dicts(boxes, scores, class_ids, self.sx, self.sy)
                     added, removed = self._assign_ids_and_diff(self._prev_det_dicts, det_dicts)
+                    self._latest_det_dicts = [dict(d) for d in det_dicts]
                     frame_to_send = None
                     if self._with_frame:
                         frame_to_send = cv2.resize(full, (screen_geom.width(), screen_geom.height()), interpolation=cv2.INTER_AREA)
@@ -426,6 +507,12 @@ class TargetFinder:
                         pass
                     # Keep current detections for next-frame tracking
                     self._prev_det_dicts = det_dicts
+                else:
+                    det_dicts = self._build_dicts(boxes, scores, class_ids, self.sx, self.sy)
+                    for d in det_dicts:
+                        d["id"] = int(self._next_id)
+                        self._next_id += 1
+                    self._latest_det_dicts = det_dicts
 
 
             # Pause to limit loop frequency
@@ -449,6 +536,7 @@ class OverlayWindow(QtWidgets.QWidget):
         # Construct an always-on-top, click-through, transparent overlay.
         super().__init__()
         self.detector = detector
+        self._is_macos = sys.platform == "darwin"
         self._keyboard_listener = None
         self.cursor_filter = cursor_filter
         self.logger = logger
@@ -464,9 +552,10 @@ class OverlayWindow(QtWidgets.QWidget):
         flags = (
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
-            | QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.WindowTransparentForInput
         )
+        if not self._is_macos:
+            flags |= QtCore.Qt.WindowType.Tool
         if sys.platform.startswith("linux"):
             # Avoid window manager interference on some X11 setups
             flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint

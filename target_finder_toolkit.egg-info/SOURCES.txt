@@ -7,6 +7,8 @@ target_finder_toolkit/best.pt
 target_finder_toolkit/bubblecursor.py
 target_finder_toolkit/control_panel.py
 target_finder_toolkit/dynaspot.py
+target_finder_toolkit/filters.py
+target_finder_toolkit/logging_utils.py
 target_finder_toolkit/mouse_utils.py
 target_finder_toolkit/postprocess.py
 target_finder_toolkit/semanticpointing.py

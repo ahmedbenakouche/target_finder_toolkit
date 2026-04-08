@@ -68,6 +68,7 @@ class BubbleCursor(QtWidgets.QWidget):
         self.cursor_filter = cursor_filter
         self.logger = logger
         self._last_target = None  # to store the active target
+        self._last_target_info = None
         self._mouse_listener = None
         self._last_rehide_at = 0.0
         self.bubble_enabled = True
@@ -151,6 +152,7 @@ class BubbleCursor(QtWidgets.QWidget):
                     if ((x - text_margin) <= cx <= (x + w + text_margin) and
                             (y - text_margin) <= cy <= (y + h + text_margin)):
                         self._last_target = None
+                        self._last_target_info = None
                         self._draw_fake_cursor(painter, cx, cy)
                         painter.end()
                         return
@@ -171,6 +173,7 @@ class BubbleCursor(QtWidgets.QWidget):
         # Draw bubble only when not hovering over text
         if not distances:
             self._last_target = None
+            self._last_target_info = None
             self._draw_fake_cursor(painter,cx,cy)
             painter.end()
             return
@@ -180,11 +183,15 @@ class BubbleCursor(QtWidgets.QWidget):
 
         if nearest_cls_id == 3:
             self._last_target = None
+            self._last_target_info = None
             self._draw_fake_cursor(painter,cx,cy)
             painter.end()
             return
         self._last_target = (
         tx / self.detector.sx, ty / self.detector.sy, w / self.detector.sx, h / self.detector.sy)
+        self._last_target_info = self.detector.find_detection_by_geometry(
+            tx, ty, w, h, class_id=nearest_cls_id
+        )
 
         # Containment Distance (ConD1)
         x = tx - w / 2
@@ -392,6 +399,7 @@ class BubbleCursor(QtWidgets.QWidget):
                         raw=[orig_x, orig_y],
                         effective=[orig_x, orig_y],
                         redirected=False,
+                        target=self._last_target_info,
                     )
                 return
 
@@ -412,6 +420,7 @@ class BubbleCursor(QtWidgets.QWidget):
                         raw=[orig_x, orig_y],
                         effective=[round(tx, 3), round(ty, 3)],
                         redirected=True,
+                        target=self._last_target_info,
                     )
                 self._rehide_cursor()
                 self._start_mouse_listener() # restart the listener

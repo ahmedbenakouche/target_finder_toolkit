@@ -633,12 +633,19 @@ class SemanticPointing(QtWidgets.QWidget):
 
         def on_click(x, y, button, pressed):
             if button == button.left and self._is_macos and pressed:
+                click_target = self.detector.find_detection_for_point(
+                    float(self.fake_pos.x()),
+                    float(self.fake_pos.y()),
+                    include_text=False,
+                    fallback_nearest=True,
+                )
                 if self.logger is not None:
                     self.logger.log_click(
                         technique="semantic",
                         raw=[x, y],
                         effective=[round(self.fake_pos.x(), 3), round(self.fake_pos.y(), 3)],
                         redirected=False,
+                        target=click_target,
                     )
                 QtCore.QMetaObject.invokeMethod(self, "_rehide_cursor", QtCore.Qt.ConnectionType.QueuedConnection)
                 return
@@ -676,12 +683,19 @@ class SemanticPointing(QtWidgets.QWidget):
                     self._set_overlay_clickthrough(False)
                 self._simulating_click = False # deactivate the flag and resynchronize
                 self.prev_real = QtCore.QPointF(QtGui.QCursor.pos())
+                click_target = self.detector.find_detection_for_point(
+                    float(self.fake_pos.x()),
+                    float(self.fake_pos.y()),
+                    include_text=False,
+                    fallback_nearest=True,
+                )
                 if self.logger is not None:
                     self.logger.log_click(
                         technique="semantic",
                         raw=[round(self.prev_real.x(), 3), round(self.prev_real.y(), 3)],
                         effective=[round(self.fake_pos.x(), 3), round(self.fake_pos.y(), 3)],
                         redirected=True,
+                        target=click_target,
                     )
                 if self._is_macos:
                     self._rehide_cursor()

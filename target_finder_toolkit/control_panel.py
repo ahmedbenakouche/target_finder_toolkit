@@ -48,6 +48,14 @@ DEFAULT_CHANGE_THRESH = 100
 DEFAULT_CAPTURE_INTERVAL = 0.033
 DEFAULT_CONFIDENCE = 0.28
 DEFAULT_IOU = 0.3
+DEFAULT_DYNASPOT_MIN_SPEED = 120.0
+DEFAULT_DYNASPOT_MAX_SPEED = 1600.0
+DEFAULT_DYNASPOT_MIN_RADIUS = 0.5
+DEFAULT_DYNASPOT_MAX_RADIUS = 28.0
+DEFAULT_DYNASPOT_LAG = 0.08
+DEFAULT_DYNASPOT_REDUCE_TIME = 0.20
+DEFAULT_DYNASPOT_GROWTH_SMOOTHING = 0.35
+DEFAULT_DYNASPOT_SHRINK_SMOOTHING = 0.18
 
 UI_TEXTS = {
     "English": {
@@ -74,6 +82,23 @@ UI_TEXTS = {
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Semantic Pointing",
         "mode_dynaspot": "DynaSpot",
+        "dynaspot_params": "DynaSpot tuning",
+        "dynaspot_min_speed": "DynaSpot min speed",
+        "dynaspot_min_speed_desc": "Pointer speed threshold where the spot starts growing. Lower values make the spot expand earlier.",
+        "dynaspot_max_speed": "DynaSpot max speed",
+        "dynaspot_max_speed_desc": "Pointer speed where the spot reaches its maximum radius. Lower values make the spot reach full size sooner.",
+        "dynaspot_min_radius": "DynaSpot min radius",
+        "dynaspot_min_radius_desc": "Base radius used when the pointer moves slowly or stays still.",
+        "dynaspot_max_radius": "DynaSpot max radius",
+        "dynaspot_max_radius_desc": "Largest radius the dynamic activation circle can reach.",
+        "dynaspot_lag": "DynaSpot shrink lag",
+        "dynaspot_lag_desc": "Delay before the radius starts shrinking once the pointer stops moving.",
+        "dynaspot_reduce_time": "DynaSpot reduce time",
+        "dynaspot_reduce_time_desc": "Time scale for shrinking back toward the minimum radius.",
+        "dynaspot_growth_smoothing": "DynaSpot growth smoothing",
+        "dynaspot_growth_smoothing_desc": "Higher values make the spot grow faster toward its target size.",
+        "dynaspot_shrink_smoothing": "DynaSpot shrink smoothing",
+        "dynaspot_shrink_smoothing_desc": "Higher values make the spot shrink faster after the lag period.",
         "apply": "Start / Apply",
         "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
         "change_thresh_desc": "Higher = fewer refreshes for small screen changes. Lower = reacts sooner.",
@@ -145,6 +170,23 @@ UI_TEXTS = {
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Pointage sémantique",
         "mode_dynaspot": "DynaSpot",
+        "dynaspot_params": "Réglages DynaSpot",
+        "dynaspot_min_speed": "Vitesse min DynaSpot",
+        "dynaspot_min_speed_desc": "Seuil de vitesse à partir duquel le spot commence à grandir. Plus bas = expansion plus précoce.",
+        "dynaspot_max_speed": "Vitesse max DynaSpot",
+        "dynaspot_max_speed_desc": "Vitesse à laquelle le spot atteint son rayon maximal. Plus bas = taille maximale atteinte plus tôt.",
+        "dynaspot_min_radius": "Rayon min DynaSpot",
+        "dynaspot_min_radius_desc": "Rayon de base utilisé quand le pointeur bouge lentement ou reste immobile.",
+        "dynaspot_max_radius": "Rayon max DynaSpot",
+        "dynaspot_max_radius_desc": "Rayon maximal que la zone d’activation dynamique peut atteindre.",
+        "dynaspot_lag": "Délai de réduction DynaSpot",
+        "dynaspot_lag_desc": "Temps d’attente avant que le rayon commence à diminuer lorsque le pointeur s’arrête.",
+        "dynaspot_reduce_time": "Temps de réduction DynaSpot",
+        "dynaspot_reduce_time_desc": "Durée utilisée pour revenir progressivement vers le rayon minimal.",
+        "dynaspot_growth_smoothing": "Lissage croissance DynaSpot",
+        "dynaspot_growth_smoothing_desc": "Des valeurs plus élevées font croître le spot plus vite vers sa taille cible.",
+        "dynaspot_shrink_smoothing": "Lissage réduction DynaSpot",
+        "dynaspot_shrink_smoothing_desc": "Des valeurs plus élevées font diminuer le spot plus vite après le délai.",
         "apply": "Démarrer / Appliquer",
         "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
         "change_thresh_desc": "Plus haut = moins de rafraîchissements pour de petits changements. Plus bas = réaction plus rapide.",
@@ -211,6 +253,14 @@ class PanelConfig:
     enable_logging: bool = False
     display: bool = False
     disable_accel: bool = False
+    dynaspot_min_speed: float = DEFAULT_DYNASPOT_MIN_SPEED
+    dynaspot_max_speed: float = DEFAULT_DYNASPOT_MAX_SPEED
+    dynaspot_min_radius: float = DEFAULT_DYNASPOT_MIN_RADIUS
+    dynaspot_max_radius: float = DEFAULT_DYNASPOT_MAX_RADIUS
+    dynaspot_lag: float = DEFAULT_DYNASPOT_LAG
+    dynaspot_reduce_time: float = DEFAULT_DYNASPOT_REDUCE_TIME
+    dynaspot_growth_smoothing: float = DEFAULT_DYNASPOT_GROWTH_SMOOTHING
+    dynaspot_shrink_smoothing: float = DEFAULT_DYNASPOT_SHRINK_SMOOTHING
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
@@ -701,9 +751,91 @@ class ControlPanel(QtWidgets.QWidget):
         self.iou_spin.setSingleStep(0.01)
         self.iou_spin.setValue(DEFAULT_IOU)
 
+        self.dynaspot_min_speed_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_min_speed_spin.setKeyboardTracking(False)
+        self.dynaspot_min_speed_spin.setDecimals(1)
+        self.dynaspot_min_speed_spin.setRange(0.0, 5000.0)
+        self.dynaspot_min_speed_spin.setSingleStep(10.0)
+        self.dynaspot_min_speed_spin.setValue(DEFAULT_DYNASPOT_MIN_SPEED)
+
+        self.dynaspot_max_speed_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_max_speed_spin.setKeyboardTracking(False)
+        self.dynaspot_max_speed_spin.setDecimals(1)
+        self.dynaspot_max_speed_spin.setRange(1.0, 10000.0)
+        self.dynaspot_max_speed_spin.setSingleStep(25.0)
+        self.dynaspot_max_speed_spin.setValue(DEFAULT_DYNASPOT_MAX_SPEED)
+
+        self.dynaspot_min_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_min_radius_spin.setKeyboardTracking(False)
+        self.dynaspot_min_radius_spin.setDecimals(2)
+        self.dynaspot_min_radius_spin.setRange(0.0, 200.0)
+        self.dynaspot_min_radius_spin.setSingleStep(0.5)
+        self.dynaspot_min_radius_spin.setValue(DEFAULT_DYNASPOT_MIN_RADIUS)
+
+        self.dynaspot_max_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_max_radius_spin.setKeyboardTracking(False)
+        self.dynaspot_max_radius_spin.setDecimals(2)
+        self.dynaspot_max_radius_spin.setRange(0.1, 400.0)
+        self.dynaspot_max_radius_spin.setSingleStep(1.0)
+        self.dynaspot_max_radius_spin.setValue(DEFAULT_DYNASPOT_MAX_RADIUS)
+
+        self.dynaspot_lag_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_lag_spin.setKeyboardTracking(False)
+        self.dynaspot_lag_spin.setDecimals(3)
+        self.dynaspot_lag_spin.setRange(0.0, 5.0)
+        self.dynaspot_lag_spin.setSingleStep(0.01)
+        self.dynaspot_lag_spin.setValue(DEFAULT_DYNASPOT_LAG)
+
+        self.dynaspot_reduce_time_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_reduce_time_spin.setKeyboardTracking(False)
+        self.dynaspot_reduce_time_spin.setDecimals(3)
+        self.dynaspot_reduce_time_spin.setRange(0.001, 10.0)
+        self.dynaspot_reduce_time_spin.setSingleStep(0.01)
+        self.dynaspot_reduce_time_spin.setValue(DEFAULT_DYNASPOT_REDUCE_TIME)
+
+        self.dynaspot_growth_smoothing_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_growth_smoothing_spin.setKeyboardTracking(False)
+        self.dynaspot_growth_smoothing_spin.setDecimals(2)
+        self.dynaspot_growth_smoothing_spin.setRange(0.0, 1.0)
+        self.dynaspot_growth_smoothing_spin.setSingleStep(0.01)
+        self.dynaspot_growth_smoothing_spin.setValue(DEFAULT_DYNASPOT_GROWTH_SMOOTHING)
+
+        self.dynaspot_shrink_smoothing_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_shrink_smoothing_spin.setKeyboardTracking(False)
+        self.dynaspot_shrink_smoothing_spin.setDecimals(2)
+        self.dynaspot_shrink_smoothing_spin.setRange(0.0, 1.0)
+        self.dynaspot_shrink_smoothing_spin.setSingleStep(0.01)
+        self.dynaspot_shrink_smoothing_spin.setValue(DEFAULT_DYNASPOT_SHRINK_SMOOTHING)
+
         self.display_cb = self._create_switch()
         self.disable_accel_cb = self._create_switch()
         self.log_data_cb = self._create_switch()
+
+        self._semantic_rows = [
+            self._create_separator(),
+            self._create_switch_row("display", self.display_cb, "display_desc"),
+            self._create_separator(),
+            self._create_switch_row("disable_accel", self.disable_accel_cb, "disable_accel_desc"),
+        ]
+
+        self._dynaspot_rows = [
+            self._create_separator(),
+            self._create_field_row("dynaspot_min_speed", self.dynaspot_min_speed_spin, "dynaspot_min_speed_desc"),
+            self._create_separator(),
+            self._create_field_row("dynaspot_max_speed", self.dynaspot_max_speed_spin, "dynaspot_max_speed_desc"),
+            self._create_separator(),
+            self._create_field_row("dynaspot_min_radius", self.dynaspot_min_radius_spin, "dynaspot_min_radius_desc"),
+            self._create_separator(),
+            self._create_field_row("dynaspot_max_radius", self.dynaspot_max_radius_spin, "dynaspot_max_radius_desc"),
+            self._create_separator(),
+            self._create_field_row("dynaspot_lag", self.dynaspot_lag_spin, "dynaspot_lag_desc"),
+            self._create_separator(),
+            self._create_field_row("dynaspot_reduce_time", self.dynaspot_reduce_time_spin, "dynaspot_reduce_time_desc"),
+            self._create_separator(),
+            self._create_field_row("dynaspot_growth_smoothing", self.dynaspot_growth_smoothing_spin, "dynaspot_growth_smoothing_desc"),
+            self._create_separator(),
+            self._create_field_row("dynaspot_shrink_smoothing", self.dynaspot_shrink_smoothing_spin, "dynaspot_shrink_smoothing_desc"),
+        ]
 
         rows = [
             self._create_field_row("model_path", self.model_picker, "model_path_desc"),
@@ -712,6 +844,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_separator(),
             self._create_field_row("filter", self.filter_selector_button, "filter_desc"),
             self._create_separator(),
+            self._create_switch_row("record_data", self.log_data_cb, "record_data_desc"),
+            self._create_separator(),
             self._create_field_row("change_thresh", self.change_thresh_spin, "change_thresh_desc"),
             self._create_separator(),
             self._create_field_row("capture_interval", self.capture_interval_spin, "capture_interval_desc"),
@@ -719,12 +853,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("confidence", self.confidence_spin, "confidence_desc"),
             self._create_separator(),
             self._create_field_row("iou", self.iou_spin, "iou_desc"),
-            self._create_separator(),
-            self._create_switch_row("display", self.display_cb, "display_desc"),
-            self._create_separator(),
-            self._create_switch_row("disable_accel", self.disable_accel_cb, "disable_accel_desc"),
-            self._create_separator(),
-            self._create_switch_row("record_data", self.log_data_cb, "record_data_desc"),
+            *self._semantic_rows,
+            *self._dynaspot_rows,
         ]
 
         for row in rows:
@@ -786,6 +916,14 @@ class ControlPanel(QtWidgets.QWidget):
         self.capture_interval_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.confidence_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.iou_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_min_speed_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_max_speed_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_min_radius_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_max_radius_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_lag_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_reduce_time_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_growth_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_shrink_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.display_cb.toggled.connect(self._handle_runtime_option_change)
         self.disable_accel_cb.toggled.connect(self._handle_runtime_option_change)
         self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
@@ -797,6 +935,14 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.capture_interval_spin, "capture_interval")
         self._register_numeric_field(self.confidence_spin, "confidence")
         self._register_numeric_field(self.iou_spin, "iou")
+        self._register_numeric_field(self.dynaspot_min_speed_spin, "dynaspot_min_speed")
+        self._register_numeric_field(self.dynaspot_max_speed_spin, "dynaspot_max_speed")
+        self._register_numeric_field(self.dynaspot_min_radius_spin, "dynaspot_min_radius")
+        self._register_numeric_field(self.dynaspot_max_radius_spin, "dynaspot_max_radius")
+        self._register_numeric_field(self.dynaspot_lag_spin, "dynaspot_lag")
+        self._register_numeric_field(self.dynaspot_reduce_time_spin, "dynaspot_reduce_time")
+        self._register_numeric_field(self.dynaspot_growth_smoothing_spin, "dynaspot_growth_smoothing")
+        self._register_numeric_field(self.dynaspot_shrink_smoothing_spin, "dynaspot_shrink_smoothing")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
             "model_path",
@@ -863,8 +1009,13 @@ class ControlPanel(QtWidgets.QWidget):
 
     def _update_mode_dependent_fields(self):
         semantic_enabled = self._mode_code() == "semantic"
+        dynaspot_enabled = self._mode_code() == "dynaspot"
         self.display_cb.setEnabled(semantic_enabled)
         self.disable_accel_cb.setEnabled(semantic_enabled)
+        for row in getattr(self, "_semantic_rows", []):
+            row.setVisible(semantic_enabled)
+        for row in getattr(self, "_dynaspot_rows", []):
+            row.setVisible(dynaspot_enabled)
         self._update_action_buttons()
         self.q_hint_label.setVisible(self.pages.currentIndex() == 0 and self._mode_code() is not None)
 
@@ -960,6 +1111,22 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.confidence_spin.text())
         elif sender is self.iou_spin:
             self._speak_auto_text(self.iou_spin.text())
+        elif sender is self.dynaspot_min_speed_spin:
+            self._speak_auto_text(self.dynaspot_min_speed_spin.text())
+        elif sender is self.dynaspot_max_speed_spin:
+            self._speak_auto_text(self.dynaspot_max_speed_spin.text())
+        elif sender is self.dynaspot_min_radius_spin:
+            self._speak_auto_text(self.dynaspot_min_radius_spin.text())
+        elif sender is self.dynaspot_max_radius_spin:
+            self._speak_auto_text(self.dynaspot_max_radius_spin.text())
+        elif sender is self.dynaspot_lag_spin:
+            self._speak_auto_text(self.dynaspot_lag_spin.text())
+        elif sender is self.dynaspot_reduce_time_spin:
+            self._speak_auto_text(self.dynaspot_reduce_time_spin.text())
+        elif sender is self.dynaspot_growth_smoothing_spin:
+            self._speak_auto_text(self.dynaspot_growth_smoothing_spin.text())
+        elif sender is self.dynaspot_shrink_smoothing_spin:
+            self._speak_auto_text(self.dynaspot_shrink_smoothing_spin.text())
         elif sender is self.display_cb:
             key = "turn_on" if self.display_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("display_short")))
@@ -1371,6 +1538,14 @@ class ControlPanel(QtWidgets.QWidget):
             self.capture_interval_spin,
             self.confidence_spin,
             self.iou_spin,
+            self.dynaspot_min_speed_spin,
+            self.dynaspot_max_speed_spin,
+            self.dynaspot_min_radius_spin,
+            self.dynaspot_max_radius_spin,
+            self.dynaspot_lag_spin,
+            self.dynaspot_reduce_time_spin,
+            self.dynaspot_growth_smoothing_spin,
+            self.dynaspot_shrink_smoothing_spin,
         ):
             widget.interpretText()
 
@@ -1391,6 +1566,14 @@ class ControlPanel(QtWidgets.QWidget):
             enable_logging=self.log_data_cb.isChecked(),
             display=self.display_cb.isChecked(),
             disable_accel=self.disable_accel_cb.isChecked(),
+            dynaspot_min_speed=self.dynaspot_min_speed_spin.value(),
+            dynaspot_max_speed=self.dynaspot_max_speed_spin.value(),
+            dynaspot_min_radius=self.dynaspot_min_radius_spin.value(),
+            dynaspot_max_radius=self.dynaspot_max_radius_spin.value(),
+            dynaspot_lag=self.dynaspot_lag_spin.value(),
+            dynaspot_reduce_time=self.dynaspot_reduce_time_spin.value(),
+            dynaspot_growth_smoothing=self.dynaspot_growth_smoothing_spin.value(),
+            dynaspot_shrink_smoothing=self.dynaspot_shrink_smoothing_spin.value(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
             enable_dynaspot=mode == "dynaspot",
@@ -1413,6 +1596,14 @@ class ControlPanel(QtWidgets.QWidget):
         self.log_data_cb.setChecked(cfg.enable_logging)
         self.display_cb.setChecked(cfg.display)
         self.disable_accel_cb.setChecked(cfg.disable_accel)
+        self.dynaspot_min_speed_spin.setValue(cfg.dynaspot_min_speed)
+        self.dynaspot_max_speed_spin.setValue(cfg.dynaspot_max_speed)
+        self.dynaspot_min_radius_spin.setValue(cfg.dynaspot_min_radius)
+        self.dynaspot_max_radius_spin.setValue(cfg.dynaspot_max_radius)
+        self.dynaspot_lag_spin.setValue(cfg.dynaspot_lag)
+        self.dynaspot_reduce_time_spin.setValue(cfg.dynaspot_reduce_time)
+        self.dynaspot_growth_smoothing_spin.setValue(cfg.dynaspot_growth_smoothing)
+        self.dynaspot_shrink_smoothing_spin.setValue(cfg.dynaspot_shrink_smoothing)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
@@ -1460,6 +1651,14 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.enable_dynaspot = False
         cfg.display = False
         cfg.disable_accel = False
+        cfg.dynaspot_min_speed = DEFAULT_DYNASPOT_MIN_SPEED
+        cfg.dynaspot_max_speed = DEFAULT_DYNASPOT_MAX_SPEED
+        cfg.dynaspot_min_radius = DEFAULT_DYNASPOT_MIN_RADIUS
+        cfg.dynaspot_max_radius = DEFAULT_DYNASPOT_MAX_RADIUS
+        cfg.dynaspot_lag = DEFAULT_DYNASPOT_LAG
+        cfg.dynaspot_reduce_time = DEFAULT_DYNASPOT_REDUCE_TIME
+        cfg.dynaspot_growth_smoothing = DEFAULT_DYNASPOT_GROWTH_SMOOTHING
+        cfg.dynaspot_shrink_smoothing = DEFAULT_DYNASPOT_SHRINK_SMOOTHING
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
         cfg.language = "English"
@@ -1495,6 +1694,17 @@ class ControlPanel(QtWidgets.QWidget):
             cmd.append("--display")
         if cfg.enable_semantic_pointing and cfg.disable_accel:
             cmd.append("--disable-accel")
+        if cfg.enable_dynaspot:
+            cmd += [
+                "--min-speed", str(cfg.dynaspot_min_speed),
+                "--max-speed", str(cfg.dynaspot_max_speed),
+                "--min-radius", str(cfg.dynaspot_min_radius),
+                "--max-radius", str(cfg.dynaspot_max_radius),
+                "--lag", str(cfg.dynaspot_lag),
+                "--reduce-time", str(cfg.dynaspot_reduce_time),
+                "--growth-smoothing", str(cfg.dynaspot_growth_smoothing),
+                "--shrink-smoothing", str(cfg.dynaspot_shrink_smoothing),
+            ]
         return cmd
 
     def _is_demo_running(self):

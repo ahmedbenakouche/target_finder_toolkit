@@ -20,6 +20,7 @@ Requires-Dist: ultralytics
 Requires-Dist: PyQt6
 Requires-Dist: pyautogui
 Requires-Dist: pynput
+Requires-Dist: OneEuroFilter
 Dynamic: license-file
 
 # TargetFinder Toolkit
