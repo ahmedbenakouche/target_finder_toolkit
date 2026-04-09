@@ -339,8 +339,8 @@ else:
 
     _MAC_ACCEL_METHOD = None  # "iokit" or "defaults"
 
-    # --- Try IOKit first ---
-    try:
+    # --- Try IOKit first (disabled: segfault on Apple Silicon, using defaults write fallback) ---
+    if False:  # IOKit disabled - keeping code for future reference
         import objc
         from Foundation import NSBundle
 
@@ -355,7 +355,7 @@ else:
         ]
         objc.loadBundleFunctions(_iokit_bundle, globals(), _iokit_functions)
 
-        _ACCEL_KEY = "HIDMouseAcceleration"
+        _ACCEL_KEY = b"HIDMouseAcceleration"
         _IOKIT_HANDLE = None
         _IOKIT_ORIGINAL_ACCEL = None
 
@@ -381,8 +381,8 @@ else:
             _IOKIT_ORIGINAL_ACCEL = None
             _MAC_ACCEL_METHOD = None
 
-    except (ImportError, Exception):
-        # --- Fallback: defaults write (with indentation bug fixed) ---
+    else:
+        # --- defaults write approach (xinqi's method, with indentation bug fixed) ---
         _MAC_MOUSE_ACCEL_BACKUP = None
         _MAC_MOUSE_SCALING_EXISTED = None
 

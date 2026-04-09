@@ -8,3 +8,4 @@ build/
 .eggs/
 logs/
 _test_output/
+.DS_Store
