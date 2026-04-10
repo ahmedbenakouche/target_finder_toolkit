@@ -480,16 +480,40 @@ class RakeCursor(QtWidgets.QWidget):
         def on_press(key):
             try:
                 if key.char == "q":
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "stop_and_quit",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                    )
+                    self._queue_quit()
             except AttributeError:
                 pass
 
-        self._keyboard_listener = keyboard.Listener(on_press=on_press)
+        kwargs = {"on_press": on_press}
+        if sys.platform == "darwin":
+            kwargs["darwin_intercept"] = self._intercept_keyboard_event
+        self._keyboard_listener = keyboard.Listener(**kwargs)
         self._keyboard_listener.start()
+
+    def _queue_quit(self):
+        QtCore.QMetaObject.invokeMethod(
+            self,
+            "stop_and_quit",
+            QtCore.Qt.ConnectionType.QueuedConnection,
+        )
+
+    def _intercept_keyboard_event(self, event_type, event):
+        try:
+            import Quartz
+        except Exception:
+            return event
+        if event_type != Quartz.kCGEventKeyDown:
+            return event
+        try:
+            keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+            _length, chars = Quartz.CGEventKeyboardGetUnicodeString(event, 100, None, None)
+        except Exception:
+            return event
+        if keycode == 12 or chars == "q":
+            print("[rake] q pressed, quitting", flush=True)
+            self._queue_quit()
+            return None
+        return event
 
     def _start_mouse_listener(self):
         def on_click(x, y, button, pressed):
