@@ -11,6 +11,7 @@ target_finder_toolkit/filters.py
 target_finder_toolkit/logging_utils.py
 target_finder_toolkit/mouse_utils.py
 target_finder_toolkit/postprocess.py
+target_finder_toolkit/rakecursor.py
 target_finder_toolkit/semanticpointing.py
 target_finder_toolkit/targetfinder.py
 target_finder_toolkit/test_mouse_utils.py

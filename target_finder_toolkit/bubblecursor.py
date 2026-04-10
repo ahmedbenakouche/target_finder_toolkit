@@ -387,43 +387,61 @@ class BubbleCursor(QtWidgets.QWidget):
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
         if self._in_system_reserved_area(orig_x, orig_y):
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=None,
+                )
             return
-        if self._last_target and self.bubble_enabled:
-            tx, ty, w, h = self._last_target
+        if not (self._last_target and self.bubble_enabled):
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=None,
+                )
+            return
 
-            # If click inside detected rectangle let it pass
-            if tx-w/2 <= orig_x <= tx+w/2 and ty-h/2 <= orig_y <= ty+h/2:
-                if self.logger is not None:
-                    self.logger.log_click(
-                        technique="bubble",
-                        raw=[orig_x, orig_y],
-                        effective=[orig_x, orig_y],
-                        redirected=False,
-                        target=self._last_target_info,
-                    )
-                return
+        tx, ty, w, h = self._last_target
 
-            # Otherwise simulate target click
-            self._mouse_listener.stop()  # stop listener
-            try:
-                pyautogui.mouseUp(button='left')  # simulate button release
-                pyautogui.moveTo(tx, ty) # move to and click the targeted widget
-                pyautogui.click()
-                pyautogui.moveTo(orig_x, orig_y) # move the mouse back to its original position
-            except pyautogui.FailSafeException:
-                # to prevent the script from crashing when the mouse hits a corner
-                pass
-            finally:
-                if self.logger is not None:
-                    self.logger.log_click(
-                        technique="bubble",
-                        raw=[orig_x, orig_y],
-                        effective=[round(tx, 3), round(ty, 3)],
-                        redirected=True,
-                        target=self._last_target_info,
-                    )
-                self._rehide_cursor()
-                self._start_mouse_listener() # restart the listener
+        # If click inside detected rectangle let it pass
+        if tx-w/2 <= orig_x <= tx+w/2 and ty-h/2 <= orig_y <= ty+h/2:
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=self._last_target_info,
+                )
+            return
+
+        # Otherwise simulate target click
+        self._mouse_listener.stop()  # stop listener
+        try:
+            pyautogui.mouseUp(button='left')  # simulate button release
+            pyautogui.moveTo(tx, ty) # move to and click the targeted widget
+            pyautogui.click()
+            pyautogui.moveTo(orig_x, orig_y) # move the mouse back to its original position
+        except pyautogui.FailSafeException:
+            # to prevent the script from crashing when the mouse hits a corner
+            pass
+        finally:
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[orig_x, orig_y],
+                    effective=[round(tx, 3), round(ty, 3)],
+                    redirected=True,
+                    target=self._last_target_info,
+                )
+            self._rehide_cursor()
+            self._start_mouse_listener() # restart the listener
 
 
 def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):

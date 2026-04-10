@@ -1,4 +1,5 @@
 import json
+import importlib
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,10 @@ MODE_OPTIONS = {
         "English": "DynaSpot",
         "French": "DynaSpot",
     },
+    "rake": {
+        "English": "Rake Cursor (Gaze)",
+        "French": "Rake Cursor (Gaze)",
+    },
 }
 
 LANGUAGE_OPTIONS = {
@@ -56,6 +61,11 @@ DEFAULT_DYNASPOT_LAG = 0.08
 DEFAULT_DYNASPOT_REDUCE_TIME = 0.20
 DEFAULT_DYNASPOT_GROWTH_SMOOTHING = 0.35
 DEFAULT_DYNASPOT_SHRINK_SMOOTHING = 0.18
+DEFAULT_RAKE_CAMERA_INDEX = 0
+DEFAULT_RAKE_SCREEN_WIDTH_CM = 34.0
+DEFAULT_RAKE_SCREEN_HEIGHT_CM = 19.0
+DEFAULT_RAKE_SPACING = 72.0
+DEFAULT_RAKE_GAZE_SMOOTHING = 0.35
 
 UI_TEXTS = {
     "English": {
@@ -67,7 +77,7 @@ UI_TEXTS = {
         "page_accessibility": "Accessibility",
         "page_audio": "Audio",
         "page_language": "Language",
-        "technique": "Technique (4 modes)",
+        "technique": "Technique (5 modes)",
         "select_technique": "Choose a technique",
         "choose_mode_dialog": "Choose a Technique",
         "filter": "Filter",
@@ -82,6 +92,7 @@ UI_TEXTS = {
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Semantic Pointing",
         "mode_dynaspot": "DynaSpot",
+        "mode_rake": "Rake Cursor (Gaze)",
         "dynaspot_params": "DynaSpot tuning",
         "dynaspot_min_speed": "DynaSpot min speed",
         "dynaspot_min_speed_desc": "Pointer speed threshold where the spot starts growing. Lower values make the spot expand earlier.",
@@ -99,6 +110,19 @@ UI_TEXTS = {
         "dynaspot_growth_smoothing_desc": "Higher values make the spot grow faster toward its target size.",
         "dynaspot_shrink_smoothing": "DynaSpot shrink smoothing",
         "dynaspot_shrink_smoothing_desc": "Higher values make the spot shrink faster after the lag period.",
+        "rake_params": "Rake Cursor tuning",
+        "rake_camera_index": "Webcam index",
+        "rake_camera_index_desc": "Camera index used by WebEyeTrack for webcam-based gaze estimation.",
+        "rake_screen_width_cm": "Screen width (cm)",
+        "rake_screen_width_cm_desc": "Approximate physical screen width used by WebEyeTrack.",
+        "rake_screen_height_cm": "Screen height (cm)",
+        "rake_screen_height_cm_desc": "Approximate physical screen height used by WebEyeTrack.",
+        "rake_spacing": "Rake spacing",
+        "rake_spacing_desc": "Distance in pixels between the center cursor and the surrounding rake cursors.",
+        "rake_gaze_smoothing": "Gaze smoothing",
+        "rake_gaze_smoothing_desc": "Higher values stabilize the gaze point more strongly but increase lag.",
+        "rake_show_gaze": "Show gaze point (rake only, range: off/on, default: on)",
+        "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
         "apply": "Start / Apply",
         "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
         "change_thresh_desc": "Higher = fewer refreshes for small screen changes. Lower = reacts sooner.",
@@ -118,7 +142,7 @@ UI_TEXTS = {
         "disable_accel": "Disable system mouse acceleration (semantic only, range: off/on, default: off)",
         "disable_accel_short": "Disable system mouse acceleration",
         "disable_accel_desc": "Makes semantic pointing feel more stable, but changes mouse behavior while running.",
-        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: grows a circular activation area as pointer speed increases, while staying point-like at low speed.",
+        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: grows a circular activation area as pointer speed increases, while staying point-like at low speed. Rake Cursor: uses webcam gaze to select one cursor from a rake of mouse-driven candidate cursors.",
         "contrast": "Contrast",
         "enable_tts": "Enable TTS",
         "language": "Language",
@@ -136,9 +160,12 @@ UI_TEXTS = {
         "running_semantic": "Semantic Pointing is running.",
         "running_targetfinder": "TargetFinder Overlay is running.",
         "running_dynaspot": "DynaSpot is running.",
+        "running_rake": "Rake Cursor is running.",
         "stopped": "Stopped the running mode.",
         "no_running": "No running mode was found.",
         "invalid_model_path": "The selected model file was not found.",
+        "missing_one_euro": "OneEuroFilter is not installed or could not be imported in this environment.",
+        "missing_webeyetrack": "WebEyeTrack is not installed or could not be imported in this environment.",
         "panel_updated": "Panel appearance updated.",
         "tts_enabled": "Text-to-speech enabled.",
         "tts_disabled": "Text-to-speech disabled.",
@@ -155,7 +182,7 @@ UI_TEXTS = {
         "page_accessibility": "Accessibilité",
         "page_audio": "Audio",
         "page_language": "Langue",
-        "technique": "Technique (4 modes)",
+        "technique": "Technique (5 modes)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
         "filter": "Filtre",
@@ -170,6 +197,7 @@ UI_TEXTS = {
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Pointage sémantique",
         "mode_dynaspot": "DynaSpot",
+        "mode_rake": "Rake Cursor (Gaze)",
         "dynaspot_params": "Réglages DynaSpot",
         "dynaspot_min_speed": "Vitesse min DynaSpot",
         "dynaspot_min_speed_desc": "Seuil de vitesse à partir duquel le spot commence à grandir. Plus bas = expansion plus précoce.",
@@ -187,6 +215,19 @@ UI_TEXTS = {
         "dynaspot_growth_smoothing_desc": "Des valeurs plus élevées font croître le spot plus vite vers sa taille cible.",
         "dynaspot_shrink_smoothing": "Lissage réduction DynaSpot",
         "dynaspot_shrink_smoothing_desc": "Des valeurs plus élevées font diminuer le spot plus vite après le délai.",
+        "rake_params": "Réglages Rake Cursor",
+        "rake_camera_index": "Index de webcam",
+        "rake_camera_index_desc": "Index de la caméra utilisée par WebEyeTrack pour estimer le regard.",
+        "rake_screen_width_cm": "Largeur écran (cm)",
+        "rake_screen_width_cm_desc": "Largeur physique approximative de l’écran utilisée par WebEyeTrack.",
+        "rake_screen_height_cm": "Hauteur écran (cm)",
+        "rake_screen_height_cm_desc": "Hauteur physique approximative de l’écran utilisée par WebEyeTrack.",
+        "rake_spacing": "Espacement du rake",
+        "rake_spacing_desc": "Distance en pixels entre le curseur central et les curseurs périphériques du rake.",
+        "rake_gaze_smoothing": "Lissage du regard",
+        "rake_gaze_smoothing_desc": "Des valeurs plus élevées stabilisent davantage le point de regard mais ajoutent du retard.",
+        "rake_show_gaze": "Afficher le point de regard (rake uniquement, plage : off/on, défaut : on)",
+        "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
         "apply": "Démarrer / Appliquer",
         "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
         "change_thresh_desc": "Plus haut = moins de rafraîchissements pour de petits changements. Plus bas = réaction plus rapide.",
@@ -206,7 +247,7 @@ UI_TEXTS = {
         "disable_accel": "Désactiver l'accélération de la souris (sémantique uniquement, plage : off/on, défaut : off)",
         "disable_accel_short": "Désactiver l'accélération de la souris",
         "disable_accel_desc": "Rend le pointage sémantique plus stable, mais change la sensation de la souris pendant l'exécution.",
-        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : agrandit une zone d’activation circulaire quand la vitesse du pointeur augmente, tout en restant ponctuel à faible vitesse.",
+        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : agrandit une zone d’activation circulaire quand la vitesse du pointeur augmente, tout en restant ponctuel à faible vitesse. Rake Cursor : utilise le regard via webcam pour sélectionner un curseur actif parmi plusieurs curseurs pilotés par la souris.",
         "contrast": "Contrast",
         "enable_tts": "Activer la synthèse vocale",
         "language": "Langue",
@@ -224,9 +265,12 @@ UI_TEXTS = {
         "running_semantic": "Le pointage sémantique est en cours.",
         "running_targetfinder": "L'overlay TargetFinder est en cours.",
         "running_dynaspot": "DynaSpot est en cours.",
+        "running_rake": "Rake Cursor est en cours.",
         "stopped": "Le mode en cours a été arrêté.",
         "no_running": "Aucun mode en cours n'a été trouvé.",
         "invalid_model_path": "Le fichier du modèle sélectionné est introuvable.",
+        "missing_one_euro": "OneEuroFilter n’est pas installé ou n’a pas pu être importé dans cet environnement.",
+        "missing_webeyetrack": "WebEyeTrack n’est pas installé ou n’a pas pu être importé dans cet environnement.",
         "panel_updated": "L'apparence du panneau a été mise à jour.",
         "tts_enabled": "La synthèse vocale est activée.",
         "tts_disabled": "La synthèse vocale est désactivée.",
@@ -261,10 +305,17 @@ class PanelConfig:
     dynaspot_reduce_time: float = DEFAULT_DYNASPOT_REDUCE_TIME
     dynaspot_growth_smoothing: float = DEFAULT_DYNASPOT_GROWTH_SMOOTHING
     dynaspot_shrink_smoothing: float = DEFAULT_DYNASPOT_SHRINK_SMOOTHING
+    rake_camera_index: int = DEFAULT_RAKE_CAMERA_INDEX
+    rake_screen_width_cm: float = DEFAULT_RAKE_SCREEN_WIDTH_CM
+    rake_screen_height_cm: float = DEFAULT_RAKE_SCREEN_HEIGHT_CM
+    rake_spacing: float = DEFAULT_RAKE_SPACING
+    rake_gaze_smoothing: float = DEFAULT_RAKE_GAZE_SMOOTHING
+    rake_show_gaze: bool = True
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
     enable_dynaspot: bool = False
+    enable_rake_cursor: bool = False
 
     high_contrast_mode: bool = False
     stronger_visual_cue: bool = False
@@ -807,9 +858,43 @@ class ControlPanel(QtWidgets.QWidget):
         self.dynaspot_shrink_smoothing_spin.setSingleStep(0.01)
         self.dynaspot_shrink_smoothing_spin.setValue(DEFAULT_DYNASPOT_SHRINK_SMOOTHING)
 
+        self.rake_camera_index_spin = QtWidgets.QSpinBox()
+        self.rake_camera_index_spin.setKeyboardTracking(False)
+        self.rake_camera_index_spin.setRange(0, 10)
+        self.rake_camera_index_spin.setValue(DEFAULT_RAKE_CAMERA_INDEX)
+
+        self.rake_screen_width_cm_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_screen_width_cm_spin.setKeyboardTracking(False)
+        self.rake_screen_width_cm_spin.setDecimals(1)
+        self.rake_screen_width_cm_spin.setRange(10.0, 200.0)
+        self.rake_screen_width_cm_spin.setSingleStep(0.5)
+        self.rake_screen_width_cm_spin.setValue(DEFAULT_RAKE_SCREEN_WIDTH_CM)
+
+        self.rake_screen_height_cm_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_screen_height_cm_spin.setKeyboardTracking(False)
+        self.rake_screen_height_cm_spin.setDecimals(1)
+        self.rake_screen_height_cm_spin.setRange(10.0, 200.0)
+        self.rake_screen_height_cm_spin.setSingleStep(0.5)
+        self.rake_screen_height_cm_spin.setValue(DEFAULT_RAKE_SCREEN_HEIGHT_CM)
+
+        self.rake_spacing_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_spacing_spin.setKeyboardTracking(False)
+        self.rake_spacing_spin.setDecimals(1)
+        self.rake_spacing_spin.setRange(10.0, 300.0)
+        self.rake_spacing_spin.setSingleStep(2.0)
+        self.rake_spacing_spin.setValue(DEFAULT_RAKE_SPACING)
+
+        self.rake_gaze_smoothing_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_gaze_smoothing_spin.setKeyboardTracking(False)
+        self.rake_gaze_smoothing_spin.setDecimals(2)
+        self.rake_gaze_smoothing_spin.setRange(0.0, 0.95)
+        self.rake_gaze_smoothing_spin.setSingleStep(0.01)
+        self.rake_gaze_smoothing_spin.setValue(DEFAULT_RAKE_GAZE_SMOOTHING)
+
         self.display_cb = self._create_switch()
         self.disable_accel_cb = self._create_switch()
         self.log_data_cb = self._create_switch()
+        self.rake_show_gaze_cb = self._create_switch()
 
         self._semantic_rows = [
             self._create_separator(),
@@ -837,6 +922,21 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("dynaspot_shrink_smoothing", self.dynaspot_shrink_smoothing_spin, "dynaspot_shrink_smoothing_desc"),
         ]
 
+        self._rake_rows = [
+            self._create_separator(),
+            self._create_field_row("rake_camera_index", self.rake_camera_index_spin, "rake_camera_index_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_screen_width_cm", self.rake_screen_width_cm_spin, "rake_screen_width_cm_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_screen_height_cm", self.rake_screen_height_cm_spin, "rake_screen_height_cm_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_spacing", self.rake_spacing_spin, "rake_spacing_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_gaze_smoothing", self.rake_gaze_smoothing_spin, "rake_gaze_smoothing_desc"),
+            self._create_separator(),
+            self._create_switch_row("rake_show_gaze", self.rake_show_gaze_cb, "rake_show_gaze_desc"),
+        ]
+
         rows = [
             self._create_field_row("model_path", self.model_picker, "model_path_desc"),
             self._create_separator(),
@@ -855,6 +955,7 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("iou", self.iou_spin, "iou_desc"),
             *self._semantic_rows,
             *self._dynaspot_rows,
+            *self._rake_rows,
         ]
 
         for row in rows:
@@ -924,9 +1025,15 @@ class ControlPanel(QtWidgets.QWidget):
         self.dynaspot_reduce_time_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_growth_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_shrink_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_camera_index_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_screen_width_cm_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_screen_height_cm_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_spacing_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_gaze_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.display_cb.toggled.connect(self._handle_runtime_option_change)
         self.disable_accel_cb.toggled.connect(self._handle_runtime_option_change)
         self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
+        self.rake_show_gaze_cb.toggled.connect(self._handle_runtime_option_change)
 
         self.high_contrast_cb.toggled.connect(self._handle_panel_style_change)
         self.enable_tts_cb.toggled.connect(self._handle_tts_change)
@@ -943,6 +1050,11 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.dynaspot_reduce_time_spin, "dynaspot_reduce_time")
         self._register_numeric_field(self.dynaspot_growth_smoothing_spin, "dynaspot_growth_smoothing")
         self._register_numeric_field(self.dynaspot_shrink_smoothing_spin, "dynaspot_shrink_smoothing")
+        self._register_numeric_field(self.rake_camera_index_spin, "rake_camera_index")
+        self._register_numeric_field(self.rake_screen_width_cm_spin, "rake_screen_width_cm")
+        self._register_numeric_field(self.rake_screen_height_cm_spin, "rake_screen_height_cm")
+        self._register_numeric_field(self.rake_spacing_spin, "rake_spacing")
+        self._register_numeric_field(self.rake_gaze_smoothing_spin, "rake_gaze_smoothing")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
             "model_path",
@@ -1010,12 +1122,15 @@ class ControlPanel(QtWidgets.QWidget):
     def _update_mode_dependent_fields(self):
         semantic_enabled = self._mode_code() == "semantic"
         dynaspot_enabled = self._mode_code() == "dynaspot"
+        rake_enabled = self._mode_code() == "rake"
         self.display_cb.setEnabled(semantic_enabled)
         self.disable_accel_cb.setEnabled(semantic_enabled)
         for row in getattr(self, "_semantic_rows", []):
             row.setVisible(semantic_enabled)
         for row in getattr(self, "_dynaspot_rows", []):
             row.setVisible(dynaspot_enabled)
+        for row in getattr(self, "_rake_rows", []):
+            row.setVisible(rake_enabled)
         self._update_action_buttons()
         self.q_hint_label.setVisible(self.pages.currentIndex() == 0 and self._mode_code() is not None)
 
@@ -1068,6 +1183,7 @@ class ControlPanel(QtWidgets.QWidget):
             ("bubble", self._mode_label("bubble")),
             ("semantic", self._mode_label("semantic")),
             ("dynaspot", self._mode_label("dynaspot")),
+            ("rake", self._mode_label("rake")),
         ]
         selected = self._show_selection_dialog(
             self._text("choose_mode_dialog"),
@@ -1127,6 +1243,16 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.dynaspot_growth_smoothing_spin.text())
         elif sender is self.dynaspot_shrink_smoothing_spin:
             self._speak_auto_text(self.dynaspot_shrink_smoothing_spin.text())
+        elif sender is self.rake_camera_index_spin:
+            self._speak_auto_text(self.rake_camera_index_spin.text())
+        elif sender is self.rake_screen_width_cm_spin:
+            self._speak_auto_text(self.rake_screen_width_cm_spin.text())
+        elif sender is self.rake_screen_height_cm_spin:
+            self._speak_auto_text(self.rake_screen_height_cm_spin.text())
+        elif sender is self.rake_spacing_spin:
+            self._speak_auto_text(self.rake_spacing_spin.text())
+        elif sender is self.rake_gaze_smoothing_spin:
+            self._speak_auto_text(self.rake_gaze_smoothing_spin.text())
         elif sender is self.display_cb:
             key = "turn_on" if self.display_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("display_short")))
@@ -1136,6 +1262,9 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.log_data_cb:
             key = "turn_on" if self.log_data_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("record_data")))
+        elif sender is self.rake_show_gaze_cb:
+            key = "turn_on" if self.rake_show_gaze_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("rake_show_gaze")))
 
     def _handle_numeric_edit_finished(self, widget):
         if self._suspend_updates:
@@ -1574,13 +1703,20 @@ class ControlPanel(QtWidgets.QWidget):
             dynaspot_reduce_time=self.dynaspot_reduce_time_spin.value(),
             dynaspot_growth_smoothing=self.dynaspot_growth_smoothing_spin.value(),
             dynaspot_shrink_smoothing=self.dynaspot_shrink_smoothing_spin.value(),
+            rake_camera_index=self.rake_camera_index_spin.value(),
+            rake_screen_width_cm=self.rake_screen_width_cm_spin.value(),
+            rake_screen_height_cm=self.rake_screen_height_cm_spin.value(),
+            rake_spacing=self.rake_spacing_spin.value(),
+            rake_gaze_smoothing=self.rake_gaze_smoothing_spin.value(),
+            rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
             enable_dynaspot=mode == "dynaspot",
+            enable_rake_cursor=mode == "rake",
             high_contrast_mode=self.high_contrast_cb.isChecked(),
             stronger_visual_cue=self._hidden_config.stronger_visual_cue,
             single_click_as_double_click=self._hidden_config.single_click_as_double_click,
-            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "DynaSpot" if mode == "dynaspot" else "",
+            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "DynaSpot" if mode == "dynaspot" else "Rake Cursor" if mode == "rake" else "",
             enable_tts=self.enable_tts_cb.isChecked(),
             language=self._language_code(),
         )
@@ -1604,6 +1740,12 @@ class ControlPanel(QtWidgets.QWidget):
         self.dynaspot_reduce_time_spin.setValue(cfg.dynaspot_reduce_time)
         self.dynaspot_growth_smoothing_spin.setValue(cfg.dynaspot_growth_smoothing)
         self.dynaspot_shrink_smoothing_spin.setValue(cfg.dynaspot_shrink_smoothing)
+        self.rake_camera_index_spin.setValue(cfg.rake_camera_index)
+        self.rake_screen_width_cm_spin.setValue(cfg.rake_screen_width_cm)
+        self.rake_screen_height_cm_spin.setValue(cfg.rake_screen_height_cm)
+        self.rake_spacing_spin.setValue(cfg.rake_spacing)
+        self.rake_gaze_smoothing_spin.setValue(cfg.rake_gaze_smoothing)
+        self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
@@ -1615,6 +1757,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._selected_mode = "semantic"
         elif cfg.enable_dynaspot or cfg.preset == "DynaSpot":
             self._selected_mode = "dynaspot"
+        elif cfg.enable_rake_cursor or cfg.preset == "Rake Cursor":
+            self._selected_mode = "rake"
         else:
             self._selected_mode = None
 
@@ -1649,6 +1793,7 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.enable_bubble_cursor = False
         cfg.enable_semantic_pointing = False
         cfg.enable_dynaspot = False
+        cfg.enable_rake_cursor = False
         cfg.display = False
         cfg.disable_accel = False
         cfg.dynaspot_min_speed = DEFAULT_DYNASPOT_MIN_SPEED
@@ -1659,6 +1804,12 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.dynaspot_reduce_time = DEFAULT_DYNASPOT_REDUCE_TIME
         cfg.dynaspot_growth_smoothing = DEFAULT_DYNASPOT_GROWTH_SMOOTHING
         cfg.dynaspot_shrink_smoothing = DEFAULT_DYNASPOT_SHRINK_SMOOTHING
+        cfg.rake_camera_index = DEFAULT_RAKE_CAMERA_INDEX
+        cfg.rake_screen_width_cm = DEFAULT_RAKE_SCREEN_WIDTH_CM
+        cfg.rake_screen_height_cm = DEFAULT_RAKE_SCREEN_HEIGHT_CM
+        cfg.rake_spacing = DEFAULT_RAKE_SPACING
+        cfg.rake_gaze_smoothing = DEFAULT_RAKE_GAZE_SMOOTHING
+        cfg.rake_show_gaze = True
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
         cfg.language = "English"
@@ -1675,6 +1826,8 @@ class ControlPanel(QtWidgets.QWidget):
             module_name = "target_finder_toolkit.bubblecursor"
         elif cfg.enable_dynaspot:
             module_name = "target_finder_toolkit.dynaspot"
+        elif cfg.enable_rake_cursor:
+            module_name = "target_finder_toolkit.rakecursor"
         else:
             module_name = "target_finder_toolkit.semanticpointing"
         cmd = [sys.executable, "-m", module_name]
@@ -1705,6 +1858,16 @@ class ControlPanel(QtWidgets.QWidget):
                 "--growth-smoothing", str(cfg.dynaspot_growth_smoothing),
                 "--shrink-smoothing", str(cfg.dynaspot_shrink_smoothing),
             ]
+        if cfg.enable_rake_cursor:
+            cmd += [
+                "--camera-index", str(cfg.rake_camera_index),
+                "--screen-width-cm", str(cfg.rake_screen_width_cm),
+                "--screen-height-cm", str(cfg.rake_screen_height_cm),
+                "--rake-spacing", str(cfg.rake_spacing),
+                "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
+            ]
+            if not cfg.rake_show_gaze:
+                cmd.append("--hide-gaze-point")
         return cmd
 
     def _is_demo_running(self):
@@ -1727,6 +1890,18 @@ class ControlPanel(QtWidgets.QWidget):
         if cfg.model_path and not Path(cfg.model_path).is_file():
             self._set_status("invalid_model_path", speak=speak)
             return
+        if cfg.filter_name == "one_euro":
+            try:
+                importlib.import_module("OneEuroFilter")
+            except Exception as exc:
+                self.info_label.setText(f"{self._text('missing_one_euro')} ({exc})")
+                return
+        if cfg.enable_rake_cursor:
+            try:
+                importlib.import_module("webeyetrack")
+            except Exception as exc:
+                self.info_label.setText(f"{self._text('missing_webeyetrack')} ({exc})")
+                return
         cmd = self._build_command(cfg)
         self.process = subprocess.Popen(cmd, cwd=str(self.project_root))
         self._process_watch_timer.start()
@@ -1737,6 +1912,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._set_status("running_bubble", speak=speak)
         elif cfg.enable_dynaspot:
             self._set_status("running_dynaspot", speak=speak)
+        elif cfg.enable_rake_cursor:
+            self._set_status("running_rake", speak=speak)
         else:
             self._set_status("running_semantic", speak=speak)
 

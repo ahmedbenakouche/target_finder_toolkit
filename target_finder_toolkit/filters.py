@@ -1,6 +1,12 @@
 import time
 
-from OneEuroFilter import OneEuroFilter
+try:
+    from OneEuroFilter import OneEuroFilter
+except Exception as exc:  # pragma: no cover - optional dependency at runtime
+    OneEuroFilter = None
+    _ONE_EURO_IMPORT_ERROR = exc
+else:
+    _ONE_EURO_IMPORT_ERROR = None
 
 
 FILTER_OPTIONS = {
@@ -18,6 +24,10 @@ class OneEuroFilter1D:
         beta: float = 0.02,
         d_cutoff: float = 1.0,
     ):
+        if OneEuroFilter is None:
+            raise RuntimeError(
+                "OneEuroFilter is not available. Install it with `pip install OneEuroFilter --upgrade`."
+            ) from _ONE_EURO_IMPORT_ERROR
         self._freq = float(freq)
         self._min_cutoff = float(min_cutoff)
         self._beta = float(beta)

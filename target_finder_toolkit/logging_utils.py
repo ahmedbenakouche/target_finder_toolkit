@@ -17,6 +17,8 @@ class SessionLogger:
         self.path = Path(log_file)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = self.path.open("a", encoding="utf-8")
+        self._closed = False
+        self._session_ended = False
         self._start_monotonic = time.monotonic()
         self._cursor_interval = 1.0 / max(float(cursor_hz), 1.0)
         self._last_cursor_at = 0.0
@@ -25,6 +27,8 @@ class SessionLogger:
         return time.monotonic() - self._start_monotonic
 
     def _write(self, payload: dict):
+        if self._closed:
+            return
         payload.setdefault("t", round(self._elapsed(), 6))
         self._fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
         self._fh.flush()
@@ -33,6 +37,9 @@ class SessionLogger:
         self._write({"type": "session_start", **fields})
 
     def log_session_end(self, **fields):
+        if self._session_ended:
+            return
+        self._session_ended = True
         self._write({"type": "session_end", **fields})
 
     def log_cursor_sample(
@@ -84,7 +91,10 @@ class SessionLogger:
         )
 
     def close(self):
+        if self._closed:
+            return
         try:
             self._fh.close()
         except Exception:
             pass
+        self._closed = True

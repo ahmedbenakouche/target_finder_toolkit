@@ -405,8 +405,24 @@ class DynaSpot(QtWidgets.QWidget):
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
         if self._in_system_reserved_area(orig_x, orig_y):
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="dynaspot",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=None,
+                )
             return
         if not (self._last_target and self.enabled):
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="dynaspot",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=None,
+                )
             return
 
         tx, ty, w, h = self._last_target
