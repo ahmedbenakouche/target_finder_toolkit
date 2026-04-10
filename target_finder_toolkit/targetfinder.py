@@ -441,6 +441,7 @@ class OverlayWindow(QtWidgets.QWidget):
         # Construct an always-on-top, click-through, transparent overlay.
         super().__init__()
         self.detector = detector
+        self._is_macos = sys.platform == "darwin"
 
         # Link overlay to the detector so it can hide/show the window during capture
         detector.overlay_window = self
@@ -453,9 +454,10 @@ class OverlayWindow(QtWidgets.QWidget):
         flags = (
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
-            | QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.WindowTransparentForInput
         )
+        if not self._is_macos:
+            flags |= QtCore.Qt.WindowType.Tool
         if sys.platform.startswith("linux"):
             # Avoid window manager interference on some X11 setups
             flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
