@@ -133,12 +133,46 @@ class RakeCursor(QtWidgets.QWidget):
     DEFAULT_SCREEN_HEIGHT_CM = 19.0
     DEFAULT_RAKE_SPACING = 72.0
     DEFAULT_GAZE_SMOOTHING = 0.35
+    DEFAULT_GAZE_GAIN = 2.0
+    DEFAULT_DIRECTION_THRESHOLD = 35.0
+    DEFAULT_SELECTION_HOLD = 0.5
     DEFAULT_SHOW_GAZE = True
     CURSOR_RADIUS = 6.0
     ACTIVE_RADIUS = 12.0
     CLICK_EPSILON = 3.0
     DEBUG_TEXT_REFRESH_SEC = 1.0
     GAZE_VALID_TTL_SEC = 0.6
+
+    @classmethod
+    def resolve_screen_size_cm(cls, screen_width_cm=None, screen_height_cm=None, screen=None) -> tuple[float, float]:
+        width_cm = cls._valid_screen_dimension(screen_width_cm)
+        height_cm = cls._valid_screen_dimension(screen_height_cm)
+        if width_cm is not None and height_cm is not None:
+            return width_cm, height_cm
+
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            physical_size = screen.physicalSize()
+            detected_width_cm = cls._valid_screen_dimension(physical_size.width() / 10.0)
+            detected_height_cm = cls._valid_screen_dimension(physical_size.height() / 10.0)
+            width_cm = width_cm if width_cm is not None else detected_width_cm
+            height_cm = height_cm if height_cm is not None else detected_height_cm
+
+        return (
+            width_cm if width_cm is not None else cls.DEFAULT_SCREEN_WIDTH_CM,
+            height_cm if height_cm is not None else cls.DEFAULT_SCREEN_HEIGHT_CM,
+        )
+
+    @staticmethod
+    def _valid_screen_dimension(value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        if value <= 0.0 or not math.isfinite(value):
+            return None
+        return value
 
     def __init__(
         self,
@@ -147,10 +181,13 @@ class RakeCursor(QtWidgets.QWidget):
         logger=None,
         *,
         camera_index: int = 0,
-        screen_width_cm: float = DEFAULT_SCREEN_WIDTH_CM,
-        screen_height_cm: float = DEFAULT_SCREEN_HEIGHT_CM,
+        screen_width_cm: float | None = None,
+        screen_height_cm: float | None = None,
         rake_spacing: float = DEFAULT_RAKE_SPACING,
         gaze_smoothing: float = DEFAULT_GAZE_SMOOTHING,
+        gaze_gain: float = DEFAULT_GAZE_GAIN,
+        direction_threshold: float = DEFAULT_DIRECTION_THRESHOLD,
+        selection_hold: float = DEFAULT_SELECTION_HOLD,
         show_gaze: bool = DEFAULT_SHOW_GAZE,
     ):
         if WebEyeTrack is None:
@@ -164,10 +201,19 @@ class RakeCursor(QtWidgets.QWidget):
         self.cursor_filter = cursor_filter
         self.logger = logger
         self.camera_index = int(camera_index)
-        self.screen_width_cm = float(screen_width_cm)
-        self.screen_height_cm = float(screen_height_cm)
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            raise RuntimeError("Could not detect a primary screen for Rake Cursor.")
+        self.screen_width_cm, self.screen_height_cm = self.resolve_screen_size_cm(
+            screen_width_cm,
+            screen_height_cm,
+            screen,
+        )
         self.rake_spacing = float(rake_spacing)
         self.gaze_smoothing = max(0.0, min(float(gaze_smoothing), 0.95))
+        self.gaze_gain = max(0.1, float(gaze_gain))
+        self.direction_threshold = max(0.0, float(direction_threshold))
+        self.selection_hold = max(0.0, float(selection_hold))
         self.show_gaze = bool(show_gaze)
 
         self._mouse_listener = None
@@ -184,8 +230,12 @@ class RakeCursor(QtWidgets.QWidget):
         self._last_gaze_status = "waiting for webcam"
         self._last_gaze_debug_t = 0.0
         self._last_successful_gaze_t = 0.0
+        self._held_active_index = 0
+        self._held_active_until = 0.0
+        self._selection_magnitude = 0.0
+        self._amplified_gaze_point = None
 
-        geom = QtWidgets.QApplication.primaryScreen().geometry()
+        geom = screen.geometry()
         self.setGeometry(geom)
         self._screen_rect = geom
         self._screen_px_dimensions = (geom.width(), geom.height())
@@ -246,18 +296,46 @@ class RakeCursor(QtWidgets.QWidget):
             points.append((px, py))
         return points
 
-    def _select_active_index(self, points: list[tuple[float, float]]) -> int:
+    def _direction_candidate_index(self, points: list[tuple[float, float]]) -> int:
+        self._selection_magnitude = 0.0
+        self._amplified_gaze_point = None
         if not self._gaze_is_recent():
             return 0
+        cx, cy = points[0]
         gx, gy = self._gaze_point
+        dx = (gx - cx) * self.gaze_gain
+        dy = (gy - cy) * self.gaze_gain
+        self._selection_magnitude = math.hypot(dx, dy)
+        self._amplified_gaze_point = (cx + dx, cy + dy)
+        if self._selection_magnitude < self.direction_threshold:
+            return 0
+
         best_index = 0
-        best_dist = float("inf")
-        for idx, (px, py) in enumerate(points):
-            dist = math.hypot(px - gx, py - gy)
-            if dist < best_dist:
-                best_dist = dist
+        best_score = -float("inf")
+        for idx, (px, py) in enumerate(points[1:], start=1):
+            candidate_dx = px - cx
+            candidate_dy = py - cy
+            candidate_len = math.hypot(candidate_dx, candidate_dy)
+            if candidate_len <= 0:
+                continue
+            score = (dx * candidate_dx + dy * candidate_dy) / candidate_len
+            if score > best_score:
+                best_score = score
                 best_index = idx
         return best_index
+
+    def _select_active_index(self, points: list[tuple[float, float]]) -> int:
+        now = time.time()
+        next_index = self._direction_candidate_index(points)
+        if now < self._held_active_until:
+            return self._held_active_index
+
+        self._held_active_index = next_index
+        if next_index != 0 and self.selection_hold > 0.0:
+            self._held_active_until = now + self.selection_hold
+        else:
+            self._held_active_until = 0.0
+        return next_index
 
     def _apply_gaze_smoothing(self, x: float, y: float):
         if self._gaze_point is None:
@@ -268,7 +346,7 @@ class RakeCursor(QtWidgets.QWidget):
         self._gaze_point = (
             old_x * keep + x * (1.0 - keep),
             old_y * keep + y * (1.0 - keep),
-            )
+        )
 
     def _gaze_is_recent(self) -> bool:
         return (
@@ -327,7 +405,8 @@ class RakeCursor(QtWidgets.QWidget):
         title = f"Rake gaze: {self._last_gaze_status}"
         if self._active_point is not None:
             freshness = "recent" if self._gaze_is_recent() else "stale/default"
-            title += f" | active={self._active_index} | gaze={freshness}"
+            held = "held" if time.time() < self._held_active_until else "free"
+            title += f" | active={self._active_index} | gaze={freshness} | {held} | mag={self._selection_magnitude:.0f}"
 
         font = painter.font()
         font.setPointSize(12)
@@ -422,10 +501,19 @@ class RakeCursor(QtWidgets.QWidget):
                 "active_index": int(self._active_index),
                 "active": [round(float(self._active_point[0]), 3), round(float(self._active_point[1]), 3)],
                 "tracking_ok": bool(self._tracking_ok),
+                "gaze_gain": round(float(self.gaze_gain), 3),
+                "direction_threshold": round(float(self.direction_threshold), 3),
+                "selection_hold": round(float(self.selection_hold), 3),
+                "selection_magnitude": round(float(self._selection_magnitude), 3),
                 "detection_count": len(self.detector.get_detections()),
             }
             if self._gaze_point is not None:
                 fields["gaze"] = [round(float(self._gaze_point[0]), 3), round(float(self._gaze_point[1]), 3)]
+            if self._amplified_gaze_point is not None:
+                fields["amplified_gaze"] = [
+                    round(float(self._amplified_gaze_point[0]), 3),
+                    round(float(self._amplified_gaze_point[1]), 3),
+                ]
             self.logger.log_cursor_sample(
                 raw_x=raw_x,
                 raw_y=raw_y,
@@ -722,10 +810,13 @@ def main():
     parser.add_argument("--log-file", default=None, help="Optional JSONL log file path")
     parser.add_argument("--log-cursor-hz", type=float, default=30.0, help="Cursor sampling rate for logging")
     parser.add_argument("--camera-index", type=int, default=RakeCursor.DEFAULT_CAMERA_INDEX, help="Webcam index used for gaze tracking")
-    parser.add_argument("--screen-width-cm", type=float, default=RakeCursor.DEFAULT_SCREEN_WIDTH_CM, help="Approximate physical screen width in centimeters")
-    parser.add_argument("--screen-height-cm", type=float, default=RakeCursor.DEFAULT_SCREEN_HEIGHT_CM, help="Approximate physical screen height in centimeters")
+    parser.add_argument("--screen-width-cm", type=float, default=None, help="Approximate physical screen width in centimeters; auto-detected when omitted")
+    parser.add_argument("--screen-height-cm", type=float, default=None, help="Approximate physical screen height in centimeters; auto-detected when omitted")
     parser.add_argument("--rake-spacing", type=float, default=RakeCursor.DEFAULT_RAKE_SPACING, help="Distance in pixels between the center cursor and the outer rake cursors")
     parser.add_argument("--gaze-smoothing", type=float, default=RakeCursor.DEFAULT_GAZE_SMOOTHING, help="Smoothing factor applied to the gaze point (0 = no smoothing, higher = steadier gaze)")
+    parser.add_argument("--gaze-gain", type=float, default=RakeCursor.DEFAULT_GAZE_GAIN, help="Multiplier applied to the gaze direction vector around the mouse center")
+    parser.add_argument("--direction-threshold", type=float, default=RakeCursor.DEFAULT_DIRECTION_THRESHOLD, help="Minimum amplified gaze distance from the mouse center required to select an outer rake cursor")
+    parser.add_argument("--selection-hold", type=float, default=RakeCursor.DEFAULT_SELECTION_HOLD, help="Seconds to keep a selected outer rake cursor before switching again")
     parser.add_argument("--hide-gaze-point", action="store_true", help="Hide the red on-screen gaze feedback marker")
     args = parser.parse_args()
 
@@ -737,6 +828,12 @@ def main():
     if args.model_path is None:
         here = os.path.dirname(os.path.abspath(__file__))
         args.model_path = os.path.join(here, "best.pt")
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    args.screen_width_cm, args.screen_height_cm = RakeCursor.resolve_screen_size_cm(
+        args.screen_width_cm,
+        args.screen_height_cm,
+    )
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter) if args.filter != "none" else None
@@ -755,6 +852,9 @@ def main():
             screen_height_cm=args.screen_height_cm,
             rake_spacing=args.rake_spacing,
             gaze_smoothing=args.gaze_smoothing,
+            gaze_gain=args.gaze_gain,
+            direction_threshold=args.direction_threshold,
+            selection_hold=args.selection_hold,
             show_gaze=not args.hide_gaze_point,
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
@@ -767,6 +867,9 @@ def main():
         screen_height_cm=args.screen_height_cm,
         rake_spacing=args.rake_spacing,
         gaze_smoothing=args.gaze_smoothing,
+        gaze_gain=args.gaze_gain,
+        direction_threshold=args.direction_threshold,
+        selection_hold=args.selection_hold,
         show_gaze=not args.hide_gaze_point,
     )
 

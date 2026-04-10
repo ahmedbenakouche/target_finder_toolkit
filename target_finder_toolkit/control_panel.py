@@ -66,6 +66,9 @@ DEFAULT_RAKE_SCREEN_WIDTH_CM = 34.0
 DEFAULT_RAKE_SCREEN_HEIGHT_CM = 19.0
 DEFAULT_RAKE_SPACING = 72.0
 DEFAULT_RAKE_GAZE_SMOOTHING = 0.35
+DEFAULT_RAKE_GAZE_GAIN = 2.0
+DEFAULT_RAKE_DIRECTION_THRESHOLD = 35.0
+DEFAULT_RAKE_SELECTION_HOLD = 0.5
 
 UI_TEXTS = {
     "English": {
@@ -114,13 +117,19 @@ UI_TEXTS = {
         "rake_camera_index": "Webcam index",
         "rake_camera_index_desc": "Camera index used by WebEyeTrack for webcam-based gaze estimation.",
         "rake_screen_width_cm": "Screen width (cm)",
-        "rake_screen_width_cm_desc": "Approximate physical screen width used by WebEyeTrack.",
+        "rake_screen_width_cm_desc": "Auto-detected physical screen width used by WebEyeTrack. You can override it if detection is wrong.",
         "rake_screen_height_cm": "Screen height (cm)",
-        "rake_screen_height_cm_desc": "Approximate physical screen height used by WebEyeTrack.",
+        "rake_screen_height_cm_desc": "Auto-detected physical screen height used by WebEyeTrack. You can override it if detection is wrong.",
         "rake_spacing": "Rake spacing",
         "rake_spacing_desc": "Distance in pixels between the center cursor and the surrounding rake cursors.",
         "rake_gaze_smoothing": "Gaze smoothing",
         "rake_gaze_smoothing_desc": "Higher values stabilize the gaze point more strongly but increase lag.",
+        "rake_gaze_gain": "Gaze gain",
+        "rake_gaze_gain_desc": "Amplifies the gaze direction around the mouse center. Higher values make smaller eye movements select outer candidates.",
+        "rake_direction_threshold": "Direction threshold",
+        "rake_direction_threshold_desc": "Minimum amplified gaze distance from the mouse center before an outer candidate can be selected.",
+        "rake_selection_hold": "Selection hold time",
+        "rake_selection_hold_desc": "Seconds to keep the selected outer candidate before allowing it to switch again.",
         "rake_show_gaze": "Show gaze point (rake only, range: off/on, default: on)",
         "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
         "apply": "Start / Apply",
@@ -219,13 +228,19 @@ UI_TEXTS = {
         "rake_camera_index": "Index de webcam",
         "rake_camera_index_desc": "Index de la caméra utilisée par WebEyeTrack pour estimer le regard.",
         "rake_screen_width_cm": "Largeur écran (cm)",
-        "rake_screen_width_cm_desc": "Largeur physique approximative de l’écran utilisée par WebEyeTrack.",
+        "rake_screen_width_cm_desc": "Largeur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
         "rake_screen_height_cm": "Hauteur écran (cm)",
-        "rake_screen_height_cm_desc": "Hauteur physique approximative de l’écran utilisée par WebEyeTrack.",
+        "rake_screen_height_cm_desc": "Hauteur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
         "rake_spacing": "Espacement du rake",
         "rake_spacing_desc": "Distance en pixels entre le curseur central et les curseurs périphériques du rake.",
         "rake_gaze_smoothing": "Lissage du regard",
         "rake_gaze_smoothing_desc": "Des valeurs plus élevées stabilisent davantage le point de regard mais ajoutent du retard.",
+        "rake_gaze_gain": "Gain du regard",
+        "rake_gaze_gain_desc": "Amplifie la direction du regard autour du centre de la souris. Plus haut = de petits mouvements des yeux sélectionnent plus facilement les candidats périphériques.",
+        "rake_direction_threshold": "Seuil directionnel",
+        "rake_direction_threshold_desc": "Distance minimale du regard amplifié depuis le centre de la souris avant de sélectionner un candidat périphérique.",
+        "rake_selection_hold": "Temps de maintien",
+        "rake_selection_hold_desc": "Durée pendant laquelle le candidat périphérique sélectionné reste actif avant de pouvoir changer.",
         "rake_show_gaze": "Afficher le point de regard (rake uniquement, plage : off/on, défaut : on)",
         "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
         "apply": "Démarrer / Appliquer",
@@ -310,6 +325,9 @@ class PanelConfig:
     rake_screen_height_cm: float = DEFAULT_RAKE_SCREEN_HEIGHT_CM
     rake_spacing: float = DEFAULT_RAKE_SPACING
     rake_gaze_smoothing: float = DEFAULT_RAKE_GAZE_SMOOTHING
+    rake_gaze_gain: float = DEFAULT_RAKE_GAZE_GAIN
+    rake_direction_threshold: float = DEFAULT_RAKE_DIRECTION_THRESHOLD
+    rake_selection_hold: float = DEFAULT_RAKE_SELECTION_HOLD
     rake_show_gaze: bool = True
 
     enable_bubble_cursor: bool = False
@@ -371,6 +389,29 @@ class ControlPanel(QtWidgets.QWidget):
     # -------------------------------
     def _language_code(self):
         return self._selected_language or "English"
+
+    def _current_screen_physical_size_cm(self) -> tuple[float, float]:
+        width_cm = None
+        height_cm = None
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            physical_size = screen.physicalSize()
+            width_cm = self._valid_screen_dimension_cm(physical_size.width() / 10.0)
+            height_cm = self._valid_screen_dimension_cm(physical_size.height() / 10.0)
+        return (
+            width_cm if width_cm is not None else DEFAULT_RAKE_SCREEN_WIDTH_CM,
+            height_cm if height_cm is not None else DEFAULT_RAKE_SCREEN_HEIGHT_CM,
+        )
+
+    @staticmethod
+    def _valid_screen_dimension_cm(value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        if value <= 0.0:
+            return None
+        return value
 
     def _text(self, key: str) -> str:
         lang = self._language_code()
@@ -863,19 +904,20 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_camera_index_spin.setRange(0, 10)
         self.rake_camera_index_spin.setValue(DEFAULT_RAKE_CAMERA_INDEX)
 
+        detected_screen_width_cm, detected_screen_height_cm = self._current_screen_physical_size_cm()
         self.rake_screen_width_cm_spin = QtWidgets.QDoubleSpinBox()
         self.rake_screen_width_cm_spin.setKeyboardTracking(False)
         self.rake_screen_width_cm_spin.setDecimals(1)
         self.rake_screen_width_cm_spin.setRange(10.0, 200.0)
         self.rake_screen_width_cm_spin.setSingleStep(0.5)
-        self.rake_screen_width_cm_spin.setValue(DEFAULT_RAKE_SCREEN_WIDTH_CM)
+        self.rake_screen_width_cm_spin.setValue(detected_screen_width_cm)
 
         self.rake_screen_height_cm_spin = QtWidgets.QDoubleSpinBox()
         self.rake_screen_height_cm_spin.setKeyboardTracking(False)
         self.rake_screen_height_cm_spin.setDecimals(1)
         self.rake_screen_height_cm_spin.setRange(10.0, 200.0)
         self.rake_screen_height_cm_spin.setSingleStep(0.5)
-        self.rake_screen_height_cm_spin.setValue(DEFAULT_RAKE_SCREEN_HEIGHT_CM)
+        self.rake_screen_height_cm_spin.setValue(detected_screen_height_cm)
 
         self.rake_spacing_spin = QtWidgets.QDoubleSpinBox()
         self.rake_spacing_spin.setKeyboardTracking(False)
@@ -890,6 +932,27 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_gaze_smoothing_spin.setRange(0.0, 0.95)
         self.rake_gaze_smoothing_spin.setSingleStep(0.01)
         self.rake_gaze_smoothing_spin.setValue(DEFAULT_RAKE_GAZE_SMOOTHING)
+
+        self.rake_gaze_gain_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_gaze_gain_spin.setKeyboardTracking(False)
+        self.rake_gaze_gain_spin.setDecimals(2)
+        self.rake_gaze_gain_spin.setRange(0.1, 10.0)
+        self.rake_gaze_gain_spin.setSingleStep(0.1)
+        self.rake_gaze_gain_spin.setValue(DEFAULT_RAKE_GAZE_GAIN)
+
+        self.rake_direction_threshold_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_direction_threshold_spin.setKeyboardTracking(False)
+        self.rake_direction_threshold_spin.setDecimals(1)
+        self.rake_direction_threshold_spin.setRange(0.0, 500.0)
+        self.rake_direction_threshold_spin.setSingleStep(5.0)
+        self.rake_direction_threshold_spin.setValue(DEFAULT_RAKE_DIRECTION_THRESHOLD)
+
+        self.rake_selection_hold_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_selection_hold_spin.setKeyboardTracking(False)
+        self.rake_selection_hold_spin.setDecimals(2)
+        self.rake_selection_hold_spin.setRange(0.0, 5.0)
+        self.rake_selection_hold_spin.setSingleStep(0.05)
+        self.rake_selection_hold_spin.setValue(DEFAULT_RAKE_SELECTION_HOLD)
 
         self.display_cb = self._create_switch()
         self.disable_accel_cb = self._create_switch()
@@ -933,6 +996,12 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("rake_spacing", self.rake_spacing_spin, "rake_spacing_desc"),
             self._create_separator(),
             self._create_field_row("rake_gaze_smoothing", self.rake_gaze_smoothing_spin, "rake_gaze_smoothing_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_gaze_gain", self.rake_gaze_gain_spin, "rake_gaze_gain_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_direction_threshold", self.rake_direction_threshold_spin, "rake_direction_threshold_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_selection_hold", self.rake_selection_hold_spin, "rake_selection_hold_desc"),
             self._create_separator(),
             self._create_switch_row("rake_show_gaze", self.rake_show_gaze_cb, "rake_show_gaze_desc"),
         ]
@@ -1030,6 +1099,9 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_screen_height_cm_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_spacing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_gaze_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_gaze_gain_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_direction_threshold_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_selection_hold_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.display_cb.toggled.connect(self._handle_runtime_option_change)
         self.disable_accel_cb.toggled.connect(self._handle_runtime_option_change)
         self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
@@ -1055,6 +1127,9 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.rake_screen_height_cm_spin, "rake_screen_height_cm")
         self._register_numeric_field(self.rake_spacing_spin, "rake_spacing")
         self._register_numeric_field(self.rake_gaze_smoothing_spin, "rake_gaze_smoothing")
+        self._register_numeric_field(self.rake_gaze_gain_spin, "rake_gaze_gain")
+        self._register_numeric_field(self.rake_direction_threshold_spin, "rake_direction_threshold")
+        self._register_numeric_field(self.rake_selection_hold_spin, "rake_selection_hold")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
             "model_path",
@@ -1253,6 +1328,12 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.rake_spacing_spin.text())
         elif sender is self.rake_gaze_smoothing_spin:
             self._speak_auto_text(self.rake_gaze_smoothing_spin.text())
+        elif sender is self.rake_gaze_gain_spin:
+            self._speak_auto_text(self.rake_gaze_gain_spin.text())
+        elif sender is self.rake_direction_threshold_spin:
+            self._speak_auto_text(self.rake_direction_threshold_spin.text())
+        elif sender is self.rake_selection_hold_spin:
+            self._speak_auto_text(self.rake_selection_hold_spin.text())
         elif sender is self.display_cb:
             key = "turn_on" if self.display_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("display_short")))
@@ -1675,6 +1756,14 @@ class ControlPanel(QtWidgets.QWidget):
             self.dynaspot_reduce_time_spin,
             self.dynaspot_growth_smoothing_spin,
             self.dynaspot_shrink_smoothing_spin,
+            self.rake_camera_index_spin,
+            self.rake_screen_width_cm_spin,
+            self.rake_screen_height_cm_spin,
+            self.rake_spacing_spin,
+            self.rake_gaze_smoothing_spin,
+            self.rake_gaze_gain_spin,
+            self.rake_direction_threshold_spin,
+            self.rake_selection_hold_spin,
         ):
             widget.interpretText()
 
@@ -1708,6 +1797,9 @@ class ControlPanel(QtWidgets.QWidget):
             rake_screen_height_cm=self.rake_screen_height_cm_spin.value(),
             rake_spacing=self.rake_spacing_spin.value(),
             rake_gaze_smoothing=self.rake_gaze_smoothing_spin.value(),
+            rake_gaze_gain=self.rake_gaze_gain_spin.value(),
+            rake_direction_threshold=self.rake_direction_threshold_spin.value(),
+            rake_selection_hold=self.rake_selection_hold_spin.value(),
             rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
@@ -1745,6 +1837,9 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_screen_height_cm_spin.setValue(cfg.rake_screen_height_cm)
         self.rake_spacing_spin.setValue(cfg.rake_spacing)
         self.rake_gaze_smoothing_spin.setValue(cfg.rake_gaze_smoothing)
+        self.rake_gaze_gain_spin.setValue(cfg.rake_gaze_gain)
+        self.rake_direction_threshold_spin.setValue(cfg.rake_direction_threshold)
+        self.rake_selection_hold_spin.setValue(cfg.rake_selection_hold)
         self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
@@ -1804,11 +1899,15 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.dynaspot_reduce_time = DEFAULT_DYNASPOT_REDUCE_TIME
         cfg.dynaspot_growth_smoothing = DEFAULT_DYNASPOT_GROWTH_SMOOTHING
         cfg.dynaspot_shrink_smoothing = DEFAULT_DYNASPOT_SHRINK_SMOOTHING
+        detected_screen_width_cm, detected_screen_height_cm = self._current_screen_physical_size_cm()
         cfg.rake_camera_index = DEFAULT_RAKE_CAMERA_INDEX
-        cfg.rake_screen_width_cm = DEFAULT_RAKE_SCREEN_WIDTH_CM
-        cfg.rake_screen_height_cm = DEFAULT_RAKE_SCREEN_HEIGHT_CM
+        cfg.rake_screen_width_cm = detected_screen_width_cm
+        cfg.rake_screen_height_cm = detected_screen_height_cm
         cfg.rake_spacing = DEFAULT_RAKE_SPACING
         cfg.rake_gaze_smoothing = DEFAULT_RAKE_GAZE_SMOOTHING
+        cfg.rake_gaze_gain = DEFAULT_RAKE_GAZE_GAIN
+        cfg.rake_direction_threshold = DEFAULT_RAKE_DIRECTION_THRESHOLD
+        cfg.rake_selection_hold = DEFAULT_RAKE_SELECTION_HOLD
         cfg.rake_show_gaze = True
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
@@ -1865,6 +1964,9 @@ class ControlPanel(QtWidgets.QWidget):
                 "--screen-height-cm", str(cfg.rake_screen_height_cm),
                 "--rake-spacing", str(cfg.rake_spacing),
                 "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
+                "--gaze-gain", str(cfg.rake_gaze_gain),
+                "--direction-threshold", str(cfg.rake_direction_threshold),
+                "--selection-hold", str(cfg.rake_selection_hold),
             ]
             if not cfg.rake_show_gaze:
                 cmd.append("--hide-gaze-point")
