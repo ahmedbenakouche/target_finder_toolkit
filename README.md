@@ -1,7 +1,7 @@
 # TargetFinder Toolkit
 
 This toolkit accompanies the work presented in the article **TargetFinder: Detecting Widgets from Pixels on Desktop Interfaces**.  
-It provides a real-time detection system using the YOLOv8 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
+It provides a real-time detection system using the YOLO26 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
 
 The system is lightweight and easy to integrate, enabling the implementation of advanced interaction techniques.  
 As proof of concept, we include two interaction techniques built on top of TargetFinder:
@@ -207,7 +207,7 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 
 | Option | Description |
 |--------|-------------|
-| `--model-path` | By default, TargetFinder loads our trained model `YOLOv8n` packaged with the toolkit, but you can supply your own. |
+| `--model-path` | By default, TargetFinder loads our trained model `YOLO26` packaged with the toolkit, but you can supply your own. |
 | `--change-thresh` | Screen change detection threshold. A higher value makes detection less sensitive to small variations. (`default = 100`). |
 | `--capture-interval` | Time between screen captures in seconds. Lower values = higher frequency but more CPU/GPU usage. (`default = 1/30 ≈ 0.033s`). |
 | `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0], default = 0.28`). |
