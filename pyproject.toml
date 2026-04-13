@@ -20,12 +20,6 @@ dependencies = [
   "pynput",
 ]
 
-[project.optional-dependencies]
-macos = [
-    "pyobjc-framework-Quartz>=10.0",
-    "pyobjc-framework-Cocoa>=10.0",
-]
-
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -33,6 +27,12 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
 ]
 keywords = ["yolo", "gui", "widgets", "detection", "hci"]
+
+[project.optional-dependencies]
+macos = [
+    "pyobjc-framework-Quartz>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+]
 
 [project.scripts]
 targetfinder-gui = "target_finder_toolkit.targetfinder:main"

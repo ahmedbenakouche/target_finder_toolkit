@@ -81,8 +81,8 @@ def _require_between(name, val, lo, hi, inclusive=True):
     return v
 
 
-class TargetFinder:    
-    def __init__(self, model_path=None, change_thresh=100, capture_interval=1/30, confidence=0.28, iou = 0.3):
+class TargetFinder:
+    def __init__(self, model_name=None, change_thresh=100, capture_interval=1/30, confidence=0.4, iou = 0.3, imgsz=640):
         """Initialize the detector.
 
         Args:
@@ -145,6 +145,7 @@ class TargetFinder:
         self.interval      = float(_require_between("capture_interval", capture_interval, 0, 1e6))
         self.conf          = float(_require_between("confidence", confidence, 0.0, 1.0))
         self.iou           = float(_require_between("iou", iou, 0.0, 1.0))
+        self.imgsz         = int(imgsz)
 
         # Public snapshot used by the overlay: list of tuples (x, y, w, h, score, cls_id)
         self.detections = []
@@ -295,6 +296,28 @@ class TargetFinder:
         removed = [pd for j, pd in enumerate(prev) if j not in used_prev]
         return added, removed
 
+    def detect_array(self, img_bgr):
+        """Run detection on a BGR numpy array.
+
+        Args:
+            img_bgr (np.ndarray): BGR image array (H, W, 3).
+
+        Returns:
+            Detections with keys ``id, x, y, width, height, score, class_id, class_name``.
+        """
+        results = self.model(img_bgr, conf=self.conf, iou=self.iou, imgsz=self.imgsz, verbose=False)[0]
+        boxes = results.boxes.xyxy.cpu().numpy()
+        scores = results.boxes.conf.cpu().numpy()
+        class_ids = results.boxes.cls.cpu().numpy()
+        detections = self._build_dicts(
+            boxes_xyxy=boxes, scores=scores, class_ids=class_ids,
+            scale_x=1.0, scale_y=1.0,
+        )
+        for d in detections:
+            d["id"] = int(self._next_id)
+            self._next_id += 1
+        return detections
+
     def detect_image(self, image_path, save_annotated=False, save_json=False):
         """Run detection on a single image and optionally save results.
 
@@ -317,7 +340,7 @@ class TargetFinder:
             raise FileNotFoundError(f"Cannot read image: {image_path}")
 
         # Single-shot YOLO inference
-        results = self.model(img_bgr, conf=self.conf, iou=self.iou, verbose=False)[0]
+        results = self.model(img_bgr, conf=self.conf, iou=self.iou, imgsz=self.imgsz, end2end=False, verbose=False)[0]
         boxes = results.boxes.xyxy.cpu().numpy()
         scores = results.boxes.conf.cpu().numpy()
         class_ids = results.boxes.cls.cpu().numpy()
@@ -403,7 +426,7 @@ class TargetFinder:
                         QtCore.Qt.ConnectionType.QueuedConnection)
 
                 # YOLO inference
-                results = self.model(full, conf=self.conf, iou=self.iou, verbose = False)[0]
+                results = self.model(full, conf=self.conf, iou=self.iou, imgsz=self.imgsz, end2end=False, verbose=False)[0]
                 boxes = results.boxes.xyxy.cpu().numpy()
                 scores = results.boxes.conf.cpu().numpy()
                 class_ids = results.boxes.cls.cpu().numpy()
