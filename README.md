@@ -82,7 +82,7 @@ def on_change(detections, added, removed, frame):
     pp.pretty_print_change(detections, added, removed)
 
 if __name__ == "__main__":
-    det = TargetFinder()
+    det = TargetFinder(model_name="yolo26n-1280")   # default = yolo26n-640
     det.set_callback(on_change, with_frame=False, diff_iou=0.5)
     det.start()
 
@@ -207,7 +207,7 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 
 | Option | Description |
 |--------|-------------|
-| `--model-path` | By default, TargetFinder loads our trained model `YOLO26` packaged with the toolkit, but you can supply your own. |
+| `--model` | Select one of our trained YOLO26 models. A higher input resolution or a larger model size provides better performance, especially for small widgets, but increases inference time. Available models: yolo26[n\|s\|m]-[640\|1280\|1920] (default = yolo26n-640) |
 | `--change-thresh` | Screen change detection threshold. A higher value makes detection less sensitive to small variations. (`default = 100`). |
 | `--capture-interval` | Time between screen captures in seconds. Lower values = higher frequency but more CPU/GPU usage. (`default = 1/30 ≈ 0.033s`). |
 | `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0], default = 0.28`). |
@@ -218,6 +218,7 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 Example:
 ```bash
 bubblecursor \
+  --model yolo26n-1280 \
   --change-thresh 100 \
   --capture-interval 0.033 \
   --confidence 0.28 \
