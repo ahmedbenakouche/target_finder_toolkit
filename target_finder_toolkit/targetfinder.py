@@ -95,8 +95,7 @@ class TargetFinder:
         Args:
             model_name (str | None, optional): Name of the model to load.
                 Available choices: yolo26n-640, yolo26n-1280, yolo26n-1920,
-                                   yolo26s-640, yolo26s-1280, yolo26s-1920,
-                                   yolo26m-640, yolo26m-1280, yolo26m-1920.
+                yolo26s-640, yolo26s-1280, yolo26s-1920, yolo26m-640, yolo26m-1280, yolo26m-1920.
                 Defaults to 'yolo26n-640'.
                 Note: Larger models (s, m) or higher resolutions (1280, 1920)
                 improve widget detection but increase latency.
@@ -525,7 +524,7 @@ def show_detections(detector: TargetFinder):
 def main():
     """CLI entry point for launching the TargetFinder overlay.
 
-    **Example:**  ``python -m target_finder_toolkit.targetfinder --confidence 0.3 --iou 0.4``
+    **Example:**  ``python -m target_finder_toolkit.targetfinder --confidence 0.5 --iou 0.4``
 
     """
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")

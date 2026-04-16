@@ -374,7 +374,7 @@ def main():
         --capture-interval (float, optional): Delay in seconds between captures.
             Lower = higher refresh rate, more CPU/GPU. Default: ``1/30``.
         --confidence (float, optional): YOLO confidence threshold in ``[0, 1]``.
-            Default: ``0.28``.
+            Default: ``0.4``.
         --iou (float, optional): IoU threshold for YOLO NMS in ``[0, 1]``.
             Controls overlap merging. Default: ``0.3``.
         --disable-accel (flag): Disable system mouse acceleration.  
@@ -394,7 +394,7 @@ def main():
     parser.add_argument('--model', default="yolo26n-640", choices=AVAILABLE_MODELS, help="Select the YOLO26 model.")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
-    parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
+    parser.add_argument('--confidence', type=float, default=0.4, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     parser.add_argument('--disable-accel', action='store_true', help="Disable system mouse acceleration")
     parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
