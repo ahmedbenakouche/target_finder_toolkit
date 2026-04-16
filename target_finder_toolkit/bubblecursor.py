@@ -27,7 +27,7 @@ import math
 import pyautogui
 from pynput import keyboard, mouse
 import argparse
-from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit.targetfinder import TargetFinder, AVAILABLE_MODELS
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from importlib import resources
 
@@ -268,14 +268,14 @@ def main():
     """Command-line entry point for the Bubble Cursor demo.
 
     CLI arguments:
-        - -model-path (str, optional): Path to YOLO .pt weights.
-            Defaults to ``best.pt`` in the package.
+        - -model (str, optional): Model to load.
+            Defaults to ``yolo26n-640`` in the package.
         - -change-thresh (int, optional): Threshold for screen change detection.
             Higher = less sensitive. Default = ``100``.
         - -capture-interval (float, optional): Delay in seconds between captures.
             Lower = higher refresh rate, more CPU/GPU usage. Default = ``1/30``.
         - -confidence (float, optional): YOLO confidence threshold in ``[0, 1]``.
-            Default = ``0.28``.
+            Default = ``0.4``.
         - -iou (float, optional): IoU threshold for YOLO NMS in ``[0, 1]``.
             Controls overlap merging. Default = ``0.3``.
 
@@ -289,18 +289,14 @@ def main():
         Starts the Qt event loop until exit.
     """
     parser = argparse.ArgumentParser(description="Launch the BubbleCursor overlay")
-    parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
+    parser.add_argument('--model', default="yolo26n-640", choices=AVAILABLE_MODELS, help="Select the YOLO26 model.")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
-    parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
+    parser.add_argument('--confidence', type=float, default=0.4, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     args = parser.parse_args()
 
-    if args.model_path is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
-
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+    det = TargetFinder(args.model, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     bubble_cursor(det)
 
 if __name__ == "__main__":
