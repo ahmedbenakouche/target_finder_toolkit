@@ -84,11 +84,16 @@ class SemanticPointing(QtWidgets.QWidget):
     """
     def __init__(self, detector: TargetFinder, display = False, disable_accel = False):
         super().__init__()
+        self._is_macos = sys.platform == "darwin"
         self.display = display
         self.disable_accel = disable_accel
         self.detector = detector
         detector.overlay_window = self
+        if self._is_macos and self.display:
+            self.detector.hide_overlay_during_capture = False
         self._mouse_listener = None
+        self._cursor_refresh_timer = None
+        self._last_rehide_at = 0.0
         self.enabled = True
         self._simulating_click = False
         self._start_mouse_listener()
@@ -108,8 +113,9 @@ class SemanticPointing(QtWidgets.QWidget):
         flags = (
                 QtCore.Qt.WindowType.FramelessWindowHint
                 | QtCore.Qt.WindowType.WindowStaysOnTopHint
-                | QtCore.Qt.WindowType.Tool
         )
+        if not self._is_macos:
+            flags |= QtCore.Qt.WindowType.Tool
         if sys.platform.startswith("linux"):
             flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
 
@@ -124,20 +130,32 @@ class SemanticPointing(QtWidgets.QWidget):
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(10) # 10 ms
+        if self._is_macos:
+            self._cursor_refresh_timer = QtCore.QTimer(self)
+            self._cursor_refresh_timer.timeout.connect(self._rehide_cursor)
+            self._cursor_refresh_timer.start(16)
+            self._set_overlay_clickthrough(True)
 
     # === Paint ===
     def paintEvent(self, event):
-        if not self.enabled or not self.detector.get_detections():
+        if not self.enabled:
             return
+        detections = self.detector.get_detections()
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
 
-        real = QtCore.QPointF(QtGui.QCursor.pos())
+        raw_real = QtCore.QPointF(QtGui.QCursor.pos())
+        real = QtCore.QPointF(raw_real)
 
         # If the real cursor is stuck at an edge
-        if (real.x() <= 0 or real.x() >= self.geom.width() - 1
-                or real.y() <= 0 or real.y() >= self.geom.height() - 1):
+        if (
+            not self._is_macos
+            and (
+                real.x() <= 0 or real.x() >= self.geom.width() - 1
+                or real.y() <= 0 or real.y() >= self.geom.height() - 1
+            )
+        ):
             QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y()))
             real = QtCore.QPointF(QtGui.QCursor.pos())
             self.prev_real = real
@@ -154,7 +172,7 @@ class SemanticPointing(QtWidgets.QWidget):
 
         # Sum bell-shaped weights for all detected widgets
         total_bell = 0.0
-        for (x, y, w, h, score, cls_id) in self.detector.get_detections():
+        for (x, y, w, h, score, cls_id) in detections:
             cx = x + w / 2
             cy = y + h / 2
             ux = abs(self.fake_pos.x() - cx) / w
@@ -182,11 +200,15 @@ class SemanticPointing(QtWidgets.QWidget):
         clamped_y = max(0, min(new_y, self.geom.height() - 1))
         self.fake_pos.setX(clamped_x)
         self.fake_pos.setY(clamped_y)
+        if self._is_macos and not self._simulating_click:
+            sync_point = QtCore.QPoint(int(self.fake_pos.x()), int(self.fake_pos.y()))
+            QtGui.QCursor.setPos(sync_point)
+            real = QtCore.QPointF(sync_point)
         self.prev_real = real
 
         # If display flag is set highlight the target widget and its semantic area
         if self.display:
-            for (x, y, w, h, score, cls_id) in self.detector.get_detections():
+            for (x, y, w, h, score, cls_id) in detections:
                 rect = QtCore.QRectF(x, y, w, h)
                 if rect.contains(self.fake_pos):
                     cx = x + w / 2
@@ -233,7 +255,7 @@ class SemanticPointing(QtWidgets.QWidget):
 
         # semi-transparent rectangle to block real clicks
         # (because the real cursor position ≠ the fake cursor position)
-        if not self._simulating_click:
+        if not self._simulating_click and not self._is_macos:
             painter.setPen(QtCore.Qt.PenStyle.NoPen)
             painter.setBrush(QtGui.QColor(0, 0, 0, 1))
             painter.drawRect(QtWidgets.QApplication.primaryScreen().geometry())
@@ -251,27 +273,92 @@ class SemanticPointing(QtWidgets.QWidget):
             if self.disable_accel:
                 disable_mouse_acceleration()
             if sys.platform.startswith("linux"):
-                    self.setWindowFlags(self._base_flags)
-                    self.show()
-                    QtWidgets.QApplication.processEvents()
+                self._set_overlay_clickthrough(False)
+            elif self._is_macos:
+                self._set_overlay_clickthrough(True)
         else:
             self.detector.stop()
             restore_default_cursors()
             if self.disable_accel:
                 restore_mouse_acceleration()
-            if sys.platform.startswith("linux"):
-                self.setWindowFlags(self._base_flags | QtCore.Qt.WindowType.WindowTransparentForInput)
-                self.show()
-                QtWidgets.QApplication.processEvents()
+            if sys.platform.startswith("linux") or self._is_macos:
+                self._set_overlay_clickthrough(True)
         self.update() # repaint immediately
+
+    def _set_overlay_clickthrough(self, enabled):
+        if not (sys.platform.startswith("linux") or self._is_macos):
+            return
+        flags = self._base_flags
+        if enabled:
+            flags |= QtCore.Qt.WindowType.WindowTransparentForInput
+        self.setWindowFlags(flags)
+        self.show()
+        if not self._is_macos:
+            self.raise_()
+        QtWidgets.QApplication.processEvents()
+
+    @QtCore.pyqtSlot()
+    def _rehide_cursor(self):
+        if not self.enabled:
+            return
+        hide_cursor_everywhere()
+        if self._is_macos:
+            QtCore.QTimer.singleShot(0, hide_cursor_everywhere)
+            QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
+            QtCore.QTimer.singleShot(75, hide_cursor_everywhere)
 
     # === Quit ===
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
+        self.enabled = False
+        self.detector.stop()
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
+        if self._keyboard_listener is not None:
+            try:
+                self._keyboard_listener.stop()
+            except Exception:
+                pass
+            self._keyboard_listener = None
+        if hasattr(self, "_timer") and self._timer is not None:
+            self._timer.stop()
+        if self._cursor_refresh_timer is not None:
+            self._cursor_refresh_timer.stop()
         restore_default_cursors()
         if self.disable_accel:
             restore_mouse_acceleration()
-        os._exit(0)
+        self.close()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def closeEvent(self, event):
+        self.enabled = False
+        self.detector.stop()
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
+        if self._keyboard_listener is not None:
+            try:
+                self._keyboard_listener.stop()
+            except Exception:
+                pass
+            self._keyboard_listener = None
+        if hasattr(self, "_timer") and self._timer is not None:
+            self._timer.stop()
+        if self._cursor_refresh_timer is not None:
+            self._cursor_refresh_timer.stop()
+        restore_default_cursors()
+        if self.disable_accel:
+            restore_mouse_acceleration()
+        super().closeEvent(event)
 
     def _start_keyboard_listener(self):
         def on_press(key):
@@ -288,15 +375,29 @@ class SemanticPointing(QtWidgets.QWidget):
 
     # === Global mouse listener + click simulation ===
     def _start_mouse_listener(self):
+        def on_move(x, y):
+            if not self._is_macos or not self.enabled:
+                return
+            now = time.monotonic()
+            if now - self._last_rehide_at < 0.016:
+                return
+            self._last_rehide_at = now
+            QtCore.QMetaObject.invokeMethod(self, "_rehide_cursor", QtCore.Qt.ConnectionType.QueuedConnection)
+
         def on_click(x, y, button, pressed):
+            if button == button.left and self._is_macos and pressed:
+                QtCore.QMetaObject.invokeMethod(self, "_rehide_cursor", QtCore.Qt.ConnectionType.QueuedConnection)
+                return
             if pressed and button == button.left:
                 # simulate in the Qt thread
                 QtCore.QMetaObject.invokeMethod(self, "_simulate_click", QtCore.Qt.ConnectionType.QueuedConnection)
-        self._mouse_listener = mouse.Listener(on_click=on_click)
+        self._mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
         self._mouse_listener.start()
 
     @QtCore.pyqtSlot()
     def _simulate_click(self):
+        if self._is_macos:
+            return
         if self.enabled:
             # simulate the click by removing the semi-transparent rectangle that blocks clicks
             pyautogui.mouseUp(button='left') # simulate button release
@@ -304,10 +405,8 @@ class SemanticPointing(QtWidgets.QWidget):
             self._simulating_click = True # activate the flag "windows"
             self.update()  # request immediate Qt repaint
             QtWidgets.QApplication.processEvents()  # force immediate event processing
-            if sys.platform.startswith("linux"):  # activate TransparentForInput "linux"
-                self.setWindowFlags(self._base_flags | QtCore.Qt.WindowType.WindowTransparentForInput)
-                self.show()
-                QtWidgets.QApplication.processEvents()
+            if sys.platform.startswith("linux") or self._is_macos:
+                self._set_overlay_clickthrough(True)
             QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y())) # move real cursor
                                                                                  # note: this doesn’t work on Windows
                                                                                  # if the semi-transparent rectangle isn’t drawn
@@ -319,10 +418,8 @@ class SemanticPointing(QtWidgets.QWidget):
                 # to prevent the script from crashing when the mouse hits a corner
                 pass
             finally:
-                if sys.platform.startswith("linux"):
-                    self.setWindowFlags(self._base_flags)
-                    self.show()
-                    QtWidgets.QApplication.processEvents()
+                if sys.platform.startswith("linux") or self._is_macos:
+                    self._set_overlay_clickthrough(False)
                 self._simulating_click = False # deactivate the flag and resynchronize
                 self.prev_real = QtCore.QPointF(QtGui.QCursor.pos())
                 self._start_mouse_listener() # restart the listener
@@ -355,6 +452,7 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
     ov  = SemanticPointing(detector, display, disable_accel)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
+    signal.signal(signal.SIGTERM, lambda sig, frame: QtWidgets.QApplication.quit())
     exit_code = app.exec()
     restore_default_cursors()
     if disable_accel:
