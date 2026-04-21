@@ -25,7 +25,7 @@ import mss
 from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
-from pynput import keyboard
+from pynput import keyboard, mouse
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
 from target_finder_toolkit.logging_utils import SessionLogger
 
@@ -538,6 +538,7 @@ class OverlayWindow(QtWidgets.QWidget):
         self.detector = detector
         self._is_macos = sys.platform == "darwin"
         self._keyboard_listener = None
+        self._mouse_listener = None
         self.cursor_filter = cursor_filter
         self.logger = logger
 
@@ -571,10 +572,26 @@ class OverlayWindow(QtWidgets.QWidget):
         self._timer.timeout.connect(self.update)
         self._timer.start(10)  # 10 ms
         self._start_keyboard_listener()
+        if self.logger is not None:
+            self._start_mouse_listener()
 
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
         self.detector.stop()
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
+        if self._keyboard_listener is not None:
+            try:
+                self._keyboard_listener.stop()
+            except Exception:
+                pass
+            self._keyboard_listener = None
+        if hasattr(self, "_timer") and self._timer is not None:
+            self._timer.stop()
         if self.logger is not None:
             self.logger.log_session_end(reason="quit")
             self.logger.close()
@@ -594,6 +611,39 @@ class OverlayWindow(QtWidgets.QWidget):
 
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
+
+    def _start_mouse_listener(self):
+        def on_click(x, y, button, pressed):
+            if button != button.left or not pressed:
+                return
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_log_click_event",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(int, int(x)),
+                QtCore.Q_ARG(int, int(y)),
+            )
+
+        self._mouse_listener = mouse.Listener(on_click=on_click)
+        self._mouse_listener.start()
+
+    @QtCore.pyqtSlot(int, int)
+    def _log_click_event(self, x, y):
+        if self.logger is None:
+            return
+        click_target = self.detector.find_detection_for_point(
+            float(x),
+            float(y),
+            include_text=True,
+            fallback_nearest=False,
+        )
+        self.logger.log_click(
+            technique="targetfinder",
+            raw=[int(x), int(y)],
+            effective=[int(x), int(y)],
+            redirected=False,
+            target=click_target,
+        )
 
     def paintEvent(self, event):
         # Paint bounding boxes and scores on the transparent overlay.

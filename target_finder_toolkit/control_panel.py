@@ -53,21 +53,16 @@ DEFAULT_CHANGE_THRESH = 100
 DEFAULT_CAPTURE_INTERVAL = 0.033
 DEFAULT_CONFIDENCE = 0.28
 DEFAULT_IOU = 0.3
-DEFAULT_DYNASPOT_MIN_SPEED = 120.0
-DEFAULT_DYNASPOT_MAX_SPEED = 1600.0
-DEFAULT_DYNASPOT_MIN_RADIUS = 0.5
-DEFAULT_DYNASPOT_MAX_RADIUS = 28.0
-DEFAULT_DYNASPOT_LAG = 0.08
-DEFAULT_DYNASPOT_REDUCE_TIME = 0.20
-DEFAULT_DYNASPOT_GROWTH_SMOOTHING = 0.35
-DEFAULT_DYNASPOT_SHRINK_SMOOTHING = 0.18
+DEFAULT_DYNASPOT_MIN_SPEED = 100.0
+DEFAULT_DYNASPOT_SPOT_WIDTH = 32.0
+DEFAULT_DYNASPOT_LAG = 0.12
+DEFAULT_DYNASPOT_REDUCE_TIME = 0.18
 DEFAULT_RAKE_CAMERA_INDEX = 0
 DEFAULT_RAKE_SCREEN_WIDTH_CM = 34.0
 DEFAULT_RAKE_SCREEN_HEIGHT_CM = 19.0
 DEFAULT_RAKE_SPACING = 72.0
 DEFAULT_RAKE_GAZE_SMOOTHING = 0.35
 DEFAULT_RAKE_GAZE_GAIN = 2.0
-DEFAULT_RAKE_DIRECTION_THRESHOLD = 35.0
 DEFAULT_RAKE_SELECTION_HOLD = 0.5
 
 UI_TEXTS = {
@@ -80,16 +75,16 @@ UI_TEXTS = {
         "page_accessibility": "Accessibility",
         "page_audio": "Audio",
         "page_language": "Language",
-        "technique": "Technique (5 modes)",
+        "technique": "Technique (5 modes, default: none)",
         "select_technique": "Choose a technique",
         "choose_mode_dialog": "Choose a Technique",
-        "filter": "Filter",
+        "filter": "Filter (choices: none/one euro, default: none)",
         "select_filter": "Choose a filter",
         "choose_filter_dialog": "Choose a Filter",
         "filter_none": "None",
         "filter_one_euro": "One Euro",
         "filter_desc": "Apply an optional cursor filter before the selected technique uses pointer input.",
-        "record_data": "Record session data",
+        "record_data": "Record session data (range: off/on, default: off)",
         "record_data_desc": "Save structured JSONL logs with cursor samples, clicks, and detection changes for later analysis.",
         "mode_targetfinder": "TargetFinder Overlay",
         "mode_bubble": "Bubble Cursor",
@@ -97,45 +92,35 @@ UI_TEXTS = {
         "mode_dynaspot": "DynaSpot",
         "mode_rake": "Rake Cursor (Gaze)",
         "dynaspot_params": "DynaSpot tuning",
-        "dynaspot_min_speed": "DynaSpot min speed",
+        "dynaspot_min_speed": "DynaSpot min speed (range: 0.0-5000.0, default: 100.0)",
         "dynaspot_min_speed_desc": "Pointer speed threshold where the spot starts growing. Lower values make the spot expand earlier.",
-        "dynaspot_max_speed": "DynaSpot max speed",
-        "dynaspot_max_speed_desc": "Pointer speed where the spot reaches its maximum radius. Lower values make the spot reach full size sooner.",
-        "dynaspot_min_radius": "DynaSpot min radius",
-        "dynaspot_min_radius_desc": "Base radius used when the pointer moves slowly or stays still.",
-        "dynaspot_max_radius": "DynaSpot max radius",
-        "dynaspot_max_radius_desc": "Largest radius the dynamic activation circle can reach.",
-        "dynaspot_lag": "DynaSpot shrink lag",
-        "dynaspot_lag_desc": "Delay before the radius starts shrinking once the pointer stops moving.",
-        "dynaspot_reduce_time": "DynaSpot reduce time",
-        "dynaspot_reduce_time_desc": "Time scale for shrinking back toward the minimum radius.",
-        "dynaspot_growth_smoothing": "DynaSpot growth smoothing",
-        "dynaspot_growth_smoothing_desc": "Higher values make the spot grow faster toward its target size.",
-        "dynaspot_shrink_smoothing": "DynaSpot shrink smoothing",
-        "dynaspot_shrink_smoothing_desc": "Higher values make the spot shrink faster after the lag period.",
+        "dynaspot_spot_width": "DynaSpot spot width (range: 1.0-128.0, default: 32.0)",
+        "dynaspot_spot_width_desc": "Maximum activation area width in pixels. This is the paper's SPOTWIDTH and refers to diameter, not radius.",
+        "dynaspot_lag": "DynaSpot shrink lag (range: 0.0-5.0, default: 0.12)",
+        "dynaspot_lag_desc": "Delay before the spot starts shrinking once the pointer stops moving.",
+        "dynaspot_reduce_time": "DynaSpot reduce time (range: 0.001-10.0, default: 0.18)",
+        "dynaspot_reduce_time_desc": "Time used for the co-exponential reduction back toward a 1-pixel point cursor.",
         "rake_params": "Rake Cursor tuning",
-        "rake_camera_index": "Webcam index",
+        "rake_camera_index": "Webcam index (range: 0-10, default: 0)",
         "rake_camera_index_desc": "Camera index used by WebEyeTrack for webcam-based gaze estimation.",
-        "rake_screen_width_cm": "Screen width (cm)",
+        "rake_screen_width_cm": "Screen width (cm) (range: 10.0-200.0, default: auto-detected current screen)",
         "rake_screen_width_cm_desc": "Auto-detected physical screen width used by WebEyeTrack. You can override it if detection is wrong.",
-        "rake_screen_height_cm": "Screen height (cm)",
+        "rake_screen_height_cm": "Screen height (cm) (range: 10.0-200.0, default: auto-detected current screen)",
         "rake_screen_height_cm_desc": "Auto-detected physical screen height used by WebEyeTrack. You can override it if detection is wrong.",
-        "rake_spacing": "Rake spacing",
+        "rake_spacing": "Rake spacing (range: 10.0-300.0, default: 72.0)",
         "rake_spacing_desc": "Distance in pixels between the center cursor and the surrounding rake cursors.",
-        "rake_gaze_smoothing": "Gaze smoothing",
+        "rake_gaze_smoothing": "Gaze smoothing (range: 0.0-0.95, default: 0.35)",
         "rake_gaze_smoothing_desc": "Higher values stabilize the gaze point more strongly but increase lag.",
-        "rake_gaze_gain": "Gaze gain",
-        "rake_gaze_gain_desc": "Amplifies the gaze direction around the mouse center. Higher values make smaller eye movements select outer candidates.",
-        "rake_direction_threshold": "Direction threshold",
-        "rake_direction_threshold_desc": "Minimum amplified gaze distance from the mouse center before an outer candidate can be selected.",
-        "rake_selection_hold": "Selection hold time",
-        "rake_selection_hold_desc": "Seconds to keep the selected outer candidate before allowing it to switch again.",
+        "rake_gaze_gain": "Gaze gain (range: 0.1-10.0, default: 2.0)",
+        "rake_gaze_gain_desc": "Controls how strongly gaze direction pulls selection away from the mouse center. Higher values make outer candidates activate more easily.",
+        "rake_selection_hold": "Selection hold time (range: 0.0-5.0, default: 0.5)",
+        "rake_selection_hold_desc": "Seconds to keep the selected candidate active before allowing it to switch again.",
         "rake_show_gaze": "Show gaze point (rake only, range: off/on, default: on)",
         "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
         "apply": "Start / Apply",
         "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
         "change_thresh_desc": "Higher = fewer refreshes for small screen changes. Lower = reacts sooner.",
-        "model_path": "YOLO Model (.pt file)",
+        "model_path": "YOLO Model (.pt file) (default: packaged best.pt)",
         "model_path_desc": "Leave empty to use the packaged best.pt. Choose another trained .pt file to switch models.",
         "browse": "Browse",
         "use_default_model": "Use packaged best.pt",
@@ -151,7 +136,7 @@ UI_TEXTS = {
         "disable_accel": "Disable system mouse acceleration (semantic only, range: off/on, default: off)",
         "disable_accel_short": "Disable system mouse acceleration",
         "disable_accel_desc": "Makes semantic pointing feel more stable, but changes mouse behavior while running.",
-        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: grows a circular activation area as pointer speed increases, while staying point-like at low speed. Rake Cursor: uses webcam gaze to select one cursor from a rake of mouse-driven candidate cursors.",
+        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: keeps the normal system cursor as the center and grows a circular activation area with speed while preserving empty-space clicks. Rake Cursor: uses webcam gaze to select one cursor from a rake of mouse-driven candidate cursors.",
         "contrast": "Contrast",
         "enable_tts": "Enable TTS",
         "language": "Language",
@@ -191,16 +176,16 @@ UI_TEXTS = {
         "page_accessibility": "Accessibilité",
         "page_audio": "Audio",
         "page_language": "Langue",
-        "technique": "Technique (5 modes)",
+        "technique": "Technique (5 modes, défaut : aucun)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
-        "filter": "Filtre",
+        "filter": "Filtre (choix : none/one euro, défaut : none)",
         "select_filter": "Choisir un filtre",
         "choose_filter_dialog": "Choisir un filtre",
         "filter_none": "Aucun",
         "filter_one_euro": "One Euro",
         "filter_desc": "Appliquer un filtre optionnel au pointeur avant que la technique sélectionnée n'utilise l'entrée souris.",
-        "record_data": "Enregistrer les données",
+        "record_data": "Enregistrer les données (plage : off/on, défaut : off)",
         "record_data_desc": "Enregistrer des journaux JSONL structurés avec la trajectoire du pointeur, les clics et les changements de détection.",
         "mode_targetfinder": "Overlay TargetFinder",
         "mode_bubble": "Bubble Cursor",
@@ -208,45 +193,35 @@ UI_TEXTS = {
         "mode_dynaspot": "DynaSpot",
         "mode_rake": "Rake Cursor (Gaze)",
         "dynaspot_params": "Réglages DynaSpot",
-        "dynaspot_min_speed": "Vitesse min DynaSpot",
+        "dynaspot_min_speed": "Vitesse min DynaSpot (plage : 0.0-5000.0, défaut : 100.0)",
         "dynaspot_min_speed_desc": "Seuil de vitesse à partir duquel le spot commence à grandir. Plus bas = expansion plus précoce.",
-        "dynaspot_max_speed": "Vitesse max DynaSpot",
-        "dynaspot_max_speed_desc": "Vitesse à laquelle le spot atteint son rayon maximal. Plus bas = taille maximale atteinte plus tôt.",
-        "dynaspot_min_radius": "Rayon min DynaSpot",
-        "dynaspot_min_radius_desc": "Rayon de base utilisé quand le pointeur bouge lentement ou reste immobile.",
-        "dynaspot_max_radius": "Rayon max DynaSpot",
-        "dynaspot_max_radius_desc": "Rayon maximal que la zone d’activation dynamique peut atteindre.",
-        "dynaspot_lag": "Délai de réduction DynaSpot",
-        "dynaspot_lag_desc": "Temps d’attente avant que le rayon commence à diminuer lorsque le pointeur s’arrête.",
-        "dynaspot_reduce_time": "Temps de réduction DynaSpot",
-        "dynaspot_reduce_time_desc": "Durée utilisée pour revenir progressivement vers le rayon minimal.",
-        "dynaspot_growth_smoothing": "Lissage croissance DynaSpot",
-        "dynaspot_growth_smoothing_desc": "Des valeurs plus élevées font croître le spot plus vite vers sa taille cible.",
-        "dynaspot_shrink_smoothing": "Lissage réduction DynaSpot",
-        "dynaspot_shrink_smoothing_desc": "Des valeurs plus élevées font diminuer le spot plus vite après le délai.",
+        "dynaspot_spot_width": "Largeur du spot DynaSpot (plage : 1.0-128.0, défaut : 32.0)",
+        "dynaspot_spot_width_desc": "Largeur maximale de la zone d’activation en pixels. C’est le SPOTWIDTH de l’article et il s’agit du diamètre, pas du rayon.",
+        "dynaspot_lag": "Délai de réduction DynaSpot (plage : 0.0-5.0, défaut : 0.12)",
+        "dynaspot_lag_desc": "Temps d’attente avant que le spot commence à diminuer lorsque le pointeur s’arrête.",
+        "dynaspot_reduce_time": "Temps de réduction DynaSpot (plage : 0.001-10.0, défaut : 0.18)",
+        "dynaspot_reduce_time_desc": "Durée de la réduction co-exponentielle pour revenir vers un curseur ponctuel de 1 pixel.",
         "rake_params": "Réglages Rake Cursor",
-        "rake_camera_index": "Index de webcam",
+        "rake_camera_index": "Index de webcam (plage : 0-10, défaut : 0)",
         "rake_camera_index_desc": "Index de la caméra utilisée par WebEyeTrack pour estimer le regard.",
-        "rake_screen_width_cm": "Largeur écran (cm)",
+        "rake_screen_width_cm": "Largeur écran (cm) (plage : 10.0-200.0, défaut : écran courant détecté automatiquement)",
         "rake_screen_width_cm_desc": "Largeur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
-        "rake_screen_height_cm": "Hauteur écran (cm)",
+        "rake_screen_height_cm": "Hauteur écran (cm) (plage : 10.0-200.0, défaut : écran courant détecté automatiquement)",
         "rake_screen_height_cm_desc": "Hauteur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
-        "rake_spacing": "Espacement du rake",
+        "rake_spacing": "Espacement du rake (plage : 10.0-300.0, défaut : 72.0)",
         "rake_spacing_desc": "Distance en pixels entre le curseur central et les curseurs périphériques du rake.",
-        "rake_gaze_smoothing": "Lissage du regard",
+        "rake_gaze_smoothing": "Lissage du regard (plage : 0.0-0.95, défaut : 0.35)",
         "rake_gaze_smoothing_desc": "Des valeurs plus élevées stabilisent davantage le point de regard mais ajoutent du retard.",
-        "rake_gaze_gain": "Gain du regard",
-        "rake_gaze_gain_desc": "Amplifie la direction du regard autour du centre de la souris. Plus haut = de petits mouvements des yeux sélectionnent plus facilement les candidats périphériques.",
-        "rake_direction_threshold": "Seuil directionnel",
-        "rake_direction_threshold_desc": "Distance minimale du regard amplifié depuis le centre de la souris avant de sélectionner un candidat périphérique.",
-        "rake_selection_hold": "Temps de maintien",
-        "rake_selection_hold_desc": "Durée pendant laquelle le candidat périphérique sélectionné reste actif avant de pouvoir changer.",
+        "rake_gaze_gain": "Gain du regard (plage : 0.1-10.0, défaut : 2.0)",
+        "rake_gaze_gain_desc": "Contrôle à quel point la direction du regard éloigne la sélection du centre de la souris. Plus haut = les candidats périphériques s’activent plus facilement.",
+        "rake_selection_hold": "Temps de maintien (plage : 0.0-5.0, défaut : 0.5)",
+        "rake_selection_hold_desc": "Durée pendant laquelle le candidat sélectionné reste actif avant de pouvoir changer.",
         "rake_show_gaze": "Afficher le point de regard (rake uniquement, plage : off/on, défaut : on)",
         "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
         "apply": "Démarrer / Appliquer",
         "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
         "change_thresh_desc": "Plus haut = moins de rafraîchissements pour de petits changements. Plus bas = réaction plus rapide.",
-        "model_path": "Modèle YOLO (fichier .pt)",
+        "model_path": "Modèle YOLO (fichier .pt) (défaut : best.pt intégré)",
         "model_path_desc": "Laissez vide pour utiliser le fichier best.pt intégré. Choisissez un autre fichier .pt entraîné pour changer de modèle.",
         "browse": "Parcourir",
         "use_default_model": "Utiliser le best.pt intégré",
@@ -262,7 +237,7 @@ UI_TEXTS = {
         "disable_accel": "Désactiver l'accélération de la souris (sémantique uniquement, plage : off/on, défaut : off)",
         "disable_accel_short": "Désactiver l'accélération de la souris",
         "disable_accel_desc": "Rend le pointage sémantique plus stable, mais change la sensation de la souris pendant l'exécution.",
-        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : agrandit une zone d’activation circulaire quand la vitesse du pointeur augmente, tout en restant ponctuel à faible vitesse. Rake Cursor : utilise le regard via webcam pour sélectionner un curseur actif parmi plusieurs curseurs pilotés par la souris.",
+        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : garde le curseur système normal comme centre et agrandit une zone d’activation circulaire avec la vitesse tout en préservant les clics dans l’espace vide. Rake Cursor : utilise le regard via webcam pour sélectionner un curseur actif parmi plusieurs curseurs pilotés par la souris.",
         "contrast": "Contrast",
         "enable_tts": "Activer la synthèse vocale",
         "language": "Langue",
@@ -313,20 +288,15 @@ class PanelConfig:
     display: bool = False
     disable_accel: bool = False
     dynaspot_min_speed: float = DEFAULT_DYNASPOT_MIN_SPEED
-    dynaspot_max_speed: float = DEFAULT_DYNASPOT_MAX_SPEED
-    dynaspot_min_radius: float = DEFAULT_DYNASPOT_MIN_RADIUS
-    dynaspot_max_radius: float = DEFAULT_DYNASPOT_MAX_RADIUS
+    dynaspot_spot_width: float = DEFAULT_DYNASPOT_SPOT_WIDTH
     dynaspot_lag: float = DEFAULT_DYNASPOT_LAG
     dynaspot_reduce_time: float = DEFAULT_DYNASPOT_REDUCE_TIME
-    dynaspot_growth_smoothing: float = DEFAULT_DYNASPOT_GROWTH_SMOOTHING
-    dynaspot_shrink_smoothing: float = DEFAULT_DYNASPOT_SHRINK_SMOOTHING
     rake_camera_index: int = DEFAULT_RAKE_CAMERA_INDEX
     rake_screen_width_cm: float = DEFAULT_RAKE_SCREEN_WIDTH_CM
     rake_screen_height_cm: float = DEFAULT_RAKE_SCREEN_HEIGHT_CM
     rake_spacing: float = DEFAULT_RAKE_SPACING
     rake_gaze_smoothing: float = DEFAULT_RAKE_GAZE_SMOOTHING
     rake_gaze_gain: float = DEFAULT_RAKE_GAZE_GAIN
-    rake_direction_threshold: float = DEFAULT_RAKE_DIRECTION_THRESHOLD
     rake_selection_hold: float = DEFAULT_RAKE_SELECTION_HOLD
     rake_show_gaze: bool = True
 
@@ -850,26 +820,12 @@ class ControlPanel(QtWidgets.QWidget):
         self.dynaspot_min_speed_spin.setSingleStep(10.0)
         self.dynaspot_min_speed_spin.setValue(DEFAULT_DYNASPOT_MIN_SPEED)
 
-        self.dynaspot_max_speed_spin = QtWidgets.QDoubleSpinBox()
-        self.dynaspot_max_speed_spin.setKeyboardTracking(False)
-        self.dynaspot_max_speed_spin.setDecimals(1)
-        self.dynaspot_max_speed_spin.setRange(1.0, 10000.0)
-        self.dynaspot_max_speed_spin.setSingleStep(25.0)
-        self.dynaspot_max_speed_spin.setValue(DEFAULT_DYNASPOT_MAX_SPEED)
-
-        self.dynaspot_min_radius_spin = QtWidgets.QDoubleSpinBox()
-        self.dynaspot_min_radius_spin.setKeyboardTracking(False)
-        self.dynaspot_min_radius_spin.setDecimals(2)
-        self.dynaspot_min_radius_spin.setRange(0.0, 200.0)
-        self.dynaspot_min_radius_spin.setSingleStep(0.5)
-        self.dynaspot_min_radius_spin.setValue(DEFAULT_DYNASPOT_MIN_RADIUS)
-
-        self.dynaspot_max_radius_spin = QtWidgets.QDoubleSpinBox()
-        self.dynaspot_max_radius_spin.setKeyboardTracking(False)
-        self.dynaspot_max_radius_spin.setDecimals(2)
-        self.dynaspot_max_radius_spin.setRange(0.1, 400.0)
-        self.dynaspot_max_radius_spin.setSingleStep(1.0)
-        self.dynaspot_max_radius_spin.setValue(DEFAULT_DYNASPOT_MAX_RADIUS)
+        self.dynaspot_spot_width_spin = QtWidgets.QDoubleSpinBox()
+        self.dynaspot_spot_width_spin.setKeyboardTracking(False)
+        self.dynaspot_spot_width_spin.setDecimals(1)
+        self.dynaspot_spot_width_spin.setRange(1.0, 128.0)
+        self.dynaspot_spot_width_spin.setSingleStep(1.0)
+        self.dynaspot_spot_width_spin.setValue(DEFAULT_DYNASPOT_SPOT_WIDTH)
 
         self.dynaspot_lag_spin = QtWidgets.QDoubleSpinBox()
         self.dynaspot_lag_spin.setKeyboardTracking(False)
@@ -884,20 +840,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.dynaspot_reduce_time_spin.setRange(0.001, 10.0)
         self.dynaspot_reduce_time_spin.setSingleStep(0.01)
         self.dynaspot_reduce_time_spin.setValue(DEFAULT_DYNASPOT_REDUCE_TIME)
-
-        self.dynaspot_growth_smoothing_spin = QtWidgets.QDoubleSpinBox()
-        self.dynaspot_growth_smoothing_spin.setKeyboardTracking(False)
-        self.dynaspot_growth_smoothing_spin.setDecimals(2)
-        self.dynaspot_growth_smoothing_spin.setRange(0.0, 1.0)
-        self.dynaspot_growth_smoothing_spin.setSingleStep(0.01)
-        self.dynaspot_growth_smoothing_spin.setValue(DEFAULT_DYNASPOT_GROWTH_SMOOTHING)
-
-        self.dynaspot_shrink_smoothing_spin = QtWidgets.QDoubleSpinBox()
-        self.dynaspot_shrink_smoothing_spin.setKeyboardTracking(False)
-        self.dynaspot_shrink_smoothing_spin.setDecimals(2)
-        self.dynaspot_shrink_smoothing_spin.setRange(0.0, 1.0)
-        self.dynaspot_shrink_smoothing_spin.setSingleStep(0.01)
-        self.dynaspot_shrink_smoothing_spin.setValue(DEFAULT_DYNASPOT_SHRINK_SMOOTHING)
 
         self.rake_camera_index_spin = QtWidgets.QSpinBox()
         self.rake_camera_index_spin.setKeyboardTracking(False)
@@ -940,13 +882,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_gaze_gain_spin.setSingleStep(0.1)
         self.rake_gaze_gain_spin.setValue(DEFAULT_RAKE_GAZE_GAIN)
 
-        self.rake_direction_threshold_spin = QtWidgets.QDoubleSpinBox()
-        self.rake_direction_threshold_spin.setKeyboardTracking(False)
-        self.rake_direction_threshold_spin.setDecimals(1)
-        self.rake_direction_threshold_spin.setRange(0.0, 500.0)
-        self.rake_direction_threshold_spin.setSingleStep(5.0)
-        self.rake_direction_threshold_spin.setValue(DEFAULT_RAKE_DIRECTION_THRESHOLD)
-
         self.rake_selection_hold_spin = QtWidgets.QDoubleSpinBox()
         self.rake_selection_hold_spin.setKeyboardTracking(False)
         self.rake_selection_hold_spin.setDecimals(2)
@@ -970,19 +905,11 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_separator(),
             self._create_field_row("dynaspot_min_speed", self.dynaspot_min_speed_spin, "dynaspot_min_speed_desc"),
             self._create_separator(),
-            self._create_field_row("dynaspot_max_speed", self.dynaspot_max_speed_spin, "dynaspot_max_speed_desc"),
-            self._create_separator(),
-            self._create_field_row("dynaspot_min_radius", self.dynaspot_min_radius_spin, "dynaspot_min_radius_desc"),
-            self._create_separator(),
-            self._create_field_row("dynaspot_max_radius", self.dynaspot_max_radius_spin, "dynaspot_max_radius_desc"),
+            self._create_field_row("dynaspot_spot_width", self.dynaspot_spot_width_spin, "dynaspot_spot_width_desc"),
             self._create_separator(),
             self._create_field_row("dynaspot_lag", self.dynaspot_lag_spin, "dynaspot_lag_desc"),
             self._create_separator(),
             self._create_field_row("dynaspot_reduce_time", self.dynaspot_reduce_time_spin, "dynaspot_reduce_time_desc"),
-            self._create_separator(),
-            self._create_field_row("dynaspot_growth_smoothing", self.dynaspot_growth_smoothing_spin, "dynaspot_growth_smoothing_desc"),
-            self._create_separator(),
-            self._create_field_row("dynaspot_shrink_smoothing", self.dynaspot_shrink_smoothing_spin, "dynaspot_shrink_smoothing_desc"),
         ]
 
         self._rake_rows = [
@@ -998,8 +925,6 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("rake_gaze_smoothing", self.rake_gaze_smoothing_spin, "rake_gaze_smoothing_desc"),
             self._create_separator(),
             self._create_field_row("rake_gaze_gain", self.rake_gaze_gain_spin, "rake_gaze_gain_desc"),
-            self._create_separator(),
-            self._create_field_row("rake_direction_threshold", self.rake_direction_threshold_spin, "rake_direction_threshold_desc"),
             self._create_separator(),
             self._create_field_row("rake_selection_hold", self.rake_selection_hold_spin, "rake_selection_hold_desc"),
             self._create_separator(),
@@ -1087,20 +1012,15 @@ class ControlPanel(QtWidgets.QWidget):
         self.confidence_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.iou_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_min_speed_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.dynaspot_max_speed_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.dynaspot_min_radius_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.dynaspot_max_radius_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.dynaspot_spot_width_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_lag_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_reduce_time_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.dynaspot_growth_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.dynaspot_shrink_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_camera_index_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_screen_width_cm_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_screen_height_cm_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_spacing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_gaze_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_gaze_gain_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.rake_direction_threshold_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_selection_hold_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.display_cb.toggled.connect(self._handle_runtime_option_change)
         self.disable_accel_cb.toggled.connect(self._handle_runtime_option_change)
@@ -1115,20 +1035,15 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.confidence_spin, "confidence")
         self._register_numeric_field(self.iou_spin, "iou")
         self._register_numeric_field(self.dynaspot_min_speed_spin, "dynaspot_min_speed")
-        self._register_numeric_field(self.dynaspot_max_speed_spin, "dynaspot_max_speed")
-        self._register_numeric_field(self.dynaspot_min_radius_spin, "dynaspot_min_radius")
-        self._register_numeric_field(self.dynaspot_max_radius_spin, "dynaspot_max_radius")
+        self._register_numeric_field(self.dynaspot_spot_width_spin, "dynaspot_spot_width")
         self._register_numeric_field(self.dynaspot_lag_spin, "dynaspot_lag")
         self._register_numeric_field(self.dynaspot_reduce_time_spin, "dynaspot_reduce_time")
-        self._register_numeric_field(self.dynaspot_growth_smoothing_spin, "dynaspot_growth_smoothing")
-        self._register_numeric_field(self.dynaspot_shrink_smoothing_spin, "dynaspot_shrink_smoothing")
         self._register_numeric_field(self.rake_camera_index_spin, "rake_camera_index")
         self._register_numeric_field(self.rake_screen_width_cm_spin, "rake_screen_width_cm")
         self._register_numeric_field(self.rake_screen_height_cm_spin, "rake_screen_height_cm")
         self._register_numeric_field(self.rake_spacing_spin, "rake_spacing")
         self._register_numeric_field(self.rake_gaze_smoothing_spin, "rake_gaze_smoothing")
         self._register_numeric_field(self.rake_gaze_gain_spin, "rake_gaze_gain")
-        self._register_numeric_field(self.rake_direction_threshold_spin, "rake_direction_threshold")
         self._register_numeric_field(self.rake_selection_hold_spin, "rake_selection_hold")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
@@ -1304,20 +1219,12 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.iou_spin.text())
         elif sender is self.dynaspot_min_speed_spin:
             self._speak_auto_text(self.dynaspot_min_speed_spin.text())
-        elif sender is self.dynaspot_max_speed_spin:
-            self._speak_auto_text(self.dynaspot_max_speed_spin.text())
-        elif sender is self.dynaspot_min_radius_spin:
-            self._speak_auto_text(self.dynaspot_min_radius_spin.text())
-        elif sender is self.dynaspot_max_radius_spin:
-            self._speak_auto_text(self.dynaspot_max_radius_spin.text())
+        elif sender is self.dynaspot_spot_width_spin:
+            self._speak_auto_text(self.dynaspot_spot_width_spin.text())
         elif sender is self.dynaspot_lag_spin:
             self._speak_auto_text(self.dynaspot_lag_spin.text())
         elif sender is self.dynaspot_reduce_time_spin:
             self._speak_auto_text(self.dynaspot_reduce_time_spin.text())
-        elif sender is self.dynaspot_growth_smoothing_spin:
-            self._speak_auto_text(self.dynaspot_growth_smoothing_spin.text())
-        elif sender is self.dynaspot_shrink_smoothing_spin:
-            self._speak_auto_text(self.dynaspot_shrink_smoothing_spin.text())
         elif sender is self.rake_camera_index_spin:
             self._speak_auto_text(self.rake_camera_index_spin.text())
         elif sender is self.rake_screen_width_cm_spin:
@@ -1330,8 +1237,6 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.rake_gaze_smoothing_spin.text())
         elif sender is self.rake_gaze_gain_spin:
             self._speak_auto_text(self.rake_gaze_gain_spin.text())
-        elif sender is self.rake_direction_threshold_spin:
-            self._speak_auto_text(self.rake_direction_threshold_spin.text())
         elif sender is self.rake_selection_hold_spin:
             self._speak_auto_text(self.rake_selection_hold_spin.text())
         elif sender is self.display_cb:
@@ -1749,20 +1654,15 @@ class ControlPanel(QtWidgets.QWidget):
             self.confidence_spin,
             self.iou_spin,
             self.dynaspot_min_speed_spin,
-            self.dynaspot_max_speed_spin,
-            self.dynaspot_min_radius_spin,
-            self.dynaspot_max_radius_spin,
+            self.dynaspot_spot_width_spin,
             self.dynaspot_lag_spin,
             self.dynaspot_reduce_time_spin,
-            self.dynaspot_growth_smoothing_spin,
-            self.dynaspot_shrink_smoothing_spin,
             self.rake_camera_index_spin,
             self.rake_screen_width_cm_spin,
             self.rake_screen_height_cm_spin,
             self.rake_spacing_spin,
             self.rake_gaze_smoothing_spin,
             self.rake_gaze_gain_spin,
-            self.rake_direction_threshold_spin,
             self.rake_selection_hold_spin,
         ):
             widget.interpretText()
@@ -1785,20 +1685,15 @@ class ControlPanel(QtWidgets.QWidget):
             display=self.display_cb.isChecked(),
             disable_accel=self.disable_accel_cb.isChecked(),
             dynaspot_min_speed=self.dynaspot_min_speed_spin.value(),
-            dynaspot_max_speed=self.dynaspot_max_speed_spin.value(),
-            dynaspot_min_radius=self.dynaspot_min_radius_spin.value(),
-            dynaspot_max_radius=self.dynaspot_max_radius_spin.value(),
+            dynaspot_spot_width=self.dynaspot_spot_width_spin.value(),
             dynaspot_lag=self.dynaspot_lag_spin.value(),
             dynaspot_reduce_time=self.dynaspot_reduce_time_spin.value(),
-            dynaspot_growth_smoothing=self.dynaspot_growth_smoothing_spin.value(),
-            dynaspot_shrink_smoothing=self.dynaspot_shrink_smoothing_spin.value(),
             rake_camera_index=self.rake_camera_index_spin.value(),
             rake_screen_width_cm=self.rake_screen_width_cm_spin.value(),
             rake_screen_height_cm=self.rake_screen_height_cm_spin.value(),
             rake_spacing=self.rake_spacing_spin.value(),
             rake_gaze_smoothing=self.rake_gaze_smoothing_spin.value(),
             rake_gaze_gain=self.rake_gaze_gain_spin.value(),
-            rake_direction_threshold=self.rake_direction_threshold_spin.value(),
             rake_selection_hold=self.rake_selection_hold_spin.value(),
             rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
             enable_bubble_cursor=mode == "bubble",
@@ -1825,20 +1720,15 @@ class ControlPanel(QtWidgets.QWidget):
         self.display_cb.setChecked(cfg.display)
         self.disable_accel_cb.setChecked(cfg.disable_accel)
         self.dynaspot_min_speed_spin.setValue(cfg.dynaspot_min_speed)
-        self.dynaspot_max_speed_spin.setValue(cfg.dynaspot_max_speed)
-        self.dynaspot_min_radius_spin.setValue(cfg.dynaspot_min_radius)
-        self.dynaspot_max_radius_spin.setValue(cfg.dynaspot_max_radius)
+        self.dynaspot_spot_width_spin.setValue(cfg.dynaspot_spot_width)
         self.dynaspot_lag_spin.setValue(cfg.dynaspot_lag)
         self.dynaspot_reduce_time_spin.setValue(cfg.dynaspot_reduce_time)
-        self.dynaspot_growth_smoothing_spin.setValue(cfg.dynaspot_growth_smoothing)
-        self.dynaspot_shrink_smoothing_spin.setValue(cfg.dynaspot_shrink_smoothing)
         self.rake_camera_index_spin.setValue(cfg.rake_camera_index)
         self.rake_screen_width_cm_spin.setValue(cfg.rake_screen_width_cm)
         self.rake_screen_height_cm_spin.setValue(cfg.rake_screen_height_cm)
         self.rake_spacing_spin.setValue(cfg.rake_spacing)
         self.rake_gaze_smoothing_spin.setValue(cfg.rake_gaze_smoothing)
         self.rake_gaze_gain_spin.setValue(cfg.rake_gaze_gain)
-        self.rake_direction_threshold_spin.setValue(cfg.rake_direction_threshold)
         self.rake_selection_hold_spin.setValue(cfg.rake_selection_hold)
         self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
@@ -1892,13 +1782,9 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.display = False
         cfg.disable_accel = False
         cfg.dynaspot_min_speed = DEFAULT_DYNASPOT_MIN_SPEED
-        cfg.dynaspot_max_speed = DEFAULT_DYNASPOT_MAX_SPEED
-        cfg.dynaspot_min_radius = DEFAULT_DYNASPOT_MIN_RADIUS
-        cfg.dynaspot_max_radius = DEFAULT_DYNASPOT_MAX_RADIUS
+        cfg.dynaspot_spot_width = DEFAULT_DYNASPOT_SPOT_WIDTH
         cfg.dynaspot_lag = DEFAULT_DYNASPOT_LAG
         cfg.dynaspot_reduce_time = DEFAULT_DYNASPOT_REDUCE_TIME
-        cfg.dynaspot_growth_smoothing = DEFAULT_DYNASPOT_GROWTH_SMOOTHING
-        cfg.dynaspot_shrink_smoothing = DEFAULT_DYNASPOT_SHRINK_SMOOTHING
         detected_screen_width_cm, detected_screen_height_cm = self._current_screen_physical_size_cm()
         cfg.rake_camera_index = DEFAULT_RAKE_CAMERA_INDEX
         cfg.rake_screen_width_cm = detected_screen_width_cm
@@ -1906,7 +1792,6 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.rake_spacing = DEFAULT_RAKE_SPACING
         cfg.rake_gaze_smoothing = DEFAULT_RAKE_GAZE_SMOOTHING
         cfg.rake_gaze_gain = DEFAULT_RAKE_GAZE_GAIN
-        cfg.rake_direction_threshold = DEFAULT_RAKE_DIRECTION_THRESHOLD
         cfg.rake_selection_hold = DEFAULT_RAKE_SELECTION_HOLD
         cfg.rake_show_gaze = True
         cfg.high_contrast_mode = False
@@ -1949,13 +1834,9 @@ class ControlPanel(QtWidgets.QWidget):
         if cfg.enable_dynaspot:
             cmd += [
                 "--min-speed", str(cfg.dynaspot_min_speed),
-                "--max-speed", str(cfg.dynaspot_max_speed),
-                "--min-radius", str(cfg.dynaspot_min_radius),
-                "--max-radius", str(cfg.dynaspot_max_radius),
+                "--spot-width", str(cfg.dynaspot_spot_width),
                 "--lag", str(cfg.dynaspot_lag),
                 "--reduce-time", str(cfg.dynaspot_reduce_time),
-                "--growth-smoothing", str(cfg.dynaspot_growth_smoothing),
-                "--shrink-smoothing", str(cfg.dynaspot_shrink_smoothing),
             ]
         if cfg.enable_rake_cursor:
             cmd += [
@@ -1965,7 +1846,6 @@ class ControlPanel(QtWidgets.QWidget):
                 "--rake-spacing", str(cfg.rake_spacing),
                 "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
                 "--gaze-gain", str(cfg.rake_gaze_gain),
-                "--direction-threshold", str(cfg.rake_direction_threshold),
                 "--selection-hold", str(cfg.rake_selection_hold),
             ]
             if not cfg.rake_show_gaze:

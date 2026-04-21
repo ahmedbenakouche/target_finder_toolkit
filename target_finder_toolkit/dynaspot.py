@@ -23,30 +23,33 @@ from pynput import keyboard, mouse
 import argparse
 
 from target_finder_toolkit.targetfinder import TargetFinder
-from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
+from target_finder_toolkit.mouse_utils import restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
 from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["dynaspot", "main"]
 
+pyautogui.PAUSE = 0
+pyautogui.MINIMUM_DURATION = 0
+
 
 class DynaSpot(QtWidgets.QWidget):
     """
-    PyQt overlay widget implementing a DynaSpot-like speed-dependent area cursor.
+    PyQt overlay widget implementing the paper-style DynaSpot speed-dependent area cursor.
 
-    The cursor behaves like a point cursor at low speed and gradually grows
-    a circular activation area when the pointer moves faster.
+    The system cursor remains visible and acts as the cursor center. A translucent
+    circular activation area grows when pointer speed exceeds a threshold. When the
+    area overlaps multiple targets, the closest one to the cursor center is selected.
     """
 
-    MIN_SPEED = 120.0
-    MAX_SPEED = 1600.0
-    MIN_RADIUS = 0.5
-    MAX_RADIUS = 28.0
-    LAG = 0.08
-    REDUCE_TIME = 0.20
-    GROWTH_SMOOTHING = 0.35
-    SHRINK_SMOOTHING = 0.18
-    TEXT_MARGIN = 20
+    POINT_WIDTH = 1.0
+    MIN_SPEED = 100.0
+    SPOT_WIDTH = 32.0
+    LAG = 0.12
+    REDUCE_TIME = 0.18
+    GROWTH_FACTOR = 1.2
+    CO_EXPONENTIAL_POWER = 3.0
+    CLICK_EPSILON = 3.0
 
     def __init__(
         self,
@@ -55,13 +58,9 @@ class DynaSpot(QtWidgets.QWidget):
         logger=None,
         *,
         min_speed: float | None = None,
-        max_speed: float | None = None,
-        min_radius: float | None = None,
-        max_radius: float | None = None,
+        spot_width: float | None = None,
         lag: float | None = None,
         reduce_time: float | None = None,
-        growth_smoothing: float | None = None,
-        shrink_smoothing: float | None = None,
     ):
         super().__init__()
         self.detector = detector
@@ -71,30 +70,27 @@ class DynaSpot(QtWidgets.QWidget):
         self.cursor_filter = cursor_filter
         self.logger = logger
         self.min_speed = float(self.MIN_SPEED if min_speed is None else min_speed)
-        self.max_speed = float(self.MAX_SPEED if max_speed is None else max_speed)
-        self.min_radius = float(self.MIN_RADIUS if min_radius is None else min_radius)
-        self.max_radius = float(self.MAX_RADIUS if max_radius is None else max_radius)
+        self.spot_width = float(self.SPOT_WIDTH if spot_width is None else spot_width)
         self.lag = float(self.LAG if lag is None else lag)
         self.reduce_time = float(self.REDUCE_TIME if reduce_time is None else reduce_time)
-        self.growth_smoothing = float(self.GROWTH_SMOOTHING if growth_smoothing is None else growth_smoothing)
-        self.shrink_smoothing = float(self.SHRINK_SMOOTHING if shrink_smoothing is None else shrink_smoothing)
 
         self._mouse_listener = None
         self._keyboard_listener = None
-        self._cursor_refresh_timer = None
-        self._last_rehide_at = 0.0
 
         self.enabled = True
-        self._simulating_click = False
         self._last_target = None
+        self._last_target_click = None
         self._last_target_info = None
-        self._spot_radius = self.min_radius
-        self._last_cursor_pos = QtCore.QPointF(QtGui.QCursor.pos())
+        self._pending_click_target = None
+        self._pending_click_point = None
+        self._selected_detection = None
+        self._spot_current_width = self.POINT_WIDTH
+        self._last_speed_point = QtCore.QPointF(QtGui.QCursor.pos())
         now = time.monotonic()
-        self._last_sample_at = now
+        self._last_input_at = now
         self._last_motion_at = now
         self._shrink_start_at = None
-        self._shrink_start_radius = 0.5
+        self._shrink_start_width = self.POINT_WIDTH
 
         self._start_mouse_listener()
         self._start_keyboard_listener()
@@ -121,11 +117,6 @@ class DynaSpot(QtWidgets.QWidget):
         self._timer.timeout.connect(self.update)
         self._timer.start(10)
 
-        if sys.platform == "darwin":
-            self._cursor_refresh_timer = QtCore.QTimer(self)
-            self._cursor_refresh_timer.timeout.connect(self._rehide_cursor)
-            self._cursor_refresh_timer.start(30)
-
     def _screen_for_point(self, x: int, y: int):
         app = QtWidgets.QApplication.instance()
         if app is None:
@@ -141,73 +132,109 @@ class DynaSpot(QtWidgets.QWidget):
         point = QtCore.QPoint(int(x), int(y))
         return not screen.availableGeometry().contains(point)
 
-    def _update_spot_radius(self, cursor_pos: QtCore.QPointF):
+    def _spot_radius(self) -> float:
+        return self._spot_current_width / 2.0
+
+    def _update_spot_width(self):
         now = time.monotonic()
-        dt = max(now - self._last_sample_at, 1e-3)
-        dx = cursor_pos.x() - self._last_cursor_pos.x()
-        dy = cursor_pos.y() - self._last_cursor_pos.y()
+        idle_for = now - self._last_motion_at
+        if idle_for < self.lag:
+            return
+
+        if self._shrink_start_at is None:
+            self._shrink_start_at = now
+            self._shrink_start_width = self._spot_current_width
+        progress = min(1.0, (now - self._shrink_start_at) / max(self.reduce_time, 1e-6))
+        reduction_fraction = progress ** self.CO_EXPONENTIAL_POWER
+        self._spot_current_width = self.POINT_WIDTH + (
+            self._shrink_start_width - self.POINT_WIDTH
+        ) * (1.0 - reduction_fraction)
+
+    @QtCore.pyqtSlot(int, int)
+    def _handle_pointer_move_event(self, x: int, y: int):
+        now = time.monotonic()
+        speed_x, speed_y = float(x), float(y)
+        if self.cursor_filter is not None:
+            speed_x, speed_y = self.cursor_filter.filter(speed_x, speed_y)
+        speed_point = QtCore.QPointF(speed_x, speed_y)
+        dt = max(now - self._last_input_at, 1e-3)
+        dx = speed_point.x() - self._last_speed_point.x()
+        dy = speed_point.y() - self._last_speed_point.y()
         dist = math.hypot(dx, dy)
         speed = dist / dt
 
-        moved = dist > 0.5
+        moved = dist > 0.5  # Ignore tiny jitter between input events.
         if moved:
             self._last_motion_at = now
             self._shrink_start_at = None
-            if speed <= self.min_speed:
-                target_radius = self.min_radius
-            else:
-                speed_ratio = min(1.0, (speed - self.min_speed) / max(1.0, self.max_speed - self.min_speed))
-                eased_ratio = 1.0 - (1.0 - speed_ratio) ** 2
-                target_radius = self.min_radius + eased_ratio * (self.max_radius - self.min_radius)
-            self._spot_radius += (target_radius - self._spot_radius) * self.growth_smoothing
-        else:
-            idle_for = now - self._last_motion_at
-            if idle_for >= self.lag:
-                if self._shrink_start_at is None:
-                    self._shrink_start_at = now
-                    self._shrink_start_radius = self._spot_radius
-                progress = min(1.0, (now - self._shrink_start_at) / max(self.reduce_time, 1e-6))
-                target_radius = self.min_radius + (self._shrink_start_radius - self.min_radius) * (1.0 - progress)
-                self._spot_radius += (target_radius - self._spot_radius) * self.shrink_smoothing
+            if speed >= self.min_speed:
+                self._spot_current_width = min(
+                    self.spot_width,
+                    max(self.POINT_WIDTH, self._spot_current_width * self.GROWTH_FACTOR),
+                )
 
-        self._last_sample_at = now
-        self._last_cursor_pos = QtCore.QPointF(cursor_pos)
+        self._last_input_at = now
+        self._last_speed_point = QtCore.QPointF(speed_point)
 
-    def _select_target(self, cx: float, cy: float, detections):
-        cursor_on_non_text = False
-        for x, y, w, h, score, cls_id in detections:
-            if cls_id != 3 and x <= cx <= x + w and y <= cy <= y + h:
-                cursor_on_non_text = True
-                break
-        if not cursor_on_non_text:
-            for x, y, w, h, score, cls_id in detections:
-                if cls_id == 3:
-                    if ((x - self.TEXT_MARGIN) <= cx <= (x + w + self.TEXT_MARGIN)
-                            and (y - self.TEXT_MARGIN) <= cy <= (y + h + self.TEXT_MARGIN)):
-                        return None
-
+    def _select_target(self, cx: float, cy: float):
+        radius = self._spot_radius()
         candidates = []
-        for x, y, w, h, score, cls_id in detections:
-            if cls_id == 3:
+        for det in self.detector.get_detection_dicts():
+            if det.get("class_id") == 3:
                 continue
-            cx_box = x + w / 2
-            cy_box = y + h / 2
-            dx = max(0.0, abs(cx - cx_box) - w / 2)
-            dy = max(0.0, abs(cy - cy_box) - h / 2)
+            x = float(det["x"])
+            y = float(det["y"])
+            w = float(det["width"])
+            h = float(det["height"])
+            cx_box = x + w / 2.0
+            cy_box = y + h / 2.0
+            dx = max(0.0, abs(cx - cx_box) - w / 2.0)
+            dy = max(0.0, abs(cy - cy_box) - h / 2.0)
             int_d = math.hypot(dx, dy)
-            if int_d <= self._spot_radius:
+            if int_d <= radius:
                 center_d = math.hypot(cx - cx_box, cy - cy_box)
-                candidates.append((center_d, int_d, cx_box, cy_box, w, h, cls_id))
+                area = w * h
+                candidates.append((center_d, area, -float(det.get("score", 0.0)), det))
 
         if not candidates:
             return None
 
-        candidates.sort(key=lambda item: (item[0], item[1]))
-        _, _, tx, ty, w, h, cls_id = candidates[0]
-        return (tx, ty, w, h, cls_id)
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        return candidates[0][3]
+
+    def _set_selected_target(self, selected_det):
+        self._selected_detection = selected_det
+        if selected_det is None:
+            self._last_target = None
+            self._last_target_click = None
+            self._last_target_info = None
+            return
+
+        tx = float(selected_det["x"]) + float(selected_det["width"]) / 2.0
+        ty = float(selected_det["y"]) + float(selected_det["height"]) / 2.0
+        w = float(selected_det["width"])
+        h = float(selected_det["height"])
+        self._last_target = (tx, ty, w, h)
+        scale_x = max(float(getattr(self.detector, "sx", 1.0) or 1.0), 1e-6)
+        scale_y = max(float(getattr(self.detector, "sy", 1.0) or 1.0), 1e-6)
+        if sys.platform == "darwin":
+            self._last_target_click = (tx, ty)
+        else:
+            self._last_target_click = (tx / scale_x, ty / scale_y)
+        self._last_target_info = TargetFinder._compact_detection(selected_det)
+
+    def _draw_selected_target(self, painter: QtGui.QPainter):
+        if self._selected_detection is None:
+            return
+        x = float(self._selected_detection["x"])
+        y = float(self._selected_detection["y"])
+        w = float(self._selected_detection["width"])
+        h = float(self._selected_detection["height"])
+        painter.setPen(QtGui.QPen(QtGui.QColor(255, 80, 80, 220), 3))
+        painter.setBrush(QtGui.QColor(255, 80, 80, 44))
+        painter.drawRoundedRect(QtCore.QRectF(x, y, w, h), 8, 8)
 
     def paintEvent(self, event):
-        detections = self.detector.get_detections()
         if not self.enabled:
             return
 
@@ -217,85 +244,45 @@ class DynaSpot(QtWidgets.QWidget):
         pos = QtGui.QCursor.pos()
         raw_x, raw_y = float(pos.x()), float(pos.y())
         cx, cy = raw_x, raw_y
+        speed_x, speed_y = raw_x, raw_y
         if self.cursor_filter is not None:
-            cx, cy = self.cursor_filter.filter(raw_x, raw_y)
+            speed_x, speed_y = self.cursor_filter.filter(raw_x, raw_y)
 
-        self._update_spot_radius(QtCore.QPointF(cx, cy))
-        target = self._select_target(cx, cy, detections) if detections else None
+        self._update_spot_width()
+        self._set_selected_target(self._select_target(cx, cy))
 
-        if target is None:
-            self._last_target = None
-            self._last_target_info = None
-        else:
-            tx, ty, w, h, _cls_id = target
-            self._last_target = (
-                tx / self.detector.sx,
-                ty / self.detector.sy,
-                w / self.detector.sx,
-                h / self.detector.sy,
-            )
-            self._last_target_info = self.detector.find_detection_by_geometry(
-                tx, ty, w, h, class_id=_cls_id
-            )
-        if self._spot_radius > self.min_radius + 0.5:
-            radius_ratio = min(1.0, (self._spot_radius - self.min_radius) / max(1.0, self.max_radius - self.min_radius))
-            ring_alpha = int(135 + 75 * radius_ratio)
-            fill_alpha = int(10 + 26 * radius_ratio)
-            pen = QtGui.QPen(QtGui.QColor(70, 255, 120, ring_alpha), 3)
-            painter.setPen(pen)
-            painter.setBrush(QtGui.QColor(70, 255, 120, fill_alpha))
-            painter.drawEllipse(QtCore.QPointF(cx, cy), self._spot_radius, self._spot_radius)
-
-            inner_radius = max(3.0, self._spot_radius * 0.42)
-            inner_pen = QtGui.QPen(QtGui.QColor(255, 255, 255, int(45 + 55 * radius_ratio)), 1)
-            painter.setPen(inner_pen)
-            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(QtCore.QPointF(cx, cy), inner_radius, inner_radius)
-
-        self._draw_fake_cursor(painter, cx, cy)
+        if self._spot_current_width > self.POINT_WIDTH + 0.25:
+            radius = self._spot_radius()
+            painter.setPen(QtGui.QPen(QtGui.QColor(60, 60, 60, 170), 2))
+            painter.setBrush(QtGui.QColor(145, 145, 145, 68))
+            painter.drawEllipse(QtCore.QPointF(cx, cy), radius, radius)
+        self._draw_selected_target(painter)
         if self.logger is not None:
             self.logger.log_cursor_sample(
                 raw_x=raw_x,
                 raw_y=raw_y,
-                filtered_x=cx,
-                filtered_y=cy,
+                filtered_x=speed_x,
+                filtered_y=speed_y,
                 technique="dynaspot",
                 filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
-                dynaspot_radius=round(float(self._spot_radius), 3),
+                dynaspot_width=round(float(self._spot_current_width), 3),
+                dynaspot_radius=round(float(self._spot_radius()), 3),
                 has_target=self._last_target is not None,
             )
         painter.end()
-
-    def _draw_fake_cursor(self, painter, cx, cy):
-        active = self._spot_radius > self.min_radius + 0.5
-        pen = QtGui.QPen(
-            QtGui.QColor(255, 255, 255, 240 if active else 220),
-            2,
-        )
-        painter.setPen(pen)
-        fill = QtGui.QColor(255, 255, 255, 22 if active else 0)
-        painter.setBrush(fill if active else QtCore.Qt.BrushStyle.NoBrush)
-        radius_cursor = 6
-        center = QtCore.QPointF(cx, cy)
-        painter.drawEllipse(center, radius_cursor, radius_cursor)
-        line_len = 4
-        gap = radius_cursor + 1
-        painter.drawLine(QtCore.QLineF(cx, cy - gap - line_len, cx, cy - gap))
-        painter.drawLine(QtCore.QLineF(cx, cy + gap, cx, cy + gap + line_len))
-        painter.drawLine(QtCore.QLineF(cx + gap, cy, cx + gap + line_len, cy))
-        painter.drawLine(QtCore.QLineF(cx - gap - line_len, cy, cx - gap, cy))
 
     @QtCore.pyqtSlot()
     def toggle_dynaspot(self):
         self.enabled = not self.enabled
         if self.enabled:
             self.detector.start()
-            hide_cursor_everywhere()
         else:
             self.detector.stop()
-            restore_default_cursors()
             self._last_target = None
-            self._spot_radius = self.min_radius
+            self._last_target_click = None
+            self._last_target_info = None
+            self._selected_detection = None
+            self._spot_current_width = self.POINT_WIDTH
         self.update()
 
     @QtCore.pyqtSlot()
@@ -314,9 +301,10 @@ class DynaSpot(QtWidgets.QWidget):
             except Exception:
                 pass
             self._keyboard_listener = None
-        if self._cursor_refresh_timer is not None:
-            self._cursor_refresh_timer.stop()
         restore_default_cursors()
+        self._last_target = None
+        self._last_target_click = None
+        self._last_target_info = None
         if self.logger is not None:
             self.logger.log_session_end(reason="quit")
             self.logger.close()
@@ -340,9 +328,10 @@ class DynaSpot(QtWidgets.QWidget):
             except Exception:
                 pass
             self._keyboard_listener = None
-        if self._cursor_refresh_timer is not None:
-            self._cursor_refresh_timer.stop()
         restore_default_cursors()
+        self._last_target = None
+        self._last_target_click = None
+        self._last_target_info = None
         super().closeEvent(event)
 
     def _start_keyboard_listener(self):
@@ -358,36 +347,19 @@ class DynaSpot(QtWidgets.QWidget):
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 
-    @QtCore.pyqtSlot()
-    def _rehide_cursor(self):
-        if not self.enabled:
-            return
-        hide_cursor_everywhere()
-        if sys.platform == "darwin":
-            QtCore.QTimer.singleShot(0, hide_cursor_everywhere)
-            QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
-            QtCore.QTimer.singleShot(75, hide_cursor_everywhere)
-
     def _start_mouse_listener(self):
-        def queue_rehide(force=False):
-            if sys.platform != "darwin":
-                return
-            now = time.monotonic()
-            if not force and now - self._last_rehide_at < 0.008:
-                return
-            self._last_rehide_at = now
+        def on_move(x, y):
             QtCore.QMetaObject.invokeMethod(
                 self,
-                "_rehide_cursor",
+                "_handle_pointer_move_event",
                 QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(int, int(round(x))),
+                QtCore.Q_ARG(int, int(round(y))),
             )
 
-        def on_move(x, y):
-            queue_rehide()
-
         def on_click(x, y, button, pressed):
-            if button == button.left:
-                queue_rehide(force=True)
+            if sys.platform == "darwin":
+                return
             if pressed and button == button.left:
                 if self._in_system_reserved_area(x, y):
                     return
@@ -399,8 +371,59 @@ class DynaSpot(QtWidgets.QWidget):
                     QtCore.Q_ARG(int, y),
                 )
 
-        self._mouse_listener = mouse.Listener(on_move=on_move, on_click=on_click)
+        kwargs = {"on_move": on_move, "on_click": on_click}
+        if sys.platform == "darwin":
+            kwargs["darwin_intercept"] = self._intercept_mouse_event
+        self._mouse_listener = mouse.Listener(**kwargs)
         self._mouse_listener.start()
+
+    def _intercept_mouse_event(self, event_type, event):
+        try:
+            import Quartz
+        except Exception:
+            return event
+
+        if event_type not in (
+            Quartz.kCGEventLeftMouseDown,
+            Quartz.kCGEventLeftMouseUp,
+        ):
+            return event
+
+        try:
+            px, py = Quartz.CGEventGetLocation(event)
+        except Exception:
+            return event
+
+        if self._in_system_reserved_area(int(px), int(py)):
+            return event
+
+        if event_type == Quartz.kCGEventLeftMouseDown:
+            self._pending_click_point = self._last_target
+            self._pending_click_target = self._last_target_info
+
+        target = self._pending_click_point or self._last_target
+        if target is None:
+            return event
+
+        tx, ty, w, h = target
+        redirected = not (tx - w / 2 <= px <= tx + w / 2 and ty - h / 2 <= py <= ty + h / 2)
+        if redirected:
+            Quartz.CGEventSetLocation(event, Quartz.CGPointMake(float(tx), float(ty)))
+
+        if event_type == Quartz.kCGEventLeftMouseUp:
+            if self.logger is not None:
+                effective_x = float(tx) if redirected else float(px)
+                effective_y = float(ty) if redirected else float(py)
+                self.logger.log_click(
+                    technique="dynaspot",
+                    raw=[round(float(px), 3), round(float(py), 3)],
+                    effective=[round(effective_x, 3), round(effective_y, 3)],
+                    redirected=redirected,
+                    target=self._pending_click_target,
+                )
+            self._pending_click_point = None
+            self._pending_click_target = None
+        return event
 
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
@@ -437,12 +460,12 @@ class DynaSpot(QtWidgets.QWidget):
                 )
             return
 
-        self._mouse_listener.stop()
+        click_tx, click_ty = self._last_target_click
+        if self._mouse_listener is not None:
+            self._mouse_listener.stop()
+            self._mouse_listener = None
         try:
-            pyautogui.mouseUp(button='left')
-            pyautogui.moveTo(tx, ty)
-            pyautogui.click()
-            pyautogui.moveTo(orig_x, orig_y)
+            self._send_click(orig_x, orig_y, click_tx, click_ty)
         except pyautogui.FailSafeException:
             pass
         finally:
@@ -450,12 +473,43 @@ class DynaSpot(QtWidgets.QWidget):
                 self.logger.log_click(
                     technique="dynaspot",
                     raw=[orig_x, orig_y],
-                    effective=[round(tx, 3), round(ty, 3)],
+                    effective=[round(click_tx, 3), round(click_ty, 3)],
                     redirected=True,
                     target=self._last_target_info,
                 )
-            self._rehide_cursor()
             self._start_mouse_listener()
+
+    def _send_click(self, orig_x: float, orig_y: float, tx: float, ty: float):
+        if sys.platform == "darwin":
+            self._send_macos_click(float(orig_x), float(orig_y), float(tx), float(ty))
+            return
+
+        pyautogui.mouseUp(button='left')
+        pyautogui.moveTo(tx, ty)
+        pyautogui.click()
+        pyautogui.moveTo(orig_x, orig_y)
+
+    def _send_macos_click(self, orig_x: float, orig_y: float, tx: float, ty: float):
+        import Quartz
+
+        def post_mouse_event(event_type, x, y):
+            event = Quartz.CGEventCreateMouseEvent(
+                None,
+                event_type,
+                (x, y),
+                Quartz.kCGMouseButtonLeft,
+            )
+            if event_type in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
+                Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, 1)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+        post_mouse_event(Quartz.kCGEventMouseMoved, tx, ty)
+        time.sleep(0.015)
+        post_mouse_event(Quartz.kCGEventLeftMouseDown, tx, ty)
+        time.sleep(0.025)
+        post_mouse_event(Quartz.kCGEventLeftMouseUp, tx, ty)
+        time.sleep(0.03)
+        post_mouse_event(Quartz.kCGEventMouseMoved, orig_x, orig_y)
 
 
 def dynaspot(
@@ -465,7 +519,6 @@ def dynaspot(
     **dynaspot_kwargs,
 ):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    hide_cursor_everywhere()
     ov = DynaSpot(detector, cursor_filter=cursor_filter, logger=logger, **dynaspot_kwargs)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
@@ -487,14 +540,10 @@ def main():
     parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
     parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
-    parser.add_argument('--min-speed', type=float, default=DynaSpot.MIN_SPEED, help="Minimum speed before the DynaSpot radius starts growing")
-    parser.add_argument('--max-speed', type=float, default=DynaSpot.MAX_SPEED, help="Speed at which the DynaSpot radius reaches its maximum")
-    parser.add_argument('--min-radius', type=float, default=DynaSpot.MIN_RADIUS, help="Minimum DynaSpot radius")
-    parser.add_argument('--max-radius', type=float, default=DynaSpot.MAX_RADIUS, help="Maximum DynaSpot radius")
-    parser.add_argument('--lag', type=float, default=DynaSpot.LAG, help="Delay before the radius begins shrinking after motion stops")
-    parser.add_argument('--reduce-time', type=float, default=DynaSpot.REDUCE_TIME, help="Time used to shrink the radius back toward its minimum")
-    parser.add_argument('--growth-smoothing', type=float, default=DynaSpot.GROWTH_SMOOTHING, help="Smoothing factor applied while the spot grows")
-    parser.add_argument('--shrink-smoothing', type=float, default=DynaSpot.SHRINK_SMOOTHING, help="Smoothing factor applied while the spot shrinks")
+    parser.add_argument('--min-speed', type=float, default=DynaSpot.MIN_SPEED, help="Minimum speed threshold (px/s) before the DynaSpot area starts growing")
+    parser.add_argument('--spot-width', type=float, default=DynaSpot.SPOT_WIDTH, help="Maximum DynaSpot spot width (diameter in pixels)")
+    parser.add_argument('--lag', type=float, default=DynaSpot.LAG, help="Delay before the spot starts shrinking after motion stops")
+    parser.add_argument('--reduce-time', type=float, default=DynaSpot.REDUCE_TIME, help="Time used to shrink the spot back to a point")
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -514,13 +563,9 @@ def main():
             confidence=args.confidence,
             iou=args.iou,
             min_speed=args.min_speed,
-            max_speed=args.max_speed,
-            min_radius=args.min_radius,
-            max_radius=args.max_radius,
+            spot_width=args.spot_width,
             lag=args.lag,
             reduce_time=args.reduce_time,
-            growth_smoothing=args.growth_smoothing,
-            shrink_smoothing=args.shrink_smoothing,
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
     dynaspot(
@@ -528,13 +573,9 @@ def main():
         cursor_filter=cursor_filter,
         logger=logger,
         min_speed=args.min_speed,
-        max_speed=args.max_speed,
-        min_radius=args.min_radius,
-        max_radius=args.max_radius,
+        spot_width=args.spot_width,
         lag=args.lag,
         reduce_time=args.reduce_time,
-        growth_smoothing=args.growth_smoothing,
-        shrink_smoothing=args.shrink_smoothing,
     )
 
 

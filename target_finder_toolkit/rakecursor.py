@@ -134,7 +134,7 @@ class RakeCursor(QtWidgets.QWidget):
     DEFAULT_RAKE_SPACING = 72.0
     DEFAULT_GAZE_SMOOTHING = 0.35
     DEFAULT_GAZE_GAIN = 2.0
-    DEFAULT_DIRECTION_THRESHOLD = 35.0
+    FIXED_DIRECTION_THRESHOLD = 35.0
     DEFAULT_SELECTION_HOLD = 0.5
     DEFAULT_SHOW_GAZE = True
     CURSOR_RADIUS = 6.0
@@ -186,7 +186,6 @@ class RakeCursor(QtWidgets.QWidget):
         rake_spacing: float = DEFAULT_RAKE_SPACING,
         gaze_smoothing: float = DEFAULT_GAZE_SMOOTHING,
         gaze_gain: float = DEFAULT_GAZE_GAIN,
-        direction_threshold: float = DEFAULT_DIRECTION_THRESHOLD,
         selection_hold: float = DEFAULT_SELECTION_HOLD,
         show_gaze: bool = DEFAULT_SHOW_GAZE,
     ):
@@ -212,7 +211,7 @@ class RakeCursor(QtWidgets.QWidget):
         self.rake_spacing = float(rake_spacing)
         self.gaze_smoothing = max(0.0, min(float(gaze_smoothing), 0.95))
         self.gaze_gain = max(0.1, float(gaze_gain))
-        self.direction_threshold = max(0.0, float(direction_threshold))
+        self.direction_threshold = self.FIXED_DIRECTION_THRESHOLD
         self.selection_hold = max(0.0, float(selection_hold))
         self.show_gaze = bool(show_gaze)
 
@@ -331,7 +330,7 @@ class RakeCursor(QtWidgets.QWidget):
             return self._held_active_index
 
         self._held_active_index = next_index
-        if next_index != 0 and self.selection_hold > 0.0:
+        if self.selection_hold > 0.0:
             self._held_active_until = now + self.selection_hold
         else:
             self._held_active_until = 0.0
@@ -502,7 +501,6 @@ class RakeCursor(QtWidgets.QWidget):
                 "active": [round(float(self._active_point[0]), 3), round(float(self._active_point[1]), 3)],
                 "tracking_ok": bool(self._tracking_ok),
                 "gaze_gain": round(float(self.gaze_gain), 3),
-                "direction_threshold": round(float(self.direction_threshold), 3),
                 "selection_hold": round(float(self.selection_hold), 3),
                 "selection_magnitude": round(float(self._selection_magnitude), 3),
                 "detection_count": len(self.detector.get_detections()),
@@ -815,7 +813,6 @@ def main():
     parser.add_argument("--rake-spacing", type=float, default=RakeCursor.DEFAULT_RAKE_SPACING, help="Distance in pixels between the center cursor and the outer rake cursors")
     parser.add_argument("--gaze-smoothing", type=float, default=RakeCursor.DEFAULT_GAZE_SMOOTHING, help="Smoothing factor applied to the gaze point (0 = no smoothing, higher = steadier gaze)")
     parser.add_argument("--gaze-gain", type=float, default=RakeCursor.DEFAULT_GAZE_GAIN, help="Multiplier applied to the gaze direction vector around the mouse center")
-    parser.add_argument("--direction-threshold", type=float, default=RakeCursor.DEFAULT_DIRECTION_THRESHOLD, help="Minimum amplified gaze distance from the mouse center required to select an outer rake cursor")
     parser.add_argument("--selection-hold", type=float, default=RakeCursor.DEFAULT_SELECTION_HOLD, help="Seconds to keep a selected outer rake cursor before switching again")
     parser.add_argument("--hide-gaze-point", action="store_true", help="Hide the red on-screen gaze feedback marker")
     args = parser.parse_args()
@@ -853,7 +850,6 @@ def main():
             rake_spacing=args.rake_spacing,
             gaze_smoothing=args.gaze_smoothing,
             gaze_gain=args.gaze_gain,
-            direction_threshold=args.direction_threshold,
             selection_hold=args.selection_hold,
             show_gaze=not args.hide_gaze_point,
         )
@@ -868,7 +864,6 @@ def main():
         rake_spacing=args.rake_spacing,
         gaze_smoothing=args.gaze_smoothing,
         gaze_gain=args.gaze_gain,
-        direction_threshold=args.direction_threshold,
         selection_hold=args.selection_hold,
         show_gaze=not args.hide_gaze_point,
     )
