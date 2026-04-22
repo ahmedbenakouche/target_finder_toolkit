@@ -25,8 +25,13 @@ import mss
 from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
+import pyautogui
 
 __all__ = ["TargetFinder", "show_detections", "main"]
+
+
+class ScreenCaptureError(Exception):
+    pass
 
 # Mapping of class IDs to names
 CLASS_NAMES = {
@@ -157,7 +162,7 @@ class TargetFinder:
         # Control flags for the background loop
         self._stop = False
         self.hide_overlay_during_capture = True
-        self.overlay_window = None  # will be set by OverlayWindow
+        self.overlay_window = {}  # screen_key -> OverlayWindow, set by OverlayWindow or caller
 
         # Tracking state to keep stable IDs between frames
         self._prev_det_dicts = []   # previous frame detection dicts (with "id")
@@ -214,6 +219,41 @@ class TargetFinder:
         self._with_frame = bool(with_frame)
         self._diff_iou = float(_require_between("diff_iou", diff_iou, 0.0, 1.0))
 
+    @staticmethod
+    def get_monitor_from_mouse(sct):
+        """Return the mss monitor dict and its 1-based index for the screen
+        that currently contains the mouse pointer."""
+        x, y = pyautogui.position()
+        for i, monitor in enumerate(sct.monitors[1:], start=1):
+            if (
+                monitor["left"] <= x < monitor["left"] + monitor["width"]
+                and monitor["top"] <= y < monitor["top"] + monitor["height"]
+            ):
+                return monitor, i
+        raise ScreenCaptureError("Mouse is not on any known monitor")
+
+    def match_monitor_to_overlay(self, monitor):
+        """Match an mss monitor dict to the corresponding OverlayWindow.
+
+        Returns:
+            tuple: (active_overlay, list_of_other_overlays)
+        """
+        other_overlays = []
+        active_overlay = None
+        for _, overlay in self.overlay_window.items():
+            if (
+                hasattr(overlay, "screen_geometry")
+                and overlay.screen_geometry.x() == monitor["left"]
+                and overlay.screen_geometry.y() == monitor["top"]
+                and overlay.screen_geometry.width() == monitor["width"]
+                and overlay.screen_geometry.height() == monitor["height"]
+            ):
+                active_overlay = overlay
+            else:
+                other_overlays.append(overlay)
+        if active_overlay is None:
+            raise ScreenCaptureError("No overlay matches the active monitor")
+        return active_overlay, other_overlays
 
     def start(self):
         """Start the capture+inference loop in a separate thread."""
