@@ -625,6 +625,32 @@ class OverlayWindow(QtWidgets.QWidget):
         self.update()
 
 
+class MultiMonitorOverlay:
+    """Creates one OverlayWindow per screen and starts detection."""
+
+    def __init__(self, app: QtWidgets.QApplication, detector: TargetFinder):
+        self.overlays = []
+        for screen in app.screens():
+            g = screen.geometry()
+            overlay = OverlayWindow(detector, screen)
+            self.overlays.append((overlay, g.x(), g.y()))
+        self.detector = detector
+        self.detector.start()
+
+    def show(self):
+        for overlay, xshift, yshift in self.overlays:
+            g = overlay.screen_geometry
+            overlay.show()
+            overlay.move(xshift, yshift)
+            overlay.resize(g.width(), g.height())
+            overlay.raise_()
+            overlay.activateWindow()
+
+    def hide(self):
+        for overlay, _, _ in self.overlays:
+            overlay.hide()
+
+
 def show_detections(detector: TargetFinder):
     """Launch a PyQt application showing detections in a transparent overlay window.
 
@@ -632,7 +658,7 @@ def show_detections(detector: TargetFinder):
         detector (TargetFinder): The detector instance providing the detections.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    ov  = OverlayWindow(detector)
+    ov = MultiMonitorOverlay(app, detector)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     sys.exit(app.exec())
