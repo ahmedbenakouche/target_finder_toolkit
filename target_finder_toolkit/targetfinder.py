@@ -503,30 +503,33 @@ class TargetFinder:
 
 
 class OverlayWindow(QtWidgets.QWidget):
-    # Transparent full-screen overlay window for drawing bounding boxes. Colors are assigned per class ID.
     PALETTE = [
-        QtGui.QColor(0, 255, 0, 200),    # Button → green
-        QtGui.QColor(255, 0, 0, 200),    # ToggleButton → red
-        QtGui.QColor(0, 0, 255, 200),    # Hyperlink → blue
-        QtGui.QColor(255, 255, 0, 200),  # Text → yellow
-        QtGui.QColor(255, 0, 255, 200),  # TextInput → magenta
-        QtGui.QColor(0, 255, 255, 200),  # Slider → cyan
+        QtGui.QColor(0, 255, 0, 200),    # Button
+        QtGui.QColor(255, 0, 0, 200),    # ToggleButton
+        QtGui.QColor(0, 0, 255, 200),    # Hyperlink
+        QtGui.QColor(255, 255, 0, 200),  # Text
+        QtGui.QColor(255, 0, 255, 200),  # TextInput
+        QtGui.QColor(0, 255, 255, 200),  # Slider
     ]
 
-    def __init__(self, detector: TargetFinder):
-        # Construct an always-on-top, click-through, transparent overlay.
+    def __init__(self, detector: TargetFinder, screen: QtGui.QScreen = None):
         super().__init__()
         self.detector = detector
         self._is_macos = sys.platform == "darwin"
+        self.active = True
 
-        # Link overlay to the detector so it can hide/show the window during capture
-        detector.overlay_window = self
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
 
-        # Full-screen geometry (Qt DPI-aware)
-        geom = QtWidgets.QApplication.primaryScreen().geometry()
-        self.setGeometry(geom)
+        # Register in detector's overlay dict
+        self.detector.overlay_window[str(screen.name())] = self
 
-        # Window flags for frameless, always-on-top, click-through & transparent
+        # Per-screen geometry
+        self.setScreen(screen)
+        self.screen_geometry = screen.geometry()
+        self.resize(self.screen_geometry.size())
+
+        # Window flags
         flags = (
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
@@ -540,16 +543,14 @@ class OverlayWindow(QtWidgets.QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # Start the detection loop (background thread)
-        self.detector.start()
-
-        # refresh to update the overlay
+        # Refresh timer
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.update)
-        self._timer.start(10)  # 10 ms
+        self._timer.start(10)
 
     def paintEvent(self, event):
-        # Paint bounding boxes and scores on the transparent overlay.
+        if not self.active:
+            return
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -560,7 +561,6 @@ class OverlayWindow(QtWidgets.QWidget):
             painter.setPen(pen)
             painter.drawRect(x, y, w, h)
 
-            # Label
             label = f"{score:.2f}"
             fm = painter.fontMetrics()
             tw, th = fm.horizontalAdvance(label), fm.height()
@@ -568,6 +568,13 @@ class OverlayWindow(QtWidgets.QWidget):
             painter.drawText(x + 2, y - 2, label)
 
         painter.end()
+
+    def activate(self):
+        self.active = True
+
+    def reset(self):
+        self.active = False
+        self.update()
 
 
 def show_detections(detector: TargetFinder):
