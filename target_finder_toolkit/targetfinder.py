@@ -135,15 +135,19 @@ class TargetFinder:
         if QtWidgets.QApplication.instance() is None:
             self._app = QtWidgets.QApplication(sys.argv)
 
-        # Resolve model path (fallback to local best.pt)
-        if model_path is None:
-            here = os.path.dirname(__file__)
-            model_path = os.path.join(here, "best.pt")
-        if not os.path.isfile(model_path):
-            raise FileNotFoundError(f"model_path not found: {model_path}")
+        # Handle model selection
+        if model_name is None:
+            model_name = "yolo26n-640"
+
+        # Resolve internal path to the models directory
+        here = os.path.dirname(__file__)
+        full_model_path = os.path.join(here, "models", f"{model_name}.pt")
+
+        if not os.path.isfile(full_model_path):
+            raise FileNotFoundError(f"Model weights not found at: {full_model_path}")
 
         # Load YOLO model
-        self.model = YOLO(model_path)
+        self.model = YOLO(full_model_path)
 
         # Validate and store core thresholds/intervals
         self.change_thresh = int(_require_between("change_thresh", change_thresh, 0, 1e12))
@@ -672,7 +676,7 @@ def main():
 
     """
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")
-    parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
+    parser.add_argument('--model', default="yolo26n-640", help="Select the YOLO26 model.")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
