@@ -454,6 +454,7 @@ class TargetFinder:
             if prev_small is None or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh:
                 # Activate/deactivate per-screen overlays if available
                 active_overlay = None
+                other_overlays = []
                 has_per_screen = (
                     len(self.overlay_window) > 1
                     and any(hasattr(ov, "screen_geometry") for ov in self.overlay_window.values())
