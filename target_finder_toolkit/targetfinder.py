@@ -436,34 +436,76 @@ class TargetFinder:
 
     def _capture_loop(self):
         """Internal loop: capture screen, run inference, invoke callback if needed."""
-        # Create an MSS grabber and select primary monitor
         sct = mss.mss()
-        monitor = sct.monitors[0]
-        prev_small = None     # last low-res grayscale for change detection
+        prev_small = None
 
         while not self._stop:
+            # Determine which monitor to capture
+            try:
+                monitor, _ = self.get_monitor_from_mouse(sct)
+            except ScreenCaptureError:
+                monitor = sct.monitors[0]
+
             # Low-res screenshot for change detection
             frame = np.array(sct.grab(monitor))[..., :3]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (64, 64), interpolation=cv2.INTER_AREA)
 
-            # Trigger detection only if significant screen change is detected
             if prev_small is None or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh:
+                # Activate/deactivate per-screen overlays if available
+                active_overlay = None
+                has_per_screen = (
+                    len(self.overlay_window) > 1
+                    and any(hasattr(ov, "screen_geometry") for ov in self.overlay_window.values())
+                )
+                if has_per_screen:
+                    try:
+                        active_overlay, other_overlays = self.match_monitor_to_overlay(monitor)
+                        active_overlay.activate()
+                        for ov in other_overlays:
+                            ov.reset()
+                    except ScreenCaptureError:
+                        pass
+
                 prev_small = small.copy()
 
-                # Hide the overlay before full-resolution capture when needed.
+                # Hide overlay(s) before full-resolution capture when needed
+                target_ov = active_overlay if active_overlay else None
                 if self.overlay_window and self.hide_overlay_during_capture:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "hide",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
-                    time.sleep(0.03)  # allow time for the overlay to disappear
+                    if target_ov:
+                        QtCore.QMetaObject.invokeMethod(
+                            target_ov, "hide",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                        )
+                    else:
+                        for ov in self.overlay_window.values():
+                            QtCore.QMetaObject.invokeMethod(
+                                ov, "hide",
+                                QtCore.Qt.ConnectionType.QueuedConnection,
+                            )
+                    time.sleep(0.03)
 
-                # Full-resolution capture without overlay
+                # Full-resolution capture
                 full = np.array(sct.grab(monitor))[..., :3]
 
-                # Re-show the overlay
+                # Re-show overlay(s)
                 if self.overlay_window and self.hide_overlay_during_capture:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "show",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
+                    if target_ov:
+                        QtCore.QMetaObject.invokeMethod(
+                            target_ov, "show",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                        )
+                    else:
+                        for ov in self.overlay_window.values():
+                            QtCore.QMetaObject.invokeMethod(
+                                ov, "show",
+                                QtCore.Qt.ConnectionType.QueuedConnection,
+                            )
+
+                # Reset non-active overlays (clear leftover detections)
+                if has_per_screen and active_overlay:
+                    for ov in other_overlays:
+                        ov.reset()
 
                 # YOLO inference
                 results = self.model(full, conf=self.conf, iou=self.iou, imgsz=self.imgsz, end2end=False, verbose=False)[0]
@@ -473,32 +515,37 @@ class TargetFinder:
 
                 # DPI-aware scaling
                 h_phy, w_phy = full.shape[:2]
-                screen_geom = QtWidgets.QApplication.primaryScreen().geometry()
+                if active_overlay and hasattr(active_overlay, "screen_geometry"):
+                    screen_geom = active_overlay.screen_geometry
+                else:
+                    screen_geom = QtWidgets.QApplication.primaryScreen().geometry()
                 self.sx = screen_geom.width() / w_phy
                 self.sy = screen_geom.height() / h_phy
 
-                # Store detections as list of tuples for the overlay painter
-                self.detections = [(int(x1 * self.sx), int(y1 * self.sy), int((x2 - x1) * self.sx), int((y2 - y1) * self.sy), float(score),
-                                    int(cls_id)) for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, class_ids)]
+                # Store detections as tuples for the overlay painter
+                self.detections = [
+                    (int(x1 * self.sx), int(y1 * self.sy),
+                     int((x2 - x1) * self.sx), int((y2 - y1) * self.sy),
+                     float(score), int(cls_id))
+                    for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, class_ids)
+                ]
 
-                # Notify callback with dicts and (optionally) the frame
+                # Notify callback
                 if self._on_change:
                     det_dicts = self._build_dicts(boxes, scores, class_ids, self.sx, self.sy)
                     added, removed = self._assign_ids_and_diff(self._prev_det_dicts, det_dicts)
                     frame_to_send = None
                     if self._with_frame:
-                        frame_to_send = cv2.resize(full, (screen_geom.width(), screen_geom.height()), interpolation=cv2.INTER_AREA)
+                        frame_to_send = cv2.resize(
+                            full, (screen_geom.width(), screen_geom.height()),
+                            interpolation=cv2.INTER_AREA,
+                        )
                     try:
                         self._on_change(det_dicts, added, removed, frame_to_send)
                     except Exception:
                         pass
-                    # Keep current detections for next-frame tracking
                     self._prev_det_dicts = det_dicts
 
-
-            # Pause to limit loop frequency
-            # Prevents saturating RAM and CPU with too many captures
-            # On very powerful machines with lots of RAM we can set self.interval = 0
             time.sleep(self.interval)
 
 
