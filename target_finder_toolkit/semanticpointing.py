@@ -88,7 +88,7 @@ class SemanticPointing(QtWidgets.QWidget):
         self.display = display
         self.disable_accel = disable_accel
         self.detector = detector
-        detector.overlay_window = self
+        detector.overlay_window["semantic"] = self
         if self._is_macos and self.display:
             self.detector.hide_overlay_during_capture = False
         self._mouse_listener = None
@@ -501,7 +501,7 @@ def main():
         Starts the Qt event loop until exit.
     """
     parser = argparse.ArgumentParser(description="Launch the Semantic Pointing overlay")
-    parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
+    parser.add_argument('--model', default="yolo26n-1920", help="Select the YOLO26 model.")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0-1.0)")
@@ -510,11 +510,7 @@ def main():
     parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
     args = parser.parse_args()
 
-    if args.model_path is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
-
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+    det = TargetFinder(args.model, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     semantic_pointing(det, args.display, args.disable_accel)
 
 if __name__ == "__main__":

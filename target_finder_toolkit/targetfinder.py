@@ -676,19 +676,14 @@ def main():
 
     """
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")
-    parser.add_argument('--model', default="yolo26n-640", help="Select the YOLO26 model.")
+    parser.add_argument('--model', default="yolo26n-1920", help="Select the YOLO26 model.")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     args = parser.parse_args()
 
-    if args.model_path is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
-
-    # Instantiate detector and start overlay
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+    det = TargetFinder(args.model, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     show_detections(det)
 
 if __name__ == "__main__":
