@@ -91,7 +91,7 @@ class TargetFinder:
         Args:
             model_path (str | None, optional):
                 Path to a YOLO ``.pt`` weights file.  
-                If ``None``, the detector loads the default model (``best.pt``)
+                If ``None``, the detector loads the default model (``yolo26s_1280.pt``)
                 packaged with the toolkit. You can also supply your own trained
                 YOLOv8 model.
 
@@ -133,10 +133,10 @@ class TargetFinder:
         if QtWidgets.QApplication.instance() is None:
             self._app = QtWidgets.QApplication(sys.argv)
 
-        # Resolve model path (fallback to local best.pt)
+        # Resolve model path (fallback to local yolo26s_1280.pt)
         if model_path is None:
             here = os.path.dirname(__file__)
-            model_path = os.path.join(here, "best.pt")
+            model_path = os.path.join(here, "yolo26s_1280.pt")
         if not os.path.isfile(model_path):
             raise FileNotFoundError(f"model_path not found: {model_path}")
 
@@ -715,7 +715,7 @@ def main():
 
     if args.model_path is None:
         here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
+        args.model_path = os.path.join(here, "yolo26s_1280.pt")
 
     # Instantiate detector and start overlay
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)

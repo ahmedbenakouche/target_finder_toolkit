@@ -548,7 +548,7 @@ def main():
 
     if args.model_path is None:
         here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
+        args.model_path = os.path.join(here, "yolo26s_1280.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter)

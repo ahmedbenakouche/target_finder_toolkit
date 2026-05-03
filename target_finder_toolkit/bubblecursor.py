@@ -28,7 +28,7 @@ import math
 import pyautogui
 from pynput import keyboard, mouse
 import argparse
-from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit.targetfinder import CLASS_NAMES, TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
 from target_finder_toolkit.logging_utils import SessionLogger
@@ -69,6 +69,9 @@ class BubbleCursor(QtWidgets.QWidget):
         self.logger = logger
         self._last_target = None  # to store the active target
         self._last_target_info = None
+        self._pending_click_target = None
+        self._pending_click_target_info = None
+        self._pending_click_enabled = False
         self._mouse_listener = None
         self._last_rehide_at = 0.0
         self.bubble_enabled = True
@@ -106,11 +109,65 @@ class BubbleCursor(QtWidgets.QWidget):
             self._cursor_refresh_timer.timeout.connect(self._rehide_cursor)
             self._cursor_refresh_timer.start(30)
 
+    def _resolve_target_info(self, tx, ty, w, h, cls_id, score):
+        target_info = self.detector.find_detection_by_geometry(
+            tx, ty, w, h, class_id=cls_id
+        )
+        if target_info is not None:
+            return target_info
+
+        target_info = self.detector.find_detection_for_point(
+            float(tx),
+            float(ty),
+            include_text=(cls_id == 3),
+            fallback_nearest=True,
+        )
+        if target_info is not None:
+            return target_info
+
+        return {
+            "id": None,
+            "x": int(round(tx - w / 2)),
+            "y": int(round(ty - h / 2)),
+            "w": int(round(w)),
+            "h": int(round(h)),
+            "score": round(float(score), 4),
+            "class": CLASS_NAMES.get(int(cls_id), str(cls_id)),
+            "class_id": int(cls_id),
+        }
+
     def _screen_for_point(self, x: int, y: int):
         app = QtWidgets.QApplication.instance()
         if app is None:
             return QtWidgets.QApplication.primaryScreen()
         return app.screenAt(QtCore.QPoint(int(x), int(y))) or QtWidgets.QApplication.primaryScreen()
+
+    def _snapshot_click_target(self):
+        self._pending_click_target = tuple(self._last_target) if self._last_target else None
+        self._pending_click_target_info = (
+            dict(self._last_target_info) if self._last_target_info is not None else None
+        )
+        self._pending_click_enabled = bool(self.bubble_enabled)
+
+    def _take_click_target_snapshot(self):
+        target = self._pending_click_target
+        target_info = self._pending_click_target_info
+        enabled = self._pending_click_enabled
+        self._pending_click_target = None
+        self._pending_click_target_info = None
+        self._pending_click_enabled = False
+        return target, target_info, enabled
+
+    def _resolve_click_target_for_log(self, x, y, fallback_info=None, *, fallback_nearest=False):
+        if fallback_info is not None:
+            return dict(fallback_info)
+        target_info = self.detector.find_detection_for_point(
+            float(x),
+            float(y),
+            include_text=True,
+            fallback_nearest=fallback_nearest,
+        )
+        return target_info
 
     def _in_system_reserved_area(self, x: int, y: int) -> bool:
         if sys.platform != "darwin":
@@ -168,7 +225,7 @@ class BubbleCursor(QtWidgets.QWidget):
             dy = max(0.0, abs(cy - cy_box) - h/2)
             IntD = math.hypot(dx, dy)
 
-            distances.append((IntD, cx_box, cy_box, w, h, cls_id))
+            distances.append((IntD, cx_box, cy_box, w, h, score, cls_id))
 
         # Draw bubble only when not hovering over text
         if not distances:
@@ -179,7 +236,7 @@ class BubbleCursor(QtWidgets.QWidget):
             return
 
         distances.sort(key=lambda t: t[0])
-        IntD1, tx, ty, w, h, nearest_cls_id = distances[0]
+        IntD1, tx, ty, w, h, nearest_score, nearest_cls_id = distances[0]
 
         if nearest_cls_id == 3:
             self._last_target = None
@@ -189,8 +246,8 @@ class BubbleCursor(QtWidgets.QWidget):
             return
         self._last_target = (
         tx / self.detector.sx, ty / self.detector.sy, w / self.detector.sx, h / self.detector.sy)
-        self._last_target_info = self.detector.find_detection_by_geometry(
-            tx, ty, w, h, class_id=nearest_cls_id
+        self._last_target_info = self._resolve_target_info(
+            tx, ty, w, h, nearest_cls_id, nearest_score
         )
 
         # Containment Distance (ConD1)
@@ -376,6 +433,7 @@ class BubbleCursor(QtWidgets.QWidget):
             if button == button.left:
                 queue_rehide(force=True)
             if pressed and button == button.left:
+                self._snapshot_click_target()
                 if self._in_system_reserved_area(x, y):
                     return
                 # simulate in the Qt thread
@@ -386,6 +444,14 @@ class BubbleCursor(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
+        click_target, click_target_info, click_enabled = self._take_click_target_snapshot()
+        if click_target is None:
+            click_target = self._last_target
+        if click_target_info is None:
+            click_target_info = self._last_target_info
+        if not click_enabled:
+            click_enabled = self.bubble_enabled
+
         if self._in_system_reserved_area(orig_x, orig_y):
             if self.logger is not None:
                 self.logger.log_click(
@@ -396,7 +462,7 @@ class BubbleCursor(QtWidgets.QWidget):
                     target=None,
                 )
             return
-        if not (self._last_target and self.bubble_enabled):
+        if not (click_target and click_enabled):
             if self.logger is not None:
                 self.logger.log_click(
                     technique="bubble",
@@ -407,7 +473,7 @@ class BubbleCursor(QtWidgets.QWidget):
                 )
             return
 
-        tx, ty, w, h = self._last_target
+        tx, ty, w, h = click_target
 
         # If click inside detected rectangle let it pass
         if tx-w/2 <= orig_x <= tx+w/2 and ty-h/2 <= orig_y <= ty+h/2:
@@ -417,7 +483,12 @@ class BubbleCursor(QtWidgets.QWidget):
                     raw=[orig_x, orig_y],
                     effective=[orig_x, orig_y],
                     redirected=False,
-                    target=self._last_target_info,
+                    target=self._resolve_click_target_for_log(
+                        orig_x,
+                        orig_y,
+                        click_target_info,
+                        fallback_nearest=False,
+                    ),
                 )
             return
 
@@ -438,7 +509,12 @@ class BubbleCursor(QtWidgets.QWidget):
                     raw=[orig_x, orig_y],
                     effective=[round(tx, 3), round(ty, 3)],
                     redirected=True,
-                    target=self._last_target_info,
+                    target=self._resolve_click_target_for_log(
+                        tx,
+                        ty,
+                        click_target_info,
+                        fallback_nearest=True,
+                    ),
                 )
             self._rehide_cursor()
             self._start_mouse_listener() # restart the listener
@@ -484,7 +560,7 @@ def main():
 
     CLI arguments:
         - -model-path (str, optional): Path to YOLO .pt weights.
-            Defaults to ``best.pt`` in the package.
+            Defaults to ``yolo26s_1280.pt`` in the package.
         - -change-thresh (int, optional): Threshold for screen change detection.
             Higher = less sensitive. Default = ``100``.
         - -capture-interval (float, optional): Delay in seconds between captures.
@@ -516,7 +592,7 @@ def main():
 
     if args.model_path is None:
         here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
+        args.model_path = os.path.join(here, "yolo26s_1280.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter) if args.filter != "none" else None

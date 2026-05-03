@@ -31,8 +31,8 @@ MODE_OPTIONS = {
         "French": "DynaSpot",
     },
     "rake": {
-        "English": "Rake Cursor (Gaze)",
-        "French": "Rake Cursor (Gaze)",
+        "English": "Ninja Cursors(gaze)",
+        "French": "Ninja Cursors(gaze)",
     },
 }
 
@@ -60,10 +60,13 @@ DEFAULT_DYNASPOT_REDUCE_TIME = 0.18
 DEFAULT_RAKE_CAMERA_INDEX = 0
 DEFAULT_RAKE_SCREEN_WIDTH_CM = 34.0
 DEFAULT_RAKE_SCREEN_HEIGHT_CM = 19.0
-DEFAULT_RAKE_SPACING = 72.0
+DEFAULT_RAKE_SPACING = 320.0
 DEFAULT_RAKE_GAZE_SMOOTHING = 0.35
-DEFAULT_RAKE_GAZE_GAIN = 2.0
-DEFAULT_RAKE_SELECTION_HOLD = 0.5
+DEFAULT_RAKE_GAZE_GAIN_X = 1.0
+DEFAULT_RAKE_GAZE_GAIN_Y = 1.0
+DEFAULT_RAKE_GAZE_OFFSET_X = 0.0
+DEFAULT_RAKE_GAZE_OFFSET_Y = -200.0
+DEFAULT_RAKE_SELECTION_HOLD = 2.0
 
 UI_TEXTS = {
     "English": {
@@ -90,7 +93,7 @@ UI_TEXTS = {
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Semantic Pointing",
         "mode_dynaspot": "DynaSpot",
-        "mode_rake": "Rake Cursor (Gaze)",
+        "mode_rake": "Ninja Cursors(gaze)",
         "dynaspot_params": "DynaSpot tuning",
         "dynaspot_min_speed": "DynaSpot min speed (range: 0.0-5000.0, default: 100.0)",
         "dynaspot_min_speed_desc": "Pointer speed threshold where the spot starts growing. Lower values make the spot expand earlier.",
@@ -100,30 +103,38 @@ UI_TEXTS = {
         "dynaspot_lag_desc": "Delay before the spot starts shrinking once the pointer stops moving.",
         "dynaspot_reduce_time": "DynaSpot reduce time (range: 0.001-10.0, default: 0.18)",
         "dynaspot_reduce_time_desc": "Time used for the co-exponential reduction back toward a 1-pixel point cursor.",
-        "rake_params": "Rake Cursor tuning",
+        "rake_params": "Ninja Cursors(gaze) tuning",
         "rake_camera_index": "Webcam index (range: 0-10, default: 0)",
         "rake_camera_index_desc": "Camera index used by WebEyeTrack for webcam-based gaze estimation.",
         "rake_screen_width_cm": "Screen width (cm) (range: 10.0-200.0, default: auto-detected current screen)",
         "rake_screen_width_cm_desc": "Auto-detected physical screen width used by WebEyeTrack. You can override it if detection is wrong.",
         "rake_screen_height_cm": "Screen height (cm) (range: 10.0-200.0, default: auto-detected current screen)",
         "rake_screen_height_cm_desc": "Auto-detected physical screen height used by WebEyeTrack. You can override it if detection is wrong.",
-        "rake_spacing": "Rake spacing (range: 10.0-300.0, default: 72.0)",
-        "rake_spacing_desc": "Distance in pixels between the center cursor and the surrounding rake cursors.",
+        "rake_spacing": "Rake spacing (range: 80.0-800.0, default: 320.0)",
+        "rake_spacing_desc": "Controls how widely the 8 cursors are spread. Lower = cursors closer together. Higher = cursors farther apart. The default reproduces the paper-style 4x2 layout.",
         "rake_gaze_smoothing": "Gaze smoothing (range: 0.0-0.95, default: 0.35)",
-        "rake_gaze_smoothing_desc": "Higher values stabilize the gaze point more strongly but increase lag.",
-        "rake_gaze_gain": "Gaze gain (range: 0.1-10.0, default: 2.0)",
-        "rake_gaze_gain_desc": "Controls how strongly gaze direction pulls selection away from the mouse center. Higher values make outer candidates activate more easily.",
-        "rake_selection_hold": "Selection hold time (range: 0.0-5.0, default: 0.5)",
-        "rake_selection_hold_desc": "Seconds to keep the selected candidate active before allowing it to switch again.",
+        "rake_gaze_smoothing_desc": "Per frame, the system keeps this fraction of the previous gaze point and uses the rest from the new webcam sample. Higher = steadier but more lag.",
+        "rake_gaze_gain_x": "Gaze gain X (range: 0.1-10.0, default: 1.0)",
+        "rake_gaze_gain_x_desc": "Scales horizontal gaze movement around the screen center before offset is applied. Higher values increase left-right travel.",
+        "rake_gaze_gain_y": "Gaze gain Y (range: 0.1-10.0, default: 1.0)",
+        "rake_gaze_gain_y_desc": "Scales vertical gaze movement around the screen center before offset is applied. Higher values increase up-down travel.",
+        "rake_gaze_offset_x": "Gaze offset X (px) (range: -1000.0-1000.0, default: 10.0)",
+        "rake_gaze_offset_x_desc": "Shifts the gaze estimate horizontally before selecting the active cursor. Positive = move right, negative = move left.",
+        "rake_gaze_offset_y": "Gaze offset Y (px) (range: -1000.0-1000.0, default: -200.0)",
+        "rake_gaze_offset_y_desc": "Shifts the gaze estimate vertically before selecting the active cursor. Positive = move down, negative = move up.",
+        "rake_selection_hold": "Gaze dwell lock time (range: 0.0-5.0, default: 2.0)",
+        "rake_selection_hold_desc": "Seconds the gaze must stay on the same cursor before it locks automatically.",
         "rake_show_gaze": "Show gaze point (rake only, range: off/on, default: on)",
         "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
+        "rake_without_targetfinder": "Without TargetFinder (range: off/on, default: off)",
+        "rake_without_targetfinder_desc": "Runs Ninja Cursors(gaze) without detection, target highlighting, or model inference. Only gaze-based cursor selection and redirected clicks remain active.",
         "apply": "Start / Apply",
         "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
         "change_thresh_desc": "Higher = fewer refreshes for small screen changes. Lower = reacts sooner.",
-        "model_path": "YOLO Model (.pt file) (default: packaged best.pt)",
-        "model_path_desc": "Leave empty to use the packaged best.pt. Choose another trained .pt file to switch models.",
+        "model_path": "YOLO Model (.pt file) (default: packaged yolo26s_1280.pt)",
+        "model_path_desc": "Leave empty to use the packaged yolo26s_1280.pt. Choose another trained .pt file to switch models.",
         "browse": "Browse",
-        "use_default_model": "Use packaged best.pt",
+        "use_default_model": "Use packaged yolo26s_1280.pt",
         "capture_interval": "Capture Interval (range: 0.001-10.0, default: 0.033)",
         "capture_interval_desc": "Lower = faster checks and more CPU/GPU use. Higher = slower updates.",
         "confidence": "Confidence (range: 0.0-1.0, default: 0.28)",
@@ -136,7 +147,7 @@ UI_TEXTS = {
         "disable_accel": "Disable system mouse acceleration (semantic only, range: off/on, default: off)",
         "disable_accel_short": "Disable system mouse acceleration",
         "disable_accel_desc": "Makes semantic pointing feel more stable, but changes mouse behavior while running.",
-        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: keeps the normal system cursor as the center and grows a circular activation area with speed while preserving empty-space clicks. Rake Cursor: uses webcam gaze to select one cursor from a rake of mouse-driven candidate cursors.",
+        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: keeps the normal system cursor as the center and grows a circular activation area with speed while preserving empty-space clicks. Ninja Cursors(gaze): gaze first activates the nearest cursor among 8 distributed cursors; if the gaze stays there long enough, that cursor locks automatically for local refinement until the click finishes.",
         "contrast": "Contrast",
         "enable_tts": "Enable TTS",
         "language": "Language",
@@ -154,7 +165,7 @@ UI_TEXTS = {
         "running_semantic": "Semantic Pointing is running.",
         "running_targetfinder": "TargetFinder Overlay is running.",
         "running_dynaspot": "DynaSpot is running.",
-        "running_rake": "Rake Cursor is running.",
+        "running_rake": "Ninja Cursors(gaze) is running.",
         "stopped": "Stopped the running mode.",
         "no_running": "No running mode was found.",
         "invalid_model_path": "The selected model file was not found.",
@@ -191,7 +202,7 @@ UI_TEXTS = {
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Pointage sémantique",
         "mode_dynaspot": "DynaSpot",
-        "mode_rake": "Rake Cursor (Gaze)",
+        "mode_rake": "Ninja Cursors(gaze)",
         "dynaspot_params": "Réglages DynaSpot",
         "dynaspot_min_speed": "Vitesse min DynaSpot (plage : 0.0-5000.0, défaut : 100.0)",
         "dynaspot_min_speed_desc": "Seuil de vitesse à partir duquel le spot commence à grandir. Plus bas = expansion plus précoce.",
@@ -201,30 +212,38 @@ UI_TEXTS = {
         "dynaspot_lag_desc": "Temps d’attente avant que le spot commence à diminuer lorsque le pointeur s’arrête.",
         "dynaspot_reduce_time": "Temps de réduction DynaSpot (plage : 0.001-10.0, défaut : 0.18)",
         "dynaspot_reduce_time_desc": "Durée de la réduction co-exponentielle pour revenir vers un curseur ponctuel de 1 pixel.",
-        "rake_params": "Réglages Rake Cursor",
+        "rake_params": "Réglages Ninja Cursors(gaze)",
         "rake_camera_index": "Index de webcam (plage : 0-10, défaut : 0)",
         "rake_camera_index_desc": "Index de la caméra utilisée par WebEyeTrack pour estimer le regard.",
         "rake_screen_width_cm": "Largeur écran (cm) (plage : 10.0-200.0, défaut : écran courant détecté automatiquement)",
         "rake_screen_width_cm_desc": "Largeur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
         "rake_screen_height_cm": "Hauteur écran (cm) (plage : 10.0-200.0, défaut : écran courant détecté automatiquement)",
         "rake_screen_height_cm_desc": "Hauteur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
-        "rake_spacing": "Espacement du rake (plage : 10.0-300.0, défaut : 72.0)",
-        "rake_spacing_desc": "Distance en pixels entre le curseur central et les curseurs périphériques du rake.",
+        "rake_spacing": "Espacement du rake (plage : 80.0-800.0, défaut : 320.0)",
+        "rake_spacing_desc": "Contrôle à quel point les 8 curseurs sont espacés. Plus bas = plus rapprochés. Plus haut = plus éloignés. La valeur par défaut reproduit la disposition 4x2 de l’article.",
         "rake_gaze_smoothing": "Lissage du regard (plage : 0.0-0.95, défaut : 0.35)",
-        "rake_gaze_smoothing_desc": "Des valeurs plus élevées stabilisent davantage le point de regard mais ajoutent du retard.",
-        "rake_gaze_gain": "Gain du regard (plage : 0.1-10.0, défaut : 2.0)",
-        "rake_gaze_gain_desc": "Contrôle à quel point la direction du regard éloigne la sélection du centre de la souris. Plus haut = les candidats périphériques s’activent plus facilement.",
-        "rake_selection_hold": "Temps de maintien (plage : 0.0-5.0, défaut : 0.5)",
-        "rake_selection_hold_desc": "Durée pendant laquelle le candidat sélectionné reste actif avant de pouvoir changer.",
+        "rake_gaze_smoothing_desc": "À chaque frame, le système garde cette fraction de l’ancien point de regard et prend le reste depuis la nouvelle mesure webcam. Plus haut = plus stable mais plus de retard.",
+        "rake_gaze_gain_x": "Gain du regard X (plage : 0.1-10.0, défaut : 1.0)",
+        "rake_gaze_gain_x_desc": "Agrandit ou réduit l’amplitude horizontale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement gauche-droite.",
+        "rake_gaze_gain_y": "Gain du regard Y (plage : 0.1-10.0, défaut : 1.0)",
+        "rake_gaze_gain_y_desc": "Agrandit ou réduit l’amplitude verticale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement haut-bas.",
+        "rake_gaze_offset_x": "Décalage regard X (px) (plage : -1000.0-1000.0, défaut : 10.0)",
+        "rake_gaze_offset_x_desc": "Décale l’estimation du regard horizontalement avant de choisir le curseur actif. Positif = vers la droite, négatif = vers la gauche.",
+        "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -1000.0-1000.0, défaut : -200.0)",
+        "rake_gaze_offset_y_desc": "Décale l’estimation du regard verticalement avant de choisir le curseur actif. Positif = vers le bas, négatif = vers le haut.",
+        "rake_selection_hold": "Temps de verrouillage par fixation du regard (plage : 0.0-5.0, défaut : 2.0)",
+        "rake_selection_hold_desc": "Durée pendant laquelle le regard doit rester sur le même curseur avant qu’il se verrouille automatiquement.",
         "rake_show_gaze": "Afficher le point de regard (rake uniquement, plage : off/on, défaut : on)",
         "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
+        "rake_without_targetfinder": "Sans TargetFinder (plage : off/on, défaut : off)",
+        "rake_without_targetfinder_desc": "Lance Ninja Cursors(gaze) sans détection, sans surbrillance de cible et sans inférence du modèle. Seuls la sélection du curseur par le regard et les clics redirigés restent actifs.",
         "apply": "Démarrer / Appliquer",
         "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
         "change_thresh_desc": "Plus haut = moins de rafraîchissements pour de petits changements. Plus bas = réaction plus rapide.",
-        "model_path": "Modèle YOLO (fichier .pt) (défaut : best.pt intégré)",
-        "model_path_desc": "Laissez vide pour utiliser le fichier best.pt intégré. Choisissez un autre fichier .pt entraîné pour changer de modèle.",
+        "model_path": "Modèle YOLO (fichier .pt) (défaut : yolo26s_1280.pt intégré)",
+        "model_path_desc": "Laissez vide pour utiliser le fichier yolo26s_1280.pt intégré. Choisissez un autre fichier .pt entraîné pour changer de modèle.",
         "browse": "Parcourir",
-        "use_default_model": "Utiliser le best.pt intégré",
+        "use_default_model": "Utiliser le yolo26s_1280.pt intégré",
         "capture_interval": "Intervalle de capture (plage : 0.001-10.0, défaut : 0.033)",
         "capture_interval_desc": "Plus bas = vérifications plus rapides et plus de charge CPU/GPU. Plus haut = mises à jour plus lentes.",
         "confidence": "Confiance (plage : 0.0-1.0, défaut : 0.28)",
@@ -237,7 +256,7 @@ UI_TEXTS = {
         "disable_accel": "Désactiver l'accélération de la souris (sémantique uniquement, plage : off/on, défaut : off)",
         "disable_accel_short": "Désactiver l'accélération de la souris",
         "disable_accel_desc": "Rend le pointage sémantique plus stable, mais change la sensation de la souris pendant l'exécution.",
-        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : garde le curseur système normal comme centre et agrandit une zone d’activation circulaire avec la vitesse tout en préservant les clics dans l’espace vide. Rake Cursor : utilise le regard via webcam pour sélectionner un curseur actif parmi plusieurs curseurs pilotés par la souris.",
+        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : garde le curseur système normal comme centre et agrandit une zone d’activation circulaire avec la vitesse tout en préservant les clics dans l’espace vide. Ninja Cursors(gaze) : le regard active d’abord le curseur le plus proche parmi 8 curseurs répartis ; si le regard y reste assez longtemps, ce curseur se verrouille automatiquement pour le micro-ajustement jusqu’au clic.",
         "contrast": "Contrast",
         "enable_tts": "Activer la synthèse vocale",
         "language": "Langue",
@@ -255,7 +274,7 @@ UI_TEXTS = {
         "running_semantic": "Le pointage sémantique est en cours.",
         "running_targetfinder": "L'overlay TargetFinder est en cours.",
         "running_dynaspot": "DynaSpot est en cours.",
-        "running_rake": "Rake Cursor est en cours.",
+        "running_rake": "Ninja Cursors(gaze) est en cours.",
         "stopped": "Le mode en cours a été arrêté.",
         "no_running": "Aucun mode en cours n'a été trouvé.",
         "invalid_model_path": "Le fichier du modèle sélectionné est introuvable.",
@@ -296,9 +315,13 @@ class PanelConfig:
     rake_screen_height_cm: float = DEFAULT_RAKE_SCREEN_HEIGHT_CM
     rake_spacing: float = DEFAULT_RAKE_SPACING
     rake_gaze_smoothing: float = DEFAULT_RAKE_GAZE_SMOOTHING
-    rake_gaze_gain: float = DEFAULT_RAKE_GAZE_GAIN
+    rake_gaze_gain_x: float = DEFAULT_RAKE_GAZE_GAIN_X
+    rake_gaze_gain_y: float = DEFAULT_RAKE_GAZE_GAIN_Y
+    rake_gaze_offset_x: float = DEFAULT_RAKE_GAZE_OFFSET_X
+    rake_gaze_offset_y: float = DEFAULT_RAKE_GAZE_OFFSET_Y
     rake_selection_hold: float = DEFAULT_RAKE_SELECTION_HOLD
     rake_show_gaze: bool = True
+    rake_without_targetfinder: bool = False
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
@@ -311,7 +334,7 @@ class PanelConfig:
 
     preset: str = ""
     enable_tts: bool = False
-    language: str = "English"
+    language: str = "French"
 
 
 class ControlPanel(QtWidgets.QWidget):
@@ -337,7 +360,7 @@ class ControlPanel(QtWidgets.QWidget):
         self._next_buttons = []
         self._selected_mode = None
         self._selected_filter = "none"
-        self._selected_language = "English"
+        self._selected_language = "French"
         self.project_root = Path(__file__).resolve().parent.parent
         self.config_path = self.project_root / "control_panel_config.json"
         self._process_watch_timer = QtCore.QTimer(self)
@@ -864,8 +887,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_spacing_spin = QtWidgets.QDoubleSpinBox()
         self.rake_spacing_spin.setKeyboardTracking(False)
         self.rake_spacing_spin.setDecimals(1)
-        self.rake_spacing_spin.setRange(10.0, 300.0)
-        self.rake_spacing_spin.setSingleStep(2.0)
+        self.rake_spacing_spin.setRange(80.0, 800.0)
+        self.rake_spacing_spin.setSingleStep(10.0)
         self.rake_spacing_spin.setValue(DEFAULT_RAKE_SPACING)
 
         self.rake_gaze_smoothing_spin = QtWidgets.QDoubleSpinBox()
@@ -875,12 +898,19 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_gaze_smoothing_spin.setSingleStep(0.01)
         self.rake_gaze_smoothing_spin.setValue(DEFAULT_RAKE_GAZE_SMOOTHING)
 
-        self.rake_gaze_gain_spin = QtWidgets.QDoubleSpinBox()
-        self.rake_gaze_gain_spin.setKeyboardTracking(False)
-        self.rake_gaze_gain_spin.setDecimals(2)
-        self.rake_gaze_gain_spin.setRange(0.1, 10.0)
-        self.rake_gaze_gain_spin.setSingleStep(0.1)
-        self.rake_gaze_gain_spin.setValue(DEFAULT_RAKE_GAZE_GAIN)
+        self.rake_gaze_offset_x_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_gaze_offset_x_spin.setKeyboardTracking(False)
+        self.rake_gaze_offset_x_spin.setDecimals(1)
+        self.rake_gaze_offset_x_spin.setRange(-1000.0, 1000.0)
+        self.rake_gaze_offset_x_spin.setSingleStep(5.0)
+        self.rake_gaze_offset_x_spin.setValue(DEFAULT_RAKE_GAZE_OFFSET_X)
+
+        self.rake_gaze_offset_y_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_gaze_offset_y_spin.setKeyboardTracking(False)
+        self.rake_gaze_offset_y_spin.setDecimals(1)
+        self.rake_gaze_offset_y_spin.setRange(-1000.0, 1000.0)
+        self.rake_gaze_offset_y_spin.setSingleStep(5.0)
+        self.rake_gaze_offset_y_spin.setValue(DEFAULT_RAKE_GAZE_OFFSET_Y)
 
         self.rake_selection_hold_spin = QtWidgets.QDoubleSpinBox()
         self.rake_selection_hold_spin.setKeyboardTracking(False)
@@ -893,6 +923,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.disable_accel_cb = self._create_switch()
         self.log_data_cb = self._create_switch()
         self.rake_show_gaze_cb = self._create_switch()
+        self.rake_without_targetfinder_cb = self._create_switch()
 
         self._semantic_rows = [
             self._create_separator(),
@@ -924,11 +955,15 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_separator(),
             self._create_field_row("rake_gaze_smoothing", self.rake_gaze_smoothing_spin, "rake_gaze_smoothing_desc"),
             self._create_separator(),
-            self._create_field_row("rake_gaze_gain", self.rake_gaze_gain_spin, "rake_gaze_gain_desc"),
+            self._create_field_row("rake_gaze_offset_x", self.rake_gaze_offset_x_spin, "rake_gaze_offset_x_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_gaze_offset_y", self.rake_gaze_offset_y_spin, "rake_gaze_offset_y_desc"),
             self._create_separator(),
             self._create_field_row("rake_selection_hold", self.rake_selection_hold_spin, "rake_selection_hold_desc"),
             self._create_separator(),
             self._create_switch_row("rake_show_gaze", self.rake_show_gaze_cb, "rake_show_gaze_desc"),
+            self._create_separator(),
+            self._create_switch_row("rake_without_targetfinder", self.rake_without_targetfinder_cb, "rake_without_targetfinder_desc"),
         ]
 
         rows = [
@@ -1020,12 +1055,14 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_screen_height_cm_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_spacing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_gaze_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.rake_gaze_gain_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_gaze_offset_x_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_gaze_offset_y_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_selection_hold_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.display_cb.toggled.connect(self._handle_runtime_option_change)
         self.disable_accel_cb.toggled.connect(self._handle_runtime_option_change)
         self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_show_gaze_cb.toggled.connect(self._handle_runtime_option_change)
+        self.rake_without_targetfinder_cb.toggled.connect(self._handle_runtime_option_change)
 
         self.high_contrast_cb.toggled.connect(self._handle_panel_style_change)
         self.enable_tts_cb.toggled.connect(self._handle_tts_change)
@@ -1043,7 +1080,8 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.rake_screen_height_cm_spin, "rake_screen_height_cm")
         self._register_numeric_field(self.rake_spacing_spin, "rake_spacing")
         self._register_numeric_field(self.rake_gaze_smoothing_spin, "rake_gaze_smoothing")
-        self._register_numeric_field(self.rake_gaze_gain_spin, "rake_gaze_gain")
+        self._register_numeric_field(self.rake_gaze_offset_x_spin, "rake_gaze_offset_x")
+        self._register_numeric_field(self.rake_gaze_offset_y_spin, "rake_gaze_offset_y")
         self._register_numeric_field(self.rake_selection_hold_spin, "rake_selection_hold")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
@@ -1235,8 +1273,10 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.rake_spacing_spin.text())
         elif sender is self.rake_gaze_smoothing_spin:
             self._speak_auto_text(self.rake_gaze_smoothing_spin.text())
-        elif sender is self.rake_gaze_gain_spin:
-            self._speak_auto_text(self.rake_gaze_gain_spin.text())
+        elif sender is self.rake_gaze_offset_x_spin:
+            self._speak_auto_text(self.rake_gaze_offset_x_spin.text())
+        elif sender is self.rake_gaze_offset_y_spin:
+            self._speak_auto_text(self.rake_gaze_offset_y_spin.text())
         elif sender is self.rake_selection_hold_spin:
             self._speak_auto_text(self.rake_selection_hold_spin.text())
         elif sender is self.display_cb:
@@ -1251,6 +1291,9 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.rake_show_gaze_cb:
             key = "turn_on" if self.rake_show_gaze_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("rake_show_gaze")))
+        elif sender is self.rake_without_targetfinder_cb:
+            key = "turn_on" if self.rake_without_targetfinder_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("rake_without_targetfinder")))
 
     def _handle_numeric_edit_finished(self, widget):
         if self._suspend_updates:
@@ -1662,7 +1705,8 @@ class ControlPanel(QtWidgets.QWidget):
             self.rake_screen_height_cm_spin,
             self.rake_spacing_spin,
             self.rake_gaze_smoothing_spin,
-            self.rake_gaze_gain_spin,
+            self.rake_gaze_offset_x_spin,
+            self.rake_gaze_offset_y_spin,
             self.rake_selection_hold_spin,
         ):
             widget.interpretText()
@@ -1693,9 +1737,13 @@ class ControlPanel(QtWidgets.QWidget):
             rake_screen_height_cm=self.rake_screen_height_cm_spin.value(),
             rake_spacing=self.rake_spacing_spin.value(),
             rake_gaze_smoothing=self.rake_gaze_smoothing_spin.value(),
-            rake_gaze_gain=self.rake_gaze_gain_spin.value(),
+            rake_gaze_gain_x=DEFAULT_RAKE_GAZE_GAIN_X,
+            rake_gaze_gain_y=DEFAULT_RAKE_GAZE_GAIN_Y,
+            rake_gaze_offset_x=self.rake_gaze_offset_x_spin.value(),
+            rake_gaze_offset_y=self.rake_gaze_offset_y_spin.value(),
             rake_selection_hold=self.rake_selection_hold_spin.value(),
             rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
+            rake_without_targetfinder=self.rake_without_targetfinder_cb.isChecked(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
             enable_dynaspot=mode == "dynaspot",
@@ -1703,7 +1751,7 @@ class ControlPanel(QtWidgets.QWidget):
             high_contrast_mode=self.high_contrast_cb.isChecked(),
             stronger_visual_cue=self._hidden_config.stronger_visual_cue,
             single_click_as_double_click=self._hidden_config.single_click_as_double_click,
-            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "DynaSpot" if mode == "dynaspot" else "Rake Cursor" if mode == "rake" else "",
+            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "DynaSpot" if mode == "dynaspot" else "Ninja Cursors(gaze)" if mode == "rake" else "",
             enable_tts=self.enable_tts_cb.isChecked(),
             language=self._language_code(),
         )
@@ -1728,9 +1776,11 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_screen_height_cm_spin.setValue(cfg.rake_screen_height_cm)
         self.rake_spacing_spin.setValue(cfg.rake_spacing)
         self.rake_gaze_smoothing_spin.setValue(cfg.rake_gaze_smoothing)
-        self.rake_gaze_gain_spin.setValue(cfg.rake_gaze_gain)
+        self.rake_gaze_offset_x_spin.setValue(cfg.rake_gaze_offset_x)
+        self.rake_gaze_offset_y_spin.setValue(cfg.rake_gaze_offset_y)
         self.rake_selection_hold_spin.setValue(cfg.rake_selection_hold)
         self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
+        self.rake_without_targetfinder_cb.setChecked(cfg.rake_without_targetfinder)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
@@ -1742,12 +1792,12 @@ class ControlPanel(QtWidgets.QWidget):
             self._selected_mode = "semantic"
         elif cfg.enable_dynaspot or cfg.preset == "DynaSpot":
             self._selected_mode = "dynaspot"
-        elif cfg.enable_rake_cursor or cfg.preset == "Rake Cursor":
+        elif cfg.enable_rake_cursor or cfg.preset in {"Rake Cursor", "Ninja Cursors(gaze)"}:
             self._selected_mode = "rake"
         else:
             self._selected_mode = None
 
-        self._selected_language = cfg.language if cfg.language in {"English", "French"} else "English"
+        self._selected_language = cfg.language if cfg.language in {"English", "French"} else "French"
 
         self._apply_language()
         self._apply_panel_style()
@@ -1791,12 +1841,16 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.rake_screen_height_cm = detected_screen_height_cm
         cfg.rake_spacing = DEFAULT_RAKE_SPACING
         cfg.rake_gaze_smoothing = DEFAULT_RAKE_GAZE_SMOOTHING
-        cfg.rake_gaze_gain = DEFAULT_RAKE_GAZE_GAIN
+        cfg.rake_gaze_gain_x = DEFAULT_RAKE_GAZE_GAIN_X
+        cfg.rake_gaze_gain_y = DEFAULT_RAKE_GAZE_GAIN_Y
+        cfg.rake_gaze_offset_x = DEFAULT_RAKE_GAZE_OFFSET_X
+        cfg.rake_gaze_offset_y = DEFAULT_RAKE_GAZE_OFFSET_Y
         cfg.rake_selection_hold = DEFAULT_RAKE_SELECTION_HOLD
         cfg.rake_show_gaze = True
+        cfg.rake_without_targetfinder = False
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
-        cfg.language = "English"
+        cfg.language = "French"
         cfg.preset = ""
         self._apply_config(cfg)
 
@@ -1811,7 +1865,7 @@ class ControlPanel(QtWidgets.QWidget):
         elif cfg.enable_dynaspot:
             module_name = "target_finder_toolkit.dynaspot"
         elif cfg.enable_rake_cursor:
-            module_name = "target_finder_toolkit.rakecursor"
+            module_name = "target_finder_toolkit.ninjacursors"
         else:
             module_name = "target_finder_toolkit.semanticpointing"
         cmd = [sys.executable, "-m", module_name]
@@ -1845,11 +1899,16 @@ class ControlPanel(QtWidgets.QWidget):
                 "--screen-height-cm", str(cfg.rake_screen_height_cm),
                 "--rake-spacing", str(cfg.rake_spacing),
                 "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
-                "--gaze-gain", str(cfg.rake_gaze_gain),
+                "--gaze-gain-x", str(cfg.rake_gaze_gain_x),
+                "--gaze-gain-y", str(cfg.rake_gaze_gain_y),
+                "--gaze-offset-x", str(cfg.rake_gaze_offset_x),
+                "--gaze-offset-y", str(cfg.rake_gaze_offset_y),
                 "--selection-hold", str(cfg.rake_selection_hold),
             ]
             if not cfg.rake_show_gaze:
                 cmd.append("--hide-gaze-point")
+            if cfg.rake_without_targetfinder:
+                cmd.append("--without-targetfinder")
         return cmd
 
     def _is_demo_running(self):

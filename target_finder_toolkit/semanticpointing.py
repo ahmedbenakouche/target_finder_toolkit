@@ -750,7 +750,7 @@ def main():
 
     CLI arguments:
         --model-path (str, optional): Path to YOLO .pt weights.
-            Defaults to ``best.pt`` in the package.
+            Defaults to ``yolo26s_1280.pt`` in the package.
         --change-thresh (int, optional): Screen-change L2 threshold on a
             down-scaled frame. Higher = less sensitive. Default: ``100``.
         --capture-interval (float, optional): Delay in seconds between captures.
@@ -787,7 +787,7 @@ def main():
 
     if args.model_path is None:
         here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
+        args.model_path = os.path.join(here, "yolo26s_1280.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter) if args.filter != "none" else None
