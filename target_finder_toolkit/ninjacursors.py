@@ -64,6 +64,9 @@ else:
 __all__ = ["ninja_cursors", "main"]
 
 
+_WEIGHT_FILE_CACHE: dict[str, Optional[str]] = {}
+
+
 def _normalize_webeyetrack_config_paths(obj):
     """Convert Path-like values inside WebEyeTrack config objects to strings."""
     if isinstance(obj, pathlib.PurePath):
@@ -93,17 +96,66 @@ def _patch_webeyetrack_model_paths(config, wet_module):
     except Exception:
         return config
 
-    model_dir = package_dir / "model_weights"
-    face_landmarker = model_dir / "face_landmarker_v2_with_blendshapes.task"
-    blazegaze = model_dir / "blazegaze_mpiifacegaze.keras"
+    def resolve_weight(filename: str) -> Optional[str]:
+        cached = _WEIGHT_FILE_CACHE.get(filename)
+        if cached is not None:
+            return cached
+
+        candidate_paths = [
+            package_dir / "model_weights" / filename,
+            package_dir.parent.parent / "python" / "webeyetrack" / "model_weights" / filename,
+            package_dir.parent.parent.parent / "python" / "webeyetrack" / "model_weights" / filename,
+            pathlib.Path(sys.prefix) / "Lib" / "python" / "webeyetrack" / "model_weights" / filename,
+            pathlib.Path(sys.prefix) / "lib" / "python" / "webeyetrack" / "model_weights" / filename,
+        ]
+        for path in candidate_paths:
+            if path.is_file():
+                resolved = str(path)
+                _WEIGHT_FILE_CACHE[filename] = resolved
+                return resolved
+
+        search_roots = [package_dir, pathlib.Path(sys.prefix)]
+        for root in search_roots:
+            if not root.exists():
+                continue
+            try:
+                match = next(root.rglob(filename), None)
+            except Exception:
+                match = None
+            if match is not None and match.is_file():
+                resolved = str(match)
+                _WEIGHT_FILE_CACHE[filename] = resolved
+                return resolved
+
+        _WEIGHT_FILE_CACHE[filename] = None
+        return None
+
+    face_landmarker = resolve_weight("face_landmarker_v2_with_blendshapes.task")
+    blazegaze = resolve_weight("blazegaze_mpiifacegaze.keras")
 
     current_face = pathlib.Path(str(getattr(config, "mediapipe_flm_model_fp", "")))
     current_blaze = pathlib.Path(str(getattr(config, "blazegaze_mlp_fp", "")))
 
-    if face_landmarker.is_file() and (not str(current_face) or not current_face.is_file()):
-        config.mediapipe_flm_model_fp = str(face_landmarker)
-    if blazegaze.is_file() and (not str(current_blaze) or not current_blaze.is_file()):
-        config.blazegaze_mlp_fp = str(blazegaze)
+    if face_landmarker and (not str(current_face) or not current_face.is_file()):
+        config.mediapipe_flm_model_fp = face_landmarker
+    if blazegaze and (not str(current_blaze) or not current_blaze.is_file()):
+        config.blazegaze_mlp_fp = blazegaze
+
+    # Patch module-level defaults as well because WebEyeTrackConfig stores class attributes.
+    try:
+        wet_module.FACE_LANDMARKER_PATH = pathlib.Path(str(config.mediapipe_flm_model_fp))
+        wet_module.BLAZEGAZE_PATH = pathlib.Path(str(config.blazegaze_mlp_fp))
+        if hasattr(wet_module, "WebEyeTrackConfig"):
+            wet_module.WebEyeTrackConfig.mediapipe_flm_model_fp = str(config.mediapipe_flm_model_fp)
+            wet_module.WebEyeTrackConfig.blazegaze_mlp_fp = str(config.blazegaze_mlp_fp)
+        try:
+            import webeyetrack.constants as constants_module
+            constants_module.FACE_LANDMARKER_PATH = pathlib.Path(str(config.mediapipe_flm_model_fp))
+            constants_module.BLAZEGAZE_PATH = pathlib.Path(str(config.blazegaze_mlp_fp))
+        except Exception:
+            pass
+    except Exception:
+        pass
     return config
 
 
