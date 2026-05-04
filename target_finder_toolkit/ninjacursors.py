@@ -634,7 +634,15 @@ class NinjaCursors(QtWidgets.QWidget):
             return
 
         try:
-            status, gaze_result, _ = self._tracker.process_frame(frame)
+            # OpenCV returns BGR frames, while WebEyeTrack / MediaPipe expects SRGB.
+            frame_for_tracking = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        except Exception as exc:
+            self._tracking_ok = False
+            self._set_gaze_status(f"frame conversion failed: {type(exc).__name__}: {exc}")
+            return
+
+        try:
+            status, gaze_result, detection_results = self._tracker.process_frame(frame_for_tracking)
         except Exception as exc:
             self._tracking_ok = False
             self._set_gaze_status(f"tracking error: {type(exc).__name__}: {exc}")
@@ -666,7 +674,14 @@ class NinjaCursors(QtWidgets.QWidget):
             self._set_gaze_status(f"tracking ok gaze=({gx:.0f}, {gy:.0f})")
         else:
             self._tracking_ok = False
-            self._set_gaze_status(f"not tracking status={status}")
+            face_count = 0
+            try:
+                face_count = len(getattr(detection_results, "face_landmarks", []) or [])
+            except Exception:
+                face_count = 0
+            self._set_gaze_status(
+                f"not tracking status={status} faces={face_count} norm_pog={'yes' if norm_pog is not None else 'no'}"
+            )
 
     def _draw_debug_status(self, painter: QtGui.QPainter):
         painter.save()
