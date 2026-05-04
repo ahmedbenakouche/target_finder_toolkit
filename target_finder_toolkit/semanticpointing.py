@@ -36,9 +36,9 @@ __all__ = ["semantic_pointing", "main"]
 
 # def Omega_rc(u, b):
 #     """
-#     Raised‐cosine normalisée telle que ∫{-1/2}^{+1/2} Omega_rc(u,b) du = 1.
+#     Raised-cosine normalisée telle que ∫{-1/2}^{+1/2} Omega_rc(u,b) du = 1.
 #     - u : distance normalisée = max(|dx|, |dy|)
-#     - b : roll‐off ∈ [0,1]
+#     - b : roll-off ∈ [0,1]
 #     """
 #     # Facteur de normalisation A(b) = 1 - b/2 + b/π
 #     A = 1.0 - (b / 2.0) + (b / math.pi)
@@ -52,7 +52,7 @@ __all__ = ["semantic_pointing", "main"]
 #         arg = (u - (1.0 - b) / 2.0) * (math.pi / b)
 #         return (0.5 * (1.0 + math.cos(arg))) / A
 #
-#     # Hors zone d’influence : 0
+#     # Hors zone d'influence : 0
 #     return 0.0
 
 class SemanticPointing(QtWidgets.QWidget):
@@ -80,7 +80,7 @@ class SemanticPointing(QtWidgets.QWidget):
     - Real clicks are redirected to the fake cursor position during
       click simulation.
     - The Qt timer is set to 10 ms for smooth cursor rendering;
-      this does not increase the detector’s inference frequency.
+      this does not increase the detector's inference frequency.
     """
     def __init__(self, detector: TargetFinder, display = False, disable_accel = False):
         super().__init__()
@@ -88,7 +88,7 @@ class SemanticPointing(QtWidgets.QWidget):
         self.display = display
         self.disable_accel = disable_accel
         self.detector = detector
-        detector.overlay_window = self
+        detector.overlay_window["semantic"] = self
         if self._is_macos and self.display:
             self.detector.hide_overlay_during_capture = False
         self._mouse_listener = None
@@ -136,6 +136,21 @@ class SemanticPointing(QtWidgets.QWidget):
             self._cursor_refresh_timer.start(16)
             self._set_overlay_clickthrough(True)
 
+    def _screen_for_point(self, x: int, y: int):
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return QtWidgets.QApplication.primaryScreen()
+        return app.screenAt(QtCore.QPoint(int(x), int(y))) or QtWidgets.QApplication.primaryScreen()
+
+    def _in_system_reserved_area(self, x: int, y: int) -> bool:
+        if not self._is_macos:
+            return False
+        screen = self._screen_for_point(x, y)
+        if screen is None:
+            return False
+        point = QtCore.QPoint(int(x), int(y))
+        return not screen.availableGeometry().contains(point)
+
     # === Paint ===
     def paintEvent(self, event):
         if not self.enabled:
@@ -181,10 +196,10 @@ class SemanticPointing(QtWidgets.QWidget):
             bell_i = math.log(3) / (math.cosh(math.log(3) * u_i) ** 2)
             total_bell += bell_i
 
-            # # Raised‐cosine
+            # # Raised-cosine
             # beta = 1
             # u_i = max(ux, uy)
-            # omega_i = Omega_rc(u_i, beta)  # nouveau « poids » raised‐cosine
+            # omega_i = Omega_rc(u_i, beta)  # nouveau « poids » raised-cosine
             # total_bell += omega_i
 
         # speed factor that changes from normal speed 1 to 1/s (speed divided by s),
@@ -387,9 +402,9 @@ class SemanticPointing(QtWidgets.QWidget):
         def on_click(x, y, button, pressed):
             if button == button.left and self._is_macos and pressed:
                 QtCore.QMetaObject.invokeMethod(self, "_rehide_cursor", QtCore.Qt.ConnectionType.QueuedConnection)
-                return
             if pressed and button == button.left:
-                # simulate in the Qt thread
+                if self._in_system_reserved_area(x, y):
+                    return
                 QtCore.QMetaObject.invokeMethod(self, "_simulate_click", QtCore.Qt.ConnectionType.QueuedConnection)
         self._mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
         self._mouse_listener.start()
@@ -399,30 +414,27 @@ class SemanticPointing(QtWidgets.QWidget):
         if self._is_macos:
             return
         if self.enabled:
-            # simulate the click by removing the semi-transparent rectangle that blocks clicks
-            pyautogui.mouseUp(button='left') # simulate button release
-            self._mouse_listener.stop() # stop listener
-            self._simulating_click = True # activate the flag "windows"
-            self.update()  # request immediate Qt repaint
-            QtWidgets.QApplication.processEvents()  # force immediate event processing
+            pos = QtGui.QCursor.pos()
+            if self._in_system_reserved_area(pos.x(), pos.y()):
+                return
+            pyautogui.mouseUp(button='left')
+            self._mouse_listener.stop()
+            self._simulating_click = True
+            self.update()
+            QtWidgets.QApplication.processEvents()
             if sys.platform.startswith("linux") or self._is_macos:
                 self._set_overlay_clickthrough(True)
-            QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y())) # move real cursor
-                                                                                 # note: this doesn’t work on Windows
-                                                                                 # if the semi-transparent rectangle isn’t drawn
-            # pyautogui.moveTo(self.fake_pos.x() / self.detector.sx, self.fake_pos.y() / self.detector.sy)
-            # pyautogui.moveTo is slower when the real cursor is stuck at the edge
+            QtGui.QCursor.setPos(int(self.fake_pos.x()), int(self.fake_pos.y()))
             try:
                 pyautogui.click()
             except pyautogui.FailSafeException:
-                # to prevent the script from crashing when the mouse hits a corner
                 pass
             finally:
                 if sys.platform.startswith("linux") or self._is_macos:
                     self._set_overlay_clickthrough(False)
-                self._simulating_click = False # deactivate the flag and resynchronize
+                self._simulating_click = False
                 self.prev_real = QtCore.QPointF(QtGui.QCursor.pos())
-                self._start_mouse_listener() # restart the listener
+                self._start_mouse_listener()
 
 def semantic_pointing(detector: TargetFinder, display = False, disable_accel=False):
     """Launch the Semantic Pointing overlay with a given detector.
@@ -434,7 +446,7 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
     Args:
         detector (TargetFinder): Initialized TargetFinder (YOLO model loaded).
         display (bool, optional): If True, highlight the target box and its
-            motor-space area (S×W). Defaults to False.
+            motor-space area (S*W). Defaults to False.
         disable_accel (bool, optional): If True, disable OS mouse
             acceleration. Defaults to False.
 
@@ -475,7 +487,7 @@ def main():
             Default: ``0.28``.
         --iou (float, optional): IoU threshold for YOLO NMS in ``[0, 1]``.
             Controls overlap merging. Default: ``0.3``.
-        --disable-accel (flag): Disable system mouse acceleration.  
+        --disable-accel (flag): Disable system mouse acceleration.
 
         --display (flag): Show the target bounding box and its motor-space area.
 
@@ -489,20 +501,16 @@ def main():
         Starts the Qt event loop until exit.
     """
     parser = argparse.ArgumentParser(description="Launch the Semantic Pointing overlay")
-    parser.add_argument('--model-path', default=None, help="Path to the YOLO model .pt file")
+    parser.add_argument('--model', default="yolo26n-1920", help="Select the YOLO26 model.")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
-    parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
-    parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
+    parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0-1.0)")
+    parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0-1.0)")
     parser.add_argument('--disable-accel', action='store_true', help="Disable system mouse acceleration")
     parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
     args = parser.parse_args()
 
-    if args.model_path is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "best.pt")
-
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+    det = TargetFinder(args.model, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     semantic_pointing(det, args.display, args.disable_accel)
 
 if __name__ == "__main__":

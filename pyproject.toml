@@ -28,6 +28,12 @@ classifiers = [
 ]
 keywords = ["yolo", "gui", "widgets", "detection", "hci"]
 
+[project.optional-dependencies]
+macos = [
+    "pyobjc-framework-Quartz>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+]
+
 [project.scripts]
 targetfinder-gui = "target_finder_toolkit.targetfinder:main"
 bubblecursor     = "target_finder_toolkit.bubblecursor:main"

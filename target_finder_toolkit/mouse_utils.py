@@ -109,33 +109,18 @@ elif sys.platform.startswith("linux"):
         libX11.XFlush(_X11_DISPLAY)
 
 else:
-    # macOS implementation using ApplicationServices
-    import ctypes
+    # macOS implementation using pyobjc (Quartz + AppKit)
     _CURSOR_HIDDEN = False
     _CURSOR_MONITOR_STOP = None
     _CURSOR_MONITOR_THREAD = None
     _NS_CURSOR_HIDE_COUNT = 0
     try:
-        try:
-            from AppKit import NSCursor as _NSCursor
-        except Exception:
-            _NSCursor = None
-
-        _app_services = ctypes.cdll.LoadLibrary(
-                "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
-            )
-
-        _app_services.CGMainDisplayID.restype = ctypes.c_uint32
-        _app_services.CGCursorIsVisible.restype = ctypes.c_bool
-        _app_services.CGDisplayHideCursor.argtypes = [ctypes.c_uint32]
-        _app_services.CGDisplayHideCursor.restype = ctypes.c_int
-        _app_services.CGDisplayShowCursor.argtypes = [ctypes.c_uint32]
-        _app_services.CGDisplayShowCursor.restype = ctypes.c_int
+        from Quartz import (CGMainDisplayID, CGCursorIsVisible,
+                            CGDisplayHideCursor, CGDisplayShowCursor)
+        from AppKit import NSCursor as _NSCursor
 
         def _hide_ns_cursor():
             global _NS_CURSOR_HIDE_COUNT
-            if _NSCursor is None:
-                return
             try:
                 _NSCursor.hide()
                 _NS_CURSOR_HIDE_COUNT += 1
@@ -144,8 +129,6 @@ else:
 
         def _restore_ns_cursor():
             global _NS_CURSOR_HIDE_COUNT
-            if _NSCursor is None:
-                return
             while _NS_CURSOR_HIDE_COUNT > 0:
                 try:
                     _NSCursor.unhide()
@@ -154,9 +137,9 @@ else:
                 _NS_CURSOR_HIDE_COUNT -= 1
 
         def _hide_cursor_if_visible():
-            display_id = _app_services.CGMainDisplayID()
-            if _app_services.CGCursorIsVisible():
-                _app_services.CGDisplayHideCursor(display_id)
+            display_id = CGMainDisplayID()
+            if CGCursorIsVisible():
+                CGDisplayHideCursor(display_id)
 
         def _cursor_monitor_loop(stop_event):
             while True:
@@ -194,12 +177,12 @@ else:
                 _CURSOR_MONITOR_STOP.set()
             _CURSOR_MONITOR_STOP = None
             _CURSOR_MONITOR_THREAD = None
-            display_id = _app_services.CGMainDisplayID()
-            if not _app_services.CGCursorIsVisible():
-                _app_services.CGDisplayShowCursor(display_id)
+            display_id = CGMainDisplayID()
+            if not CGCursorIsVisible():
+                CGDisplayShowCursor(display_id)
             _restore_ns_cursor()
             _CURSOR_HIDDEN = False
-    except Exception:
+    except ImportError:
         def hide_cursor_everywhere():
             pass
         def restore_default_cursors():
@@ -351,136 +334,116 @@ elif sys.platform.startswith("linux"):
         _AFFECTED_DEVICES.clear()
 
 else:
-    # For macOS 
+    # macOS mouse acceleration — IOKit primary, defaults write fallback
     import subprocess
 
-    _MAC_MOUSE_ACCEL_BACKUP = None
-    _MAC_MOUSE_SCALING_EXISTED = None
+    _MAC_ACCEL_METHOD = None  # "iokit" or "defaults"
 
-    def _mac_read_mouse_scaling():
-        """
-        Read the current macOS mouse scaling value from the global
-        preferences domain (`.GlobalPreferences`).
+    # --- Try IOKit first (disabled: segfault on Apple Silicon, using defaults write fallback) ---
+    if False:  # IOKit disabled - keeping code for future reference
+        import objc
+        from Foundation import NSBundle
 
-        Returns:
-            tuple[bool, float | None]
-            - first value: whether the key exists
-            - second value: the numeric value if available
-        """
-        try:
-            result = subprocess.run(
-                ["defaults", "read", ".GlobalPreferences", "com.apple.mouse.scaling"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True
-            )
-            return True, float(result.stdout.strip())
-        except subprocess.CalledProcessError:
-            # Key does not exist (or defaults read failed in the usual way)
-            return False, None
-        except ValueError:
-            # Key exists but could not be parsed as float
-            return True, None
-        except Exception:
-            return False, None
-    def _mac_write_mouse_scaling(value):
-        """
-        Write a macOS mouse scaling value to `.GlobalPreferences`.
+        _iokit_bundle = NSBundle.bundleWithPath_(
+            "/System/Library/Frameworks/IOKit.framework"
+        )
+        _iokit_functions = [
+            ("NXOpenEventStatus",           b"I",),
+            ("NXCloseEventStatus",          b"vI",),
+            ("IOHIDGetAccelerationWithKey",  b"iI*^d",),
+            ("IOHIDSetAccelerationWithKey",  b"iI*d",),
+        ]
+        objc.loadBundleFunctions(_iokit_bundle, globals(), _iokit_functions)
 
-        Returns:
-            bool
-        """
-        try:
-            subprocess.run(
-                ["defaults", "write", ".GlobalPreferences", "com.apple.mouse.scaling", "-float", str(value)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True
-            )
+        _ACCEL_KEY = b"HIDMouseAcceleration"
+        _IOKIT_HANDLE = None
+        _IOKIT_ORIGINAL_ACCEL = None
 
-            # Try to refresh preference daemon so the change is noticed sooner
-            subprocess.run(
-                ["killall", "cfprefsd"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            return True
-        except Exception:
-            return False
-    
-    def _mac_delete_mouse_scaling():
-        """
-        Delete the macOS mouse scaling key from `.GlobalPreferences`.
+        def disable_mouse_acceleration():
+            global _IOKIT_HANDLE, _IOKIT_ORIGINAL_ACCEL, _MAC_ACCEL_METHOD
+            if _IOKIT_HANDLE is not None:
+                return
+            _IOKIT_HANDLE = NXOpenEventStatus()
+            err, current = IOHIDGetAccelerationWithKey(_IOKIT_HANDLE, _ACCEL_KEY, None)
+            if err == 0:
+                _IOKIT_ORIGINAL_ACCEL = current
+            IOHIDSetAccelerationWithKey(_IOKIT_HANDLE, _ACCEL_KEY, 0.0)
+            _MAC_ACCEL_METHOD = "iokit"
 
-        Returns:
-            bool
-        """
-        try:
-            subprocess.run(
-                ["defaults", "delete", ".GlobalPreferences", "com.apple.mouse.scaling"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True  
-            )
+        def restore_mouse_acceleration():
+            global _IOKIT_HANDLE, _IOKIT_ORIGINAL_ACCEL, _MAC_ACCEL_METHOD
+            if _IOKIT_HANDLE is None:
+                return
+            if _IOKIT_ORIGINAL_ACCEL is not None:
+                IOHIDSetAccelerationWithKey(_IOKIT_HANDLE, _ACCEL_KEY, _IOKIT_ORIGINAL_ACCEL)
+            NXCloseEventStatus(_IOKIT_HANDLE)
+            _IOKIT_HANDLE = None
+            _IOKIT_ORIGINAL_ACCEL = None
+            _MAC_ACCEL_METHOD = None
 
-            subprocess.run(
-                ["killall", "cfprefsd"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            return True
-        except Exception:
-            return False
-    
-    def disable_mouse_acceleration():
-        """
-        Best-effort macOS implementation.
-
-        This stores whether the `com.apple.mouse.scaling` key existed and
-        its previous value, then writes a value intended to reduce mouse
-        acceleration.
-
-        Note:
-            This relies on a global preference key rather than a dedicated
-            public API for disabling acceleration. The actual effect may vary
-            depending on the macOS version, pointing device, and system setup.
-        """
-        global _MAC_MOUSE_ACCEL_BACKUP
-        global _MAC_MOUSE_SCALING_EXISTED
-
-        if sys.platform != "darwin":
-            return
-  
-        if _MAC_MOUSE_SCALING_EXISTED is None: # read current acceleration
-            existed, value = _mac_read_mouse_scaling()
-            _MAC_MOUSE_SCALING_EXISTED = existed
-            _MAC_MOUSE_ACCEL_BACKUP = value
-        
-        _mac_write_mouse_scaling(-1.0)
-
-    def restore_mouse_acceleration():
-        """
-        Restore the previous macOS mouse scaling state.
-
-        If the key existed before `disable_mouse_acceleration()`, its previous
-        value is written back. Otherwise, the key is removed.
-        """
-        global _MAC_MOUSE_ACCEL_BACKUP
-        global _MAC_MOUSE_SCALING_EXISTED
-
-        if sys.platform != "darwin":
-            return
-        
-        if _MAC_MOUSE_SCALING_EXISTED is None:
-            return
-        
-        if _MAC_MOUSE_SCALING_EXISTED:
-            if _MAC_MOUSE_ACCEL_BACKUP is not None:
-                _mac_write_mouse_scaling(_MAC_MOUSE_ACCEL_BACKUP)
-        else:
-            _mac_delete_mouse_scaling()
-
-    
+    else:
+        # --- defaults write approach (xinqi's method, with indentation bug fixed) ---
         _MAC_MOUSE_ACCEL_BACKUP = None
         _MAC_MOUSE_SCALING_EXISTED = None
+
+        def _mac_read_mouse_scaling():
+            try:
+                result = subprocess.run(
+                    ["defaults", "read", ".GlobalPreferences", "com.apple.mouse.scaling"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True,
+                )
+                return True, float(result.stdout.strip())
+            except subprocess.CalledProcessError:
+                return False, None
+            except ValueError:
+                return True, None
+            except Exception:
+                return False, None
+
+        def _mac_write_mouse_scaling(value):
+            try:
+                subprocess.run(
+                    ["defaults", "write", ".GlobalPreferences",
+                     "com.apple.mouse.scaling", "-float", str(value)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+                )
+                subprocess.run(["killall", "cfprefsd"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            except Exception:
+                return False
+
+        def _mac_delete_mouse_scaling():
+            try:
+                subprocess.run(
+                    ["defaults", "delete", ".GlobalPreferences", "com.apple.mouse.scaling"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+                )
+                subprocess.run(["killall", "cfprefsd"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            except Exception:
+                return False
+
+        def disable_mouse_acceleration():
+            global _MAC_MOUSE_ACCEL_BACKUP, _MAC_MOUSE_SCALING_EXISTED, _MAC_ACCEL_METHOD
+            if _MAC_MOUSE_SCALING_EXISTED is None:
+                existed, value = _mac_read_mouse_scaling()
+                _MAC_MOUSE_SCALING_EXISTED = existed
+                _MAC_MOUSE_ACCEL_BACKUP = value
+            _mac_write_mouse_scaling(-1.0)
+            _MAC_ACCEL_METHOD = "defaults"
+
+        def restore_mouse_acceleration():
+            global _MAC_MOUSE_ACCEL_BACKUP, _MAC_MOUSE_SCALING_EXISTED, _MAC_ACCEL_METHOD
+            if _MAC_MOUSE_SCALING_EXISTED is None:
+                return
+            if _MAC_MOUSE_SCALING_EXISTED:
+                if _MAC_MOUSE_ACCEL_BACKUP is not None:
+                    _mac_write_mouse_scaling(_MAC_MOUSE_ACCEL_BACKUP)
+            else:
+                _mac_delete_mouse_scaling()
+            # Fix: always cleanup (was indentation bug in xinqi code)
+            _MAC_MOUSE_ACCEL_BACKUP = None
+            _MAC_MOUSE_SCALING_EXISTED = None
+            _MAC_ACCEL_METHOD = None
