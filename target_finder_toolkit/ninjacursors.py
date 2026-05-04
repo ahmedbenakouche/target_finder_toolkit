@@ -86,6 +86,27 @@ def _normalize_webeyetrack_config_paths(obj):
     return obj
 
 
+def _patch_webeyetrack_model_paths(config, wet_module):
+    """Override broken default weight paths with files shipped in the package."""
+    try:
+        package_dir = pathlib.Path(wet_module.__file__).resolve().parent
+    except Exception:
+        return config
+
+    model_dir = package_dir / "model_weights"
+    face_landmarker = model_dir / "face_landmarker_v2_with_blendshapes.task"
+    blazegaze = model_dir / "blazegaze_mpiifacegaze.keras"
+
+    current_face = pathlib.Path(str(getattr(config, "mediapipe_flm_model_fp", "")))
+    current_blaze = pathlib.Path(str(getattr(config, "blazegaze_mlp_fp", "")))
+
+    if face_landmarker.is_file() and (not str(current_face) or not current_face.is_file()):
+        config.mediapipe_flm_model_fp = str(face_landmarker)
+    if blazegaze.is_file() and (not str(current_blaze) or not current_blaze.is_file()):
+        config.blazegaze_mlp_fp = str(blazegaze)
+    return config
+
+
 def _create_webeyetrack(config):
     """Create WebEyeTrack with CPU MediaPipe delegate when GPU setup is unavailable."""
     config = _normalize_webeyetrack_config_paths(config)
@@ -93,6 +114,7 @@ def _create_webeyetrack(config):
         import webeyetrack.webeyetrack as wet_module
     except Exception:
         return WebEyeTrack(config)
+    config = _patch_webeyetrack_model_paths(config, wet_module)
 
     original_base_options = wet_module.python.BaseOptions
     original_delegate = getattr(original_base_options, "Delegate", None)
