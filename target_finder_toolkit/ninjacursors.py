@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import pathlib
 import signal
 import sys
 import tempfile
@@ -63,8 +64,31 @@ else:
 __all__ = ["ninja_cursors", "main"]
 
 
+def _normalize_webeyetrack_config_paths(obj):
+    """Convert Path-like values inside WebEyeTrack config objects to strings."""
+    if isinstance(obj, pathlib.PurePath):
+        return str(obj)
+    if isinstance(obj, (str, bytes, int, float, bool, type(None))):
+        return obj
+    if isinstance(obj, list):
+        for idx, value in enumerate(obj):
+            obj[idx] = _normalize_webeyetrack_config_paths(value)
+        return obj
+    if isinstance(obj, tuple):
+        return tuple(_normalize_webeyetrack_config_paths(value) for value in obj)
+    if isinstance(obj, dict):
+        for key, value in list(obj.items()):
+            obj[key] = _normalize_webeyetrack_config_paths(value)
+        return obj
+    if hasattr(obj, "__dict__"):
+        for key, value in vars(obj).items():
+            setattr(obj, key, _normalize_webeyetrack_config_paths(value))
+    return obj
+
+
 def _create_webeyetrack(config):
     """Create WebEyeTrack with CPU MediaPipe delegate when GPU setup is unavailable."""
+    config = _normalize_webeyetrack_config_paths(config)
     try:
         import webeyetrack.webeyetrack as wet_module
     except Exception:
