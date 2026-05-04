@@ -167,6 +167,7 @@ def _create_webeyetrack(config):
     except Exception:
         return WebEyeTrack(config)
     config = _patch_webeyetrack_model_paths(config, wet_module)
+    _patch_webeyetrack_failure_reporting(wet_module)
 
     original_base_options = wet_module.python.BaseOptions
     original_delegate = getattr(original_base_options, "Delegate", None)
@@ -189,6 +190,36 @@ def _create_webeyetrack(config):
         raise
     finally:
         wet_module.python.BaseOptions = original_base_options
+
+
+def _patch_webeyetrack_failure_reporting(wet_module):
+    """Expose the internal step failure reason instead of swallowing it inside WebEyeTrack."""
+    webeyetrack_cls = getattr(wet_module, "WebEyeTrack", None)
+    if webeyetrack_cls is None or getattr(webeyetrack_cls, "_ninja_failure_patch", False):
+        return
+
+    original_step = webeyetrack_cls.step
+
+    def patched_step(self, *args, **kwargs):
+        self._ninja_last_step_error = None
+        try:
+            return original_step(self, *args, **kwargs)
+        except Exception as exc:
+            self._ninja_last_step_error = f"{type(exc).__name__}: {exc}"
+            raise
+
+    original_prepare_input = webeyetrack_cls.prepare_input
+
+    def patched_prepare_input(self, *args, **kwargs):
+        try:
+            return original_prepare_input(self, *args, **kwargs)
+        except Exception as exc:
+            self._ninja_last_step_error = f"{type(exc).__name__}: {exc}"
+            raise
+
+    webeyetrack_cls.step = patched_step
+    webeyetrack_cls.prepare_input = patched_prepare_input
+    webeyetrack_cls._ninja_failure_patch = True
 
 
 def _can_use_legacy_face_mesh_fallback(wet_module, exc) -> bool:
@@ -679,8 +710,10 @@ class NinjaCursors(QtWidgets.QWidget):
                 face_count = len(getattr(detection_results, "face_landmarks", []) or [])
             except Exception:
                 face_count = 0
+            detail = getattr(self._tracker, "_ninja_last_step_error", None)
+            suffix = f" detail={detail}" if detail else ""
             self._set_gaze_status(
-                f"not tracking status={status} faces={face_count} norm_pog={'yes' if norm_pog is not None else 'no'}"
+                f"not tracking status={status} faces={face_count} norm_pog={'yes' if norm_pog is not None else 'no'}{suffix}"
             )
 
     def _draw_debug_status(self, painter: QtGui.QPainter):
