@@ -168,6 +168,7 @@ def _create_webeyetrack(config):
         return WebEyeTrack(config)
     config = _patch_webeyetrack_model_paths(config, wet_module)
     _patch_webeyetrack_failure_reporting(wet_module)
+    _patch_webeyetrack_opencv_compat(wet_module)
 
     original_base_options = wet_module.python.BaseOptions
     original_delegate = getattr(original_base_options, "Delegate", None)
@@ -220,6 +221,30 @@ def _patch_webeyetrack_failure_reporting(wet_module):
     webeyetrack_cls.step = patched_step
     webeyetrack_cls.prepare_input = patched_prepare_input
     webeyetrack_cls._ninja_failure_patch = True
+
+
+def _patch_webeyetrack_opencv_compat(wet_module):
+    """Coerce WebEyeTrack preprocessing inputs to numeric arrays for OpenCV on Windows."""
+    if getattr(wet_module, "_ninja_opencv_patch", False):
+        return
+    try:
+        import numpy as np
+        import webeyetrack.model_based as model_based_module
+    except Exception:
+        return
+
+    original_obtain_eyepatch = model_based_module.obtain_eyepatch
+
+    def patched_obtain_eyepatch(frame, face_landmarks, *args, **kwargs):
+        frame = np.asarray(frame, dtype=np.uint8)
+        if not frame.flags.c_contiguous:
+            frame = np.ascontiguousarray(frame)
+        face_landmarks = np.asarray(face_landmarks, dtype=np.float32)
+        return original_obtain_eyepatch(frame, face_landmarks, *args, **kwargs)
+
+    model_based_module.obtain_eyepatch = patched_obtain_eyepatch
+    wet_module.obtain_eyepatch = patched_obtain_eyepatch
+    wet_module._ninja_opencv_patch = True
 
 
 def _can_use_legacy_face_mesh_fallback(wet_module, exc) -> bool:
