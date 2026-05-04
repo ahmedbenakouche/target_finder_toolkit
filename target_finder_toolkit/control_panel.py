@@ -13,6 +13,18 @@ from target_finder_toolkit.logging_utils import make_default_log_path
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 
 
+def _ensure_mediapipe_python_alias():
+    """Provide a compatibility alias for WebEyeTrack on newer MediaPipe builds."""
+    try:
+        import mediapipe as mp
+    except Exception:
+        return
+    if "mediapipe.python" not in sys.modules:
+        sys.modules["mediapipe.python"] = mp
+    if not hasattr(mp, "python"):
+        mp.python = mp
+
+
 MODE_OPTIONS = {
     "targetfinder": {
         "English": "TargetFinder Overlay",
@@ -1939,6 +1951,7 @@ class ControlPanel(QtWidgets.QWidget):
                 return
         if cfg.enable_rake_cursor:
             try:
+                _ensure_mediapipe_python_alias()
                 importlib.import_module("webeyetrack")
             except Exception as exc:
                 self.info_label.setText(f"{self._text('missing_webeyetrack')} ({exc})")

@@ -34,6 +34,21 @@ from target_finder_toolkit.logging_utils import SessionLogger
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.targetfinder import TargetFinder
 
+
+def _ensure_mediapipe_python_alias():
+    """Provide a compatibility alias for WebEyeTrack on newer MediaPipe builds."""
+    try:
+        import mediapipe as mp
+    except Exception:
+        return
+    if "mediapipe.python" not in sys.modules:
+        sys.modules["mediapipe.python"] = mp
+    if not hasattr(mp, "python"):
+        mp.python = mp
+
+
+_ensure_mediapipe_python_alias()
+
 try:
     from webeyetrack import WebEyeTrack, WebEyeTrackConfig
     from webeyetrack.data_protocols import TrackingStatus
