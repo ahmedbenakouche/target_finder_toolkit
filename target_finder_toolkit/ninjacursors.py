@@ -30,6 +30,7 @@ import pyautogui
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pynput import keyboard, mouse
 
+from target_finder_toolkit.eye_calibration import EyeCalibration
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
 from target_finder_toolkit.logging_utils import SessionLogger
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
@@ -65,6 +66,32 @@ __all__ = ["ninja_cursors", "main"]
 
 
 _WEIGHT_FILE_CACHE: dict[str, Optional[str]] = {}
+
+_MODEL_URLS = {
+    "face_landmarker_v2_with_blendshapes.task":
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+    "blazegaze_mpiifacegaze.keras":
+        "https://github.com/RedForestAI/WebEyeTrack/raw/main/python/webeyetrack/model_weights/blazegaze_mpiifacegaze.keras",
+}
+
+
+def _download_model_weight(filename: str, dest_dir: pathlib.Path) -> Optional[str]:
+    url = _MODEL_URLS.get(filename)
+    if not url:
+        return None
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / filename
+    if dest.is_file():
+        return str(dest)
+    print(f"[gaze] Downloading {filename}...")
+    try:
+        import urllib.request
+        urllib.request.urlretrieve(url, str(dest))
+        print(f"[gaze] Saved to {dest}")
+        return str(dest)
+    except Exception as e:
+        print(f"[gaze] Download failed: {e}")
+        return None
 
 
 def _normalize_webeyetrack_config_paths(obj):
@@ -108,6 +135,8 @@ def _patch_webeyetrack_model_paths(config, wet_module):
             pathlib.Path(sys.prefix) / "Lib" / "python" / "webeyetrack" / "model_weights" / filename,
             pathlib.Path(sys.prefix) / "lib" / "python" / "webeyetrack" / "model_weights" / filename,
         ]
+        for conda_env in pathlib.Path("/opt/homebrew/Caskroom/miniforge/base/envs").glob("*/lib/python*/site-packages/webeyetrack/model_weights"):
+            candidate_paths.append(conda_env / filename)
         for path in candidate_paths:
             if path.is_file():
                 resolved = str(path)
@@ -126,6 +155,11 @@ def _patch_webeyetrack_model_paths(config, wet_module):
                 resolved = str(match)
                 _WEIGHT_FILE_CACHE[filename] = resolved
                 return resolved
+
+        downloaded = _download_model_weight(filename, package_dir / "model_weights")
+        if downloaded:
+            _WEIGHT_FILE_CACHE[filename] = downloaded
+            return downloaded
 
         _WEIGHT_FILE_CACHE[filename] = None
         return None
@@ -387,6 +421,8 @@ class NinjaCursors(QtWidgets.QWidget):
         gaze_gain_y: float = DEFAULT_GAZE_GAIN_Y,
         selection_hold: float = DEFAULT_SELECTION_HOLD,
         show_gaze: bool = DEFAULT_SHOW_GAZE,
+        calib_points: int = 5,
+        auto_calibrate: bool = False,
     ):
         if WebEyeTrack is None:
             raise RuntimeError(
@@ -417,6 +453,8 @@ class NinjaCursors(QtWidgets.QWidget):
         self.top_half_extra_y = float(self.DEFAULT_TOP_HALF_EXTRA_Y)
         self.selection_hold = max(0.0, float(selection_hold))
         self.show_gaze = bool(show_gaze)
+        self._calib_points = calib_points if calib_points in (5, 9, 13) else 5
+        self._auto_calibrate = auto_calibrate
 
         self._mouse_listener = None
         self._keyboard_listener = None
@@ -445,6 +483,10 @@ class NinjaCursors(QtWidgets.QWidget):
         self._filtered_offset_y = 0.0
         self._last_observed_mouse = None
         self._ignore_next_mouse_delta = True
+
+        self._calibration = None
+        self._calib_status_text = ""
+        self._calib_status_until = 0.0
 
         geom = screen.geometry()
         self.setGeometry(geom)
@@ -495,6 +537,9 @@ class NinjaCursors(QtWidgets.QWidget):
             self._cursor_refresh_timer.start(16)
 
         QtCore.QTimer.singleShot(0, self._prime_hidden_cursor)
+
+        if self._auto_calibrate:
+            QtCore.QTimer.singleShot(1500, self._start_calibration)
 
     def _prime_hidden_cursor(self):
         QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
@@ -704,30 +749,37 @@ class NinjaCursors(QtWidgets.QWidget):
             self._set_gaze_status(f"tracking error: {type(exc).__name__}: {exc}")
             return
 
+        if self._calibration and self._calibration.is_calibrating:
+            if status == TrackingStatus.SUCCESS and gaze_result is not None:
+                self._calibration.feed(gaze_result)
+            else:
+                print(f"[calib] no gaze: status={status}, gaze_result={'None' if gaze_result is None else 'exists'}")
+            return
+
         norm_pog = getattr(gaze_result, "norm_pog", None) if gaze_result is not None else None
         if status == TrackingStatus.SUCCESS and norm_pog is not None:
             gx = self._screen_rect.left() + (float(norm_pog[0]) + 0.5) * self._screen_rect.width()
             gy = self._screen_rect.top() + (float(norm_pog[1]) + 0.5) * self._screen_rect.height()
-            center_x = self._screen_rect.left() + self._screen_rect.width() * 0.5
-            center_y = self._screen_rect.top() + self._screen_rect.height() * 0.5
-            gx = center_x + (gx - center_x) * self.gaze_gain_x
-            gy = center_y + (gy - center_y) * self.gaze_gain_y
-            assist_start_y = self._screen_rect.top() + self._screen_rect.height() * 0.68
-            if gy < assist_start_y:
-                assist_span = max(1.0, assist_start_y - float(self._screen_rect.top()))
-                assist_ratio = max(0.0, min(1.0, (assist_start_y - gy) / assist_span))
-                assist_strength = math.pow(assist_ratio, 1.35)
-                # Start helping slightly earlier across the upper half, while
-                # still ramping the correction up toward the top edge.
-                gy += self.top_half_extra_y * assist_strength
-            gx += self.gaze_offset_x
-            gy += self.gaze_offset_y
+            calibrated = self._calibration and self._calibration.is_calibrated
+            if not calibrated:
+                center_x = self._screen_rect.left() + self._screen_rect.width() * 0.5
+                center_y = self._screen_rect.top() + self._screen_rect.height() * 0.5
+                gx = center_x + (gx - center_x) * self.gaze_gain_x
+                gy = center_y + (gy - center_y) * self.gaze_gain_y
+                assist_start_y = self._screen_rect.top() + self._screen_rect.height() * 0.68
+                if gy < assist_start_y:
+                    assist_span = max(1.0, assist_start_y - float(self._screen_rect.top()))
+                    assist_ratio = max(0.0, min(1.0, (assist_start_y - gy) / assist_span))
+                    assist_strength = math.pow(assist_ratio, 1.35)
+                    gy += self.top_half_extra_y * assist_strength
+                gx += self.gaze_offset_x
+                gy += self.gaze_offset_y
             gx = max(float(self._screen_rect.left()), min(float(self._screen_rect.right()), gx))
             gy = max(float(self._screen_rect.top()), min(float(self._screen_rect.bottom()), gy))
             self._apply_gaze_smoothing(gx, gy)
             self._tracking_ok = True
             self._last_successful_gaze_t = time.time()
-            self._set_gaze_status(f"tracking ok gaze=({gx:.0f}, {gy:.0f})")
+            self._set_gaze_status(f"tracking ok gaze=({gx:.0f}, {gy:.0f}) {'[calibrated]' if calibrated else ''}")
         else:
             self._tracking_ok = False
             face_count = 0
@@ -740,6 +792,63 @@ class NinjaCursors(QtWidgets.QWidget):
             self._set_gaze_status(
                 f"not tracking status={status} faces={face_count} norm_pog={'yes' if norm_pog is not None else 'no'}{suffix}"
             )
+
+    def _paint_calibration(self):
+        calib = self._calibration
+        if not calib or not calib.targets:
+            return
+        idx = calib.current_point_idx
+        if idx >= len(calib.targets):
+            return
+
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(QtGui.QColor(0, 0, 0, 180))
+        painter.drawRect(self.rect())
+
+        tx, ty = calib.targets[idx]
+        elapsed = time.time() - calib._start_time
+        progress = min(elapsed / calib.HOLD_SEC, 1.0)
+
+        ring_r = 12 + 28 * (1 - progress)
+        painter.setPen(QtGui.QPen(QtGui.QColor(255, 80, 80, 180), 3))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QtCore.QPointF(tx, ty), ring_r, ring_r)
+
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(QtGui.QColor(255, 50, 50, 240))
+        painter.drawEllipse(QtCore.QPointF(tx, ty), 8, 8)
+
+        font = painter.font()
+        font.setPointSize(14)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QtGui.QColor(255, 255, 255, 220))
+        text = f"Calibration point {idx + 1}/{len(calib.targets)} - Look at the red dot"
+        text_rect = QtCore.QRectF(0, self.height() - 60, self.width(), 40)
+        painter.drawText(text_rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+
+        bar_w = 300
+        bar_x = (self.width() - bar_w) / 2
+        bar_y = self.height() - 30
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(QtGui.QColor(60, 60, 60, 200))
+        painter.drawRoundedRect(int(bar_x), int(bar_y), bar_w, 8, 4, 4)
+        painter.setBrush(QtGui.QColor(80, 200, 120, 230))
+        painter.drawRoundedRect(int(bar_x), int(bar_y), int(bar_w * progress), 8, 4, 4)
+
+        painter.end()
+
+    def _paint_calib_status(self, painter: QtGui.QPainter):
+        font = painter.font()
+        font.setPointSize(16)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QtGui.QColor(80, 220, 120, 240))
+        text_rect = QtCore.QRectF(0, self.height() / 2 - 20, self.width(), 40)
+        painter.drawText(text_rect, QtCore.Qt.AlignmentFlag.AlignCenter, self._calib_status_text)
 
     def _draw_debug_status(self, painter: QtGui.QPainter):
         painter.save()
@@ -784,6 +893,16 @@ class NinjaCursors(QtWidgets.QWidget):
         painter.restore()
 
     def paintEvent(self, event):
+        if self._calibration and self._calibration.is_calibrating:
+            self._paint_calibration()
+            return
+
+        if self._calib_status_text and time.time() < self._calib_status_until:
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            self._paint_calib_status(painter)
+            painter.end()
+
         if self._simulating_click:
             return
 
@@ -952,12 +1071,31 @@ class NinjaCursors(QtWidgets.QWidget):
             self.logger.close()
 
     def _start_keyboard_listener(self):
+        self._pressed_keys = set()
+
         def on_press(key):
+            self._pressed_keys.add(key)
             key_char = getattr(key, "char", None)
             if isinstance(key_char, str) and key_char.lower() == "q":
                 self._queue_quit()
+            if key == keyboard.Key.esc:
+                if self._calibration and self._calibration.is_calibrating:
+                    self._calibration.abort()
+                    self._calib_status_text = "Calibration cancelled"
+                    self._calib_status_until = time.time() + 2.0
+            if isinstance(key_char, str) and key_char.lower() == "c":
+                has_cmd = keyboard.Key.cmd in self._pressed_keys or keyboard.Key.cmd_r in self._pressed_keys
+                has_shift = keyboard.Key.shift in self._pressed_keys or keyboard.Key.shift_r in self._pressed_keys
+                if has_cmd and has_shift:
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_start_calibration",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    )
 
-        self._keyboard_listener = keyboard.Listener(on_press=on_press)
+        def on_release(key):
+            self._pressed_keys.discard(key)
+
+        self._keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self._keyboard_listener.start()
 
     def _install_quit_shortcut(self):
@@ -965,12 +1103,42 @@ class NinjaCursors(QtWidgets.QWidget):
         self._quit_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
         self._quit_shortcut.activated.connect(self.stop_and_quit)
 
+        calib_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+Shift+C"), self
+        )
+        calib_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+        calib_shortcut.activated.connect(self._start_calibration)
+        self._calib_shortcut = calib_shortcut
+
     def _queue_quit(self):
         QtCore.QMetaObject.invokeMethod(
             self,
             "stop_and_quit",
             QtCore.Qt.ConnectionType.QueuedConnection,
         )
+
+    @QtCore.pyqtSlot()
+    def _start_calibration(self):
+        sw, sh = self._screen_px_dimensions
+        self._calibration = EyeCalibration(
+            sw, sh,
+            num_points=self._calib_points,
+            on_progress=self._on_calib_progress,
+            on_done=self._on_calib_done,
+        )
+        self._calibration.start(self._tracker)
+        print(f"Eye calibration started ({self._calibration.num_points} points). "
+              "Look at each red dot. Press ESC to cancel.")
+
+    def _on_calib_progress(self, point_idx, progress):
+        pass
+
+    def _on_calib_done(self, success, mean_error_px):
+        if success:
+            self._calib_status_text = f"Calibrated! Error: {mean_error_px:.0f}px"
+        else:
+            self._calib_status_text = "Calibration failed"
+        self._calib_status_until = time.time() + 3.0
 
     def _start_mouse_listener(self):
         def on_click(x, y, button, pressed):
@@ -1185,6 +1353,8 @@ def main():
     parser.add_argument("--gaze-gain", type=float, default=2.0, help="Deprecated compatibility option from the old local-direction rake; ignored by this 8-cursor version")
     parser.add_argument("--selection-hold", type=float, default=NinjaCursors.DEFAULT_SELECTION_HOLD, help="Seconds gaze must remain on the same cursor before it locks automatically")
     parser.add_argument("--hide-gaze-point", action="store_true", help="Hide the red on-screen gaze feedback marker")
+    parser.add_argument("--calib-points", type=int, choices=[5, 9, 13], default=5, help="Number of calibration points (5, 9, or 13)")
+    parser.add_argument("--auto-calibrate", action="store_true", help="Start eye calibration immediately on launch")
     parser.add_argument("--without-targetfinder", action="store_true", help="Run Ninja Cursors(gaze) without TargetFinder detection or target highlighting")
     args = parser.parse_args()
 
@@ -1250,6 +1420,8 @@ def main():
         gaze_gain_y=args.gaze_gain_y,
         selection_hold=args.selection_hold,
         show_gaze=not args.hide_gaze_point,
+        calib_points=args.calib_points,
+        auto_calibrate=args.auto_calibrate,
     )
 
 
