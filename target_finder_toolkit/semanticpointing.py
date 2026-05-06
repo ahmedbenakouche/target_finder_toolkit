@@ -37,6 +37,8 @@ from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["semantic_pointing", "main"]
 
+_SESSION_STOP_REASON = None
+
 # def Omega_rc(u, b):
 #     """
 #     Raised‐cosine normalisée telle que ∫{-1/2}^{+1/2} Omega_rc(u,b) du = 1.
@@ -567,6 +569,7 @@ class SemanticPointing(QtWidgets.QWidget):
             app.quit()
 
     def closeEvent(self, event):
+        reason = _SESSION_STOP_REASON or "window_close"
         self.enabled = False
         self.detector.stop()
         if self._mouse_listener is not None:
@@ -590,6 +593,9 @@ class SemanticPointing(QtWidgets.QWidget):
         restore_default_cursors()
         if self.disable_accel:
             restore_mouse_acceleration()
+        if self.logger is not None:
+            self.logger.log_session_end(reason=reason)
+            self.logger.close()
         super().closeEvent(event)
 
     def _start_keyboard_listener(self):
@@ -732,14 +738,24 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
     ov = SemanticPointing(detector, display, disable_accel, cursor_filter=cursor_filter, logger=logger)
     ov.show()
 
-    signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
-    signal.signal(signal.SIGTERM, lambda sig, frame: QtWidgets.QApplication.quit())
+    def _handle_signal(sig, frame):
+        global _SESSION_STOP_REASON
+        _SESSION_STOP_REASON = "stop_button" if sig in {
+            getattr(signal, "SIGTERM", None),
+            getattr(signal, "SIGBREAK", None),
+        } else "signal_interrupt"
+        QtWidgets.QApplication.quit()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_signal)
     exit_code = app.exec()
     restore_default_cursors()
     if disable_accel:
         restore_mouse_acceleration()
     if logger is not None:
-        logger.log_session_end(reason="app_exit")
+        logger.log_session_end(reason=_SESSION_STOP_REASON or "app_exit")
         logger.close()
     sys.exit(exit_code)
 

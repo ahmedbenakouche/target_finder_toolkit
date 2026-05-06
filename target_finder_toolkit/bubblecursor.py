@@ -37,6 +37,7 @@ __all__ = ["bubble_cursor", "main"]
 
 
 _CURSOR_RESTORE_REGISTERED = False
+_SESSION_STOP_REASON = None
 
 class BubbleCursor(QtWidgets.QWidget):
     """
@@ -65,11 +66,16 @@ class BubbleCursor(QtWidgets.QWidget):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
+        if sys.platform == "darwin":
+            self.detector.hide_overlay_during_capture = False
         self.cursor_filter = cursor_filter
         self.logger = logger
         self._last_target = None  # to store the active target
+        self._last_target_click = None
         self._last_target_info = None
+        self._hover_text_info = None
         self._pending_click_target = None
+        self._pending_click_target_logical = None
         self._pending_click_target_info = None
         self._pending_click_enabled = False
         self._mouse_listener = None
@@ -143,20 +149,28 @@ class BubbleCursor(QtWidgets.QWidget):
         return app.screenAt(QtCore.QPoint(int(x), int(y))) or QtWidgets.QApplication.primaryScreen()
 
     def _snapshot_click_target(self):
-        self._pending_click_target = tuple(self._last_target) if self._last_target else None
-        self._pending_click_target_info = (
-            dict(self._last_target_info) if self._last_target_info is not None else None
-        )
+        target_info = None
+        click_target = tuple(self._last_target_click) if self._last_target_click else None
+        logical_target = tuple(self._last_target) if self._last_target else None
+        if self._last_target_info is not None:
+            target_info = self._last_target_info
+        if target_info is None and self._hover_text_info is not None:
+            target_info = self._hover_text_info
+        self._pending_click_target = click_target
+        self._pending_click_target_logical = logical_target
+        self._pending_click_target_info = dict(target_info) if target_info is not None else None
         self._pending_click_enabled = bool(self.bubble_enabled)
 
     def _take_click_target_snapshot(self):
         target = self._pending_click_target
+        logical_target = self._pending_click_target_logical
         target_info = self._pending_click_target_info
         enabled = self._pending_click_enabled
         self._pending_click_target = None
+        self._pending_click_target_logical = None
         self._pending_click_target_info = None
         self._pending_click_enabled = False
-        return target, target_info, enabled
+        return target, logical_target, target_info, enabled
 
     def _resolve_click_target_for_log(self, x, y, fallback_info=None, *, fallback_nearest=False):
         if fallback_info is not None:
@@ -189,13 +203,11 @@ class BubbleCursor(QtWidgets.QWidget):
 
         # Pointer position (logical coordinates)
         pos = QtGui.QCursor.pos()
-        if self.cursor_filter is None:
-            cx, cy = pos.x(), pos.y()
-            raw_x, raw_y = float(cx), float(cy)
-        else:
-            raw_x, raw_y = float(pos.x()), float(pos.y())
-            cx, cy = raw_x, raw_y
-            cx, cy = self.cursor_filter.filter(raw_x, raw_y)
+        cx, cy = pos.x(), pos.y()
+        raw_x, raw_y = float(cx), float(cy)
+        filtered_x, filtered_y = raw_x, raw_y
+        if self.cursor_filter is not None:
+            filtered_x, filtered_y = self.cursor_filter.filter(raw_x, raw_y)
 
         text_margin = 20
         cursor_on_non_text = False
@@ -209,7 +221,14 @@ class BubbleCursor(QtWidgets.QWidget):
                     if ((x - text_margin) <= cx <= (x + w + text_margin) and
                             (y - text_margin) <= cy <= (y + h + text_margin)):
                         self._last_target = None
+                        self._last_target_click = None
                         self._last_target_info = None
+                        self._hover_text_info = self.detector.find_detection_for_point(
+                            float(cx),
+                            float(cy),
+                            include_text=True,
+                            fallback_nearest=True,
+                        )
                         self._draw_fake_cursor(painter, cx, cy)
                         painter.end()
                         return
@@ -230,7 +249,9 @@ class BubbleCursor(QtWidgets.QWidget):
         # Draw bubble only when not hovering over text
         if not distances:
             self._last_target = None
+            self._last_target_click = None
             self._last_target_info = None
+            self._hover_text_info = None
             self._draw_fake_cursor(painter,cx,cy)
             painter.end()
             return
@@ -240,12 +261,22 @@ class BubbleCursor(QtWidgets.QWidget):
 
         if nearest_cls_id == 3:
             self._last_target = None
+            self._last_target_click = None
             self._last_target_info = None
+            self._hover_text_info = self._resolve_target_info(
+                tx, ty, w, h, nearest_cls_id, nearest_score
+            )
             self._draw_fake_cursor(painter,cx,cy)
             painter.end()
             return
-        self._last_target = (
-        tx / self.detector.sx, ty / self.detector.sy, w / self.detector.sx, h / self.detector.sy)
+        self._hover_text_info = None
+        self._last_target = (tx, ty, w, h)
+        scale_x = max(float(getattr(self.detector, "sx", 1.0) or 1.0), 1e-6)
+        scale_y = max(float(getattr(self.detector, "sy", 1.0) or 1.0), 1e-6)
+        if sys.platform == "darwin":
+            self._last_target_click = (tx, ty)
+        else:
+            self._last_target_click = (tx / scale_x, ty / scale_y)
         self._last_target_info = self._resolve_target_info(
             tx, ty, w, h, nearest_cls_id, nearest_score
         )
@@ -255,7 +286,6 @@ class BubbleCursor(QtWidgets.QWidget):
         y = ty - h / 2
         corners = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]
         ConD1 = max([math.hypot(cx - px, cy - py) for (px, py) in corners])
-
         if len(distances) > 1:
             IntD2 = distances[1][0]
             radius = min(ConD1, IntD2)
@@ -290,8 +320,8 @@ class BubbleCursor(QtWidgets.QWidget):
             self.logger.log_cursor_sample(
                 raw_x=raw_x,
                 raw_y=raw_y,
-                filtered_x=cx,
-                filtered_y=cy,
+                filtered_x=filtered_x,
+                filtered_y=filtered_y,
                 technique="bubble",
                 filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
                 bubble_radius=round(float(radius), 3),
@@ -358,6 +388,7 @@ class BubbleCursor(QtWidgets.QWidget):
             app.quit()
 
     def closeEvent(self, event):
+        reason = _SESSION_STOP_REASON or "window_close"
         self.bubble_enabled = False
         self.detector.stop()
         if self._mouse_listener is not None:
@@ -375,6 +406,9 @@ class BubbleCursor(QtWidgets.QWidget):
         if self._cursor_refresh_timer is not None:
             self._cursor_refresh_timer.stop()
         restore_default_cursors()
+        if self.logger is not None:
+            self.logger.log_session_end(reason=reason)
+            self.logger.close()
         super().closeEvent(event)
 
     def _start_keyboard_listener(self):
@@ -401,20 +435,6 @@ class BubbleCursor(QtWidgets.QWidget):
 
     # === Global mouse listener + click simulation ===
     def _start_mouse_listener(self):
-        if sys.platform != "darwin":
-            def on_click(x, y, button, pressed):
-                if pressed and button == button.left:
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_simulate_click",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG(int, x),
-                        QtCore.Q_ARG(int, y),
-                    )
-            self._mouse_listener = mouse.Listener(on_click=on_click)
-            self._mouse_listener.start()
-            return
-
         def queue_rehide(force=False):
             now = time.monotonic()
             if not force and now - self._last_rehide_at < 0.008:
@@ -430,53 +450,113 @@ class BubbleCursor(QtWidgets.QWidget):
             queue_rehide()
 
         def on_click(x, y, button, pressed):
+            if sys.platform == "darwin":
+                return
             if button == button.left:
                 queue_rehide(force=True)
             if pressed and button == button.left:
                 self._snapshot_click_target()
-                if self._in_system_reserved_area(x, y):
-                    return
-                # simulate in the Qt thread
                 QtCore.QMetaObject.invokeMethod(self, "_simulate_click", QtCore.Qt.ConnectionType.QueuedConnection,
                     QtCore.Q_ARG(int, x), QtCore.Q_ARG(int, y))
-        self._mouse_listener = mouse.Listener(on_move=on_move, on_click=on_click)
+
+        kwargs = {"on_move": on_move, "on_click": on_click}
+        if sys.platform == "darwin":
+            kwargs["darwin_intercept"] = self._intercept_mouse_event
+        self._mouse_listener = mouse.Listener(**kwargs)
         self._mouse_listener.start()
+
+    def _intercept_mouse_event(self, event_type, event):
+        try:
+            import Quartz
+        except Exception:
+            return event
+
+        if event_type not in (
+            Quartz.kCGEventLeftMouseDown,
+            Quartz.kCGEventLeftMouseUp,
+        ):
+            return event
+
+        try:
+            px, py = Quartz.CGEventGetLocation(event)
+        except Exception:
+            return event
+
+        if self._in_system_reserved_area(int(px), int(py)):
+            return event
+
+        if event_type == Quartz.kCGEventLeftMouseDown:
+            self._snapshot_click_target()
+
+        logical_target = self._pending_click_target_logical or self._last_target
+        target_info = self._pending_click_target_info
+        if target_info is None:
+            if self._last_target_info is not None:
+                target_info = dict(self._last_target_info)
+            elif self._hover_text_info is not None:
+                target_info = dict(self._hover_text_info)
+
+        if logical_target is None:
+            if event_type == Quartz.kCGEventLeftMouseUp and self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[round(float(px), 3), round(float(py), 3)],
+                    effective=[round(float(px), 3), round(float(py), 3)],
+                    redirected=False,
+                    target=self._resolve_click_target_for_log(
+                        float(px),
+                        float(py),
+                        target_info,
+                        fallback_nearest=True,
+                    ),
+                )
+                self._pending_click_target = None
+                self._pending_click_target_logical = None
+                self._pending_click_target_info = None
+                self._pending_click_enabled = False
+            return event
+
+        tx, ty, w, h = logical_target
+        redirected = not (tx - w / 2 <= px <= tx + w / 2 and ty - h / 2 <= py <= ty + h / 2)
+        if redirected:
+            Quartz.CGEventSetLocation(event, Quartz.CGPointMake(float(tx), float(ty)))
+
+        if event_type == Quartz.kCGEventLeftMouseUp:
+            if self.logger is not None:
+                effective_x = float(tx) if redirected else float(px)
+                effective_y = float(ty) if redirected else float(py)
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[round(float(px), 3), round(float(py), 3)],
+                    effective=[round(effective_x, 3), round(effective_y, 3)],
+                    redirected=redirected,
+                    target=self._resolve_click_target_for_log(
+                        effective_x,
+                        effective_y,
+                        target_info,
+                        fallback_nearest=True,
+                    ),
+                )
+            self._pending_click_target = None
+            self._pending_click_target_logical = None
+            self._pending_click_target_info = None
+            self._pending_click_enabled = False
+
+        return event
 
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
-        click_target, click_target_info, click_enabled = self._take_click_target_snapshot()
+        click_target, logical_target, click_target_info, click_enabled = self._take_click_target_snapshot()
         if click_target is None:
-            click_target = self._last_target
+            click_target = self._last_target_click
+        if logical_target is None:
+            logical_target = self._last_target
         if click_target_info is None:
             click_target_info = self._last_target_info
         if not click_enabled:
             click_enabled = self.bubble_enabled
 
         if self._in_system_reserved_area(orig_x, orig_y):
-            if self.logger is not None:
-                self.logger.log_click(
-                    technique="bubble",
-                    raw=[orig_x, orig_y],
-                    effective=[orig_x, orig_y],
-                    redirected=False,
-                    target=None,
-                )
-            return
-        if not (click_target and click_enabled):
-            if self.logger is not None:
-                self.logger.log_click(
-                    technique="bubble",
-                    raw=[orig_x, orig_y],
-                    effective=[orig_x, orig_y],
-                    redirected=False,
-                    target=None,
-                )
-            return
-
-        tx, ty, w, h = click_target
-
-        # If click inside detected rectangle let it pass
-        if tx-w/2 <= orig_x <= tx+w/2 and ty-h/2 <= orig_y <= ty+h/2:
             if self.logger is not None:
                 self.logger.log_click(
                     technique="bubble",
@@ -491,14 +571,64 @@ class BubbleCursor(QtWidgets.QWidget):
                     ),
                 )
             return
+        if not (click_target and click_enabled):
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=self._resolve_click_target_for_log(
+                        orig_x,
+                        orig_y,
+                        click_target_info,
+                        fallback_nearest=True,
+                    ),
+                )
+            return
+
+        if logical_target is None or click_target is None:
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=self._resolve_click_target_for_log(
+                        orig_x,
+                        orig_y,
+                        click_target_info,
+                        fallback_nearest=True,
+                    ),
+                )
+            return
+
+        tx, ty, w, h = logical_target
+
+        # If click inside detected rectangle let it pass
+        if tx-w/2 <= orig_x <= tx+w/2 and ty-h/2 <= orig_y <= ty+h/2:
+            if self.logger is not None:
+                self.logger.log_click(
+                    technique="bubble",
+                    raw=[orig_x, orig_y],
+                    effective=[orig_x, orig_y],
+                    redirected=False,
+                    target=self._resolve_click_target_for_log(
+                        orig_x,
+                        orig_y,
+                        click_target_info,
+                        fallback_nearest=True,
+                    ),
+                )
+            return
 
         # Otherwise simulate target click
-        self._mouse_listener.stop()  # stop listener
+        click_tx, click_ty = click_target
+        if self._mouse_listener is not None:
+            self._mouse_listener.stop()
+            self._mouse_listener = None
         try:
-            pyautogui.mouseUp(button='left')  # simulate button release
-            pyautogui.moveTo(tx, ty) # move to and click the targeted widget
-            pyautogui.click()
-            pyautogui.moveTo(orig_x, orig_y) # move the mouse back to its original position
+            self._send_click(orig_x, orig_y, click_tx, click_ty)
         except pyautogui.FailSafeException:
             # to prevent the script from crashing when the mouse hits a corner
             pass
@@ -507,17 +637,49 @@ class BubbleCursor(QtWidgets.QWidget):
                 self.logger.log_click(
                     technique="bubble",
                     raw=[orig_x, orig_y],
-                    effective=[round(tx, 3), round(ty, 3)],
+                    effective=[round(click_tx, 3), round(click_ty, 3)],
                     redirected=True,
                     target=self._resolve_click_target_for_log(
-                        tx,
-                        ty,
+                        click_tx,
+                        click_ty,
                         click_target_info,
                         fallback_nearest=True,
                     ),
                 )
             self._rehide_cursor()
             self._start_mouse_listener() # restart the listener
+
+    def _send_click(self, orig_x: float, orig_y: float, tx: float, ty: float):
+        if sys.platform == "darwin":
+            self._send_macos_click(float(orig_x), float(orig_y), float(tx), float(ty))
+            return
+
+        pyautogui.mouseUp(button='left')
+        pyautogui.moveTo(tx, ty)
+        pyautogui.click()
+        pyautogui.moveTo(orig_x, orig_y)
+
+    def _send_macos_click(self, orig_x: float, orig_y: float, tx: float, ty: float):
+        import Quartz
+
+        def post_mouse_event(event_type, x, y):
+            event = Quartz.CGEventCreateMouseEvent(
+                None,
+                event_type,
+                (x, y),
+                Quartz.kCGMouseButtonLeft,
+            )
+            if event_type in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
+                Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, 1)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+        post_mouse_event(Quartz.kCGEventMouseMoved, tx, ty)
+        time.sleep(0.015)
+        post_mouse_event(Quartz.kCGEventLeftMouseDown, tx, ty)
+        time.sleep(0.025)
+        post_mouse_event(Quartz.kCGEventLeftMouseUp, tx, ty)
+        time.sleep(0.03)
+        post_mouse_event(Quartz.kCGEventMouseMoved, orig_x, orig_y)
 
 
 def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):
@@ -545,11 +707,22 @@ def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):
         QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
     else:
         hide_cursor_everywhere()
-    signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
+    def _handle_signal(sig, frame):
+        global _SESSION_STOP_REASON
+        _SESSION_STOP_REASON = "stop_button" if sig in {
+            getattr(signal, "SIGTERM", None),
+            getattr(signal, "SIGBREAK", None),
+        } else "signal_interrupt"
+        QtWidgets.QApplication.quit()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_signal)
     exit_code = app.exec()
     restore_default_cursors()
     if logger is not None:
-        logger.log_session_end(reason="app_exit")
+        logger.log_session_end(reason=_SESSION_STOP_REASON or "app_exit")
         logger.close()
     sys.exit(exit_code)
 

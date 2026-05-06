@@ -1,3 +1,4 @@
+import atexit
 import json
 import time
 from datetime import datetime
@@ -22,6 +23,9 @@ class SessionLogger:
         self._start_monotonic = time.monotonic()
         self._cursor_interval = 1.0 / max(float(cursor_hz), 1.0)
         self._last_cursor_at = 0.0
+        self._atexit_registered = False
+        atexit.register(self._finalize_at_exit)
+        self._atexit_registered = True
 
     def _elapsed(self) -> float:
         return time.monotonic() - self._start_monotonic
@@ -41,6 +45,13 @@ class SessionLogger:
             return
         self._session_ended = True
         self._write({"type": "session_end", **fields})
+
+    def _finalize_at_exit(self):
+        if self._closed:
+            return
+        if not self._session_ended:
+            self.log_session_end(reason="process_exit")
+        self.close(finalize=False)
 
     def log_cursor_sample(
         self,
@@ -90,11 +101,19 @@ class SessionLogger:
             }
         )
 
-    def close(self):
+    def close(self, *, finalize: bool = True):
         if self._closed:
             return
+        if finalize and not self._session_ended:
+            self.log_session_end(reason="logger_close")
         try:
             self._fh.close()
         except Exception:
             pass
         self._closed = True
+        if self._atexit_registered:
+            try:
+                atexit.unregister(self._finalize_at_exit)
+            except Exception:
+                pass
+            self._atexit_registered = False

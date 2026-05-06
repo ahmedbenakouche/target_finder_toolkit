@@ -63,6 +63,8 @@ else:
 
 __all__ = ["ninja_cursors", "main"]
 
+_SESSION_STOP_REASON = None
+
 
 _WEIGHT_FILE_CACHE: dict[str, Optional[str]] = {}
 
@@ -916,7 +918,7 @@ class NinjaCursors(QtWidgets.QWidget):
             app.quit()
 
     def closeEvent(self, event):
-        self._cleanup(runtime_reason=None)
+        self._cleanup(runtime_reason=_SESSION_STOP_REASON or "window_close")
         super().closeEvent(event)
 
     def _cleanup(self, runtime_reason: str | None):
@@ -1154,11 +1156,22 @@ def ninja_cursors(detector: Optional[TargetFinder], cursor_filter=None, logger=N
     overlay = NinjaCursors(detector, cursor_filter=cursor_filter, logger=logger, **kwargs)
     overlay.show()
     hide_cursor_everywhere()
-    signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
+    def _handle_signal(sig, frame):
+        global _SESSION_STOP_REASON
+        _SESSION_STOP_REASON = "stop_button" if sig in {
+            getattr(signal, "SIGTERM", None),
+            getattr(signal, "SIGBREAK", None),
+        } else "signal_interrupt"
+        QtWidgets.QApplication.quit()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_signal)
     exit_code = app.exec()
     restore_default_cursors()
     if logger is not None:
-        logger.log_session_end(reason="app_exit")
+        logger.log_session_end(reason=_SESSION_STOP_REASON or "app_exit")
         logger.close()
     sys.exit(exit_code)
 

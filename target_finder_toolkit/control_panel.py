@@ -1957,7 +1957,12 @@ class ControlPanel(QtWidgets.QWidget):
                 self.info_label.setText(f"{self._text('missing_webeyetrack')} ({exc})")
                 return
         cmd = self._build_command(cfg)
-        self.process = subprocess.Popen(cmd, cwd=str(self.project_root))
+        popen_kwargs = {"cwd": str(self.project_root)}
+        if sys.platform.startswith("win"):
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        self.process = subprocess.Popen(cmd, **popen_kwargs)
         self._process_watch_timer.start()
         self._update_action_buttons()
         if cfg.preset == "TargetFinder":
@@ -1981,12 +1986,22 @@ class ControlPanel(QtWidgets.QWidget):
                 self._set_status("no_running", speak=False)
             return
 
-        self.process.terminate()
+        try:
+            if sys.platform.startswith("win"):
+                self.process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                self.process.send_signal(signal.SIGTERM)
+        except Exception:
+            self.process.terminate()
         try:
             self.process.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            self.process.kill()
-            self.process.wait(timeout=3)
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=3)
         finally:
             self.process = None
             self._process_watch_timer.stop()

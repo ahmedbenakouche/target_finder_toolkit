@@ -29,6 +29,8 @@ from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["dynaspot", "main"]
 
+_SESSION_STOP_REASON = None
+
 pyautogui.PAUSE = 0
 pyautogui.MINIMUM_DURATION = 0
 
@@ -314,6 +316,7 @@ class DynaSpot(QtWidgets.QWidget):
             app.quit()
 
     def closeEvent(self, event):
+        reason = _SESSION_STOP_REASON or "window_close"
         self.enabled = False
         self.detector.stop()
         if self._mouse_listener is not None:
@@ -332,6 +335,9 @@ class DynaSpot(QtWidgets.QWidget):
         self._last_target = None
         self._last_target_click = None
         self._last_target_info = None
+        if self.logger is not None:
+            self.logger.log_session_end(reason=reason)
+            self.logger.close()
         super().closeEvent(event)
 
     def _start_keyboard_listener(self):
@@ -363,6 +369,7 @@ class DynaSpot(QtWidgets.QWidget):
             if pressed and button == button.left:
                 if self._in_system_reserved_area(x, y):
                     return
+                self._snapshot_click_target()
                 QtCore.QMetaObject.invokeMethod(
                     self,
                     "_simulate_click",
@@ -425,8 +432,37 @@ class DynaSpot(QtWidgets.QWidget):
             self._pending_click_target = None
         return event
 
+    def _snapshot_click_target(self):
+        self._pending_click_point = self._last_target
+        self._pending_click_target = (
+            dict(self._last_target_info) if self._last_target_info is not None else None
+        )
+
+    def _take_click_target_snapshot(self):
+        point = self._pending_click_point
+        target = self._pending_click_target
+        self._pending_click_point = None
+        self._pending_click_target = None
+        return point, target
+
+    def _resolve_click_target_for_log(self, x, y, fallback_info=None, *, fallback_nearest=False):
+        if fallback_info is not None:
+            return dict(fallback_info)
+        return self.detector.find_detection_for_point(
+            float(x),
+            float(y),
+            include_text=False,
+            fallback_nearest=fallback_nearest,
+        )
+
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
+        click_target, click_target_info = self._take_click_target_snapshot()
+        if click_target is None:
+            click_target = self._last_target
+        if click_target_info is None:
+            click_target_info = self._last_target_info
+
         if self._in_system_reserved_area(orig_x, orig_y):
             if self.logger is not None:
                 self.logger.log_click(
@@ -434,21 +470,31 @@ class DynaSpot(QtWidgets.QWidget):
                     raw=[orig_x, orig_y],
                     effective=[orig_x, orig_y],
                     redirected=False,
-                    target=None,
+                    target=self._resolve_click_target_for_log(
+                        orig_x,
+                        orig_y,
+                        click_target_info,
+                        fallback_nearest=False,
+                    ),
                 )
             return
-        if not (self._last_target and self.enabled):
+        if not (click_target and self.enabled):
             if self.logger is not None:
                 self.logger.log_click(
                     technique="dynaspot",
                     raw=[orig_x, orig_y],
                     effective=[orig_x, orig_y],
                     redirected=False,
-                    target=None,
+                    target=self._resolve_click_target_for_log(
+                        orig_x,
+                        orig_y,
+                        click_target_info,
+                        fallback_nearest=True,
+                    ),
                 )
             return
 
-        tx, ty, w, h = self._last_target
+        tx, ty, w, h = click_target
         if tx - w / 2 <= orig_x <= tx + w / 2 and ty - h / 2 <= orig_y <= ty + h / 2:
             if self.logger is not None:
                 self.logger.log_click(
@@ -456,11 +502,18 @@ class DynaSpot(QtWidgets.QWidget):
                     raw=[orig_x, orig_y],
                     effective=[orig_x, orig_y],
                     redirected=False,
-                    target=self._last_target_info,
+                    target=self._resolve_click_target_for_log(
+                        orig_x,
+                        orig_y,
+                        click_target_info,
+                        fallback_nearest=True,
+                    ),
                 )
             return
 
-        click_tx, click_ty = self._last_target_click
+        click_tx, click_ty = (
+            (tx, ty) if click_target is not self._last_target else self._last_target_click
+        )
         if self._mouse_listener is not None:
             self._mouse_listener.stop()
             self._mouse_listener = None
@@ -475,7 +528,12 @@ class DynaSpot(QtWidgets.QWidget):
                     raw=[orig_x, orig_y],
                     effective=[round(click_tx, 3), round(click_ty, 3)],
                     redirected=True,
-                    target=self._last_target_info,
+                    target=self._resolve_click_target_for_log(
+                        click_tx,
+                        click_ty,
+                        click_target_info,
+                        fallback_nearest=True,
+                    ),
                 )
             self._start_mouse_listener()
 
@@ -521,11 +579,22 @@ def dynaspot(
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     ov = DynaSpot(detector, cursor_filter=cursor_filter, logger=logger, **dynaspot_kwargs)
     ov.show()
-    signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
+    def _handle_signal(sig, frame):
+        global _SESSION_STOP_REASON
+        _SESSION_STOP_REASON = "stop_button" if sig in {
+            getattr(signal, "SIGTERM", None),
+            getattr(signal, "SIGBREAK", None),
+        } else "signal_interrupt"
+        QtWidgets.QApplication.quit()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_signal)
     exit_code = app.exec()
     restore_default_cursors()
     if logger is not None:
-        logger.log_session_end(reason="app_exit")
+        logger.log_session_end(reason=_SESSION_STOP_REASON or "app_exit")
         logger.close()
     sys.exit(exit_code)
 

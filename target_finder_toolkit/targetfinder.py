@@ -31,6 +31,8 @@ from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["TargetFinder", "show_detections", "main"]
 
+_SESSION_STOP_REASON = None
+
 # Mapping of class IDs to names
 CLASS_NAMES = {
     0: "Button",
@@ -597,6 +599,28 @@ class OverlayWindow(QtWidgets.QWidget):
             self.logger.close()
         QtWidgets.QApplication.quit()
 
+    def closeEvent(self, event):
+        reason = _SESSION_STOP_REASON or "window_close"
+        self.detector.stop()
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
+        if self._keyboard_listener is not None:
+            try:
+                self._keyboard_listener.stop()
+            except Exception:
+                pass
+            self._keyboard_listener = None
+        if hasattr(self, "_timer") and self._timer is not None:
+            self._timer.stop()
+        if self.logger is not None:
+            self.logger.log_session_end(reason=reason)
+            self.logger.close()
+        super().closeEvent(event)
+
     def _start_keyboard_listener(self):
         def on_press(key):
             try:
@@ -691,8 +715,23 @@ def show_detections(detector: TargetFinder, cursor_filter=None, logger=None):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     ov  = OverlayWindow(detector, cursor_filter=cursor_filter, logger=logger)
     ov.show()
-    signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
-    sys.exit(app.exec())
+    def _handle_signal(sig, frame):
+        global _SESSION_STOP_REASON
+        _SESSION_STOP_REASON = "stop_button" if sig in {
+            getattr(signal, "SIGTERM", None),
+            getattr(signal, "SIGBREAK", None),
+        } else "signal_interrupt"
+        QtWidgets.QApplication.quit()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_signal)
+    exit_code = app.exec()
+    if logger is not None:
+        logger.log_session_end(reason=_SESSION_STOP_REASON or "app_exit")
+        logger.close()
+    sys.exit(exit_code)
 
 
 # CLI usage
