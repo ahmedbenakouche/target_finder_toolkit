@@ -83,6 +83,8 @@ class DynaSpot(QtWidgets.QWidget):
         self._last_target = None
         self._last_target_click = None
         self._last_target_info = None
+        self._current_target = None
+        self._current_non_text_target = None
         self._pending_click_target = None
         self._pending_click_point = None
         self._selected_detection = None
@@ -251,6 +253,18 @@ class DynaSpot(QtWidgets.QWidget):
             speed_x, speed_y = self.cursor_filter.filter(raw_x, raw_y)
 
         self._update_spot_width()
+        self._current_non_text_target = self.detector.find_detection_for_point(
+            raw_x,
+            raw_y,
+            include_text=False,
+            fallback_nearest=False,
+        )
+        self._current_target = self.detector.find_detection_for_point(
+            raw_x,
+            raw_y,
+            include_text=True,
+            fallback_nearest=False,
+        )
         self._set_selected_target(self._select_target(cx, cy))
 
         if self._spot_current_width > self.POINT_WIDTH + 0.25:
@@ -409,24 +423,30 @@ class DynaSpot(QtWidgets.QWidget):
             self._pending_click_target = self._last_target_info
 
         target = self._pending_click_point or self._last_target
-        if target is None:
-            return event
-
-        tx, ty, w, h = target
-        redirected = not (tx - w / 2 <= px <= tx + w / 2 and ty - h / 2 <= py <= ty + h / 2)
-        if redirected:
-            Quartz.CGEventSetLocation(event, Quartz.CGPointMake(float(tx), float(ty)))
+        redirected = False
+        effective_x = float(px)
+        effective_y = float(py)
+        if target is not None:
+            tx, ty, w, h = target
+            redirected = not (tx - w / 2 <= px <= tx + w / 2 and ty - h / 2 <= py <= ty + h / 2)
+            if redirected:
+                Quartz.CGEventSetLocation(event, Quartz.CGPointMake(float(tx), float(ty)))
+                effective_x = float(tx)
+                effective_y = float(ty)
 
         if event_type == Quartz.kCGEventLeftMouseUp:
             if self.logger is not None:
-                effective_x = float(tx) if redirected else float(px)
-                effective_y = float(ty) if redirected else float(py)
                 self.logger.log_click(
                     technique="dynaspot",
                     raw=[round(float(px), 3), round(float(py), 3)],
                     effective=[round(effective_x, 3), round(effective_y, 3)],
                     redirected=redirected,
-                    target=self._pending_click_target,
+                    target=self._resolve_click_target_for_log(
+                        effective_x,
+                        effective_y,
+                        self._pending_click_target,
+                        fallback_nearest=False,
+                    ),
                 )
             self._pending_click_point = None
             self._pending_click_target = None
@@ -448,11 +468,33 @@ class DynaSpot(QtWidgets.QWidget):
     def _resolve_click_target_for_log(self, x, y, fallback_info=None, *, fallback_nearest=False):
         if fallback_info is not None:
             return dict(fallback_info)
+        if self._current_non_text_target is not None:
+            return dict(self._current_non_text_target)
+        if self._current_target is not None:
+            return dict(self._current_target)
+        target = self.detector.find_detection_for_point(
+            float(x),
+            float(y),
+            include_text=False,
+            fallback_nearest=False,
+        )
+        if target is not None:
+            return target
+        target = self.detector.find_detection_for_point(
+            float(x),
+            float(y),
+            include_text=True,
+            fallback_nearest=False,
+        )
+        if target is not None:
+            return target
+        if not fallback_nearest:
+            return None
         return self.detector.find_detection_for_point(
             float(x),
             float(y),
             include_text=False,
-            fallback_nearest=fallback_nearest,
+            fallback_nearest=True,
         )
 
     @QtCore.pyqtSlot(int, int)

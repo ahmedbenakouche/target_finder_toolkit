@@ -261,6 +261,11 @@ class SemanticPointing(QtWidgets.QWidget):
         self._mouse_listener = None
         self._cursor_refresh_timer = None
         self._last_rehide_at = 0.0
+        self._current_target = None
+        self._current_non_text_target = None
+        self._pending_click_target = None
+        self._pending_click_raw = None
+        self._pending_click_effective = None
         self.enabled = True
         self._simulating_click = False
         self._start_mouse_listener()
@@ -395,6 +400,18 @@ class SemanticPointing(QtWidgets.QWidget):
         clamped_y = max(0, min(new_y, self.geom.height() - 1))
         self.fake_pos.setX(clamped_x)
         self.fake_pos.setY(clamped_y)
+        self._current_non_text_target = self.detector.find_detection_for_point(
+            float(self.fake_pos.x()),
+            float(self.fake_pos.y()),
+            include_text=False,
+            fallback_nearest=False,
+        )
+        self._current_target = self.detector.find_detection_for_point(
+            float(self.fake_pos.x()),
+            float(self.fake_pos.y()),
+            include_text=True,
+            fallback_nearest=False,
+        )
         if self._is_macos and not self._simulating_click:
             sync_point = QtCore.QPoint(int(self.fake_pos.x()), int(self.fake_pos.y()))
             QtGui.QCursor.setPos(sync_point)
@@ -625,6 +642,63 @@ class SemanticPointing(QtWidgets.QWidget):
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 
+    def _resolve_click_target(self, raw_x, raw_y):
+        """Resolve the logged click target without inventing a nearest fallback.
+
+        Priority:
+        1. Exact hit on a non-text control under the semantic cursor.
+        2. Exact hit on any target under the semantic cursor.
+        3. Exact hit on a non-text control at the raw click point.
+        4. Exact hit on any target at the raw click point.
+
+        This keeps empty-space clicks at null while still allowing text / text
+        labels to be logged when they are the only exact match.
+        """
+        if self._current_non_text_target is not None:
+            return self._current_non_text_target
+        if self._current_target is not None:
+            return self._current_target
+
+        points = (
+            (float(self.fake_pos.x()), float(self.fake_pos.y())),
+            (float(raw_x), float(raw_y)),
+        )
+        for px, py in points:
+            target = self.detector.find_detection_for_point(
+                px,
+                py,
+                include_text=False,
+                fallback_nearest=False,
+            )
+            if target is not None:
+                return target
+            target = self.detector.find_detection_for_point(
+                px,
+                py,
+                include_text=True,
+                fallback_nearest=False,
+            )
+            if target is not None:
+                return target
+        return None
+
+    def _snapshot_click_target(self, raw_x, raw_y):
+        self._pending_click_raw = [round(float(raw_x), 3), round(float(raw_y), 3)]
+        self._pending_click_effective = [
+            round(float(self.fake_pos.x()), 3),
+            round(float(self.fake_pos.y()), 3),
+        ]
+        self._pending_click_target = self._resolve_click_target(raw_x, raw_y)
+
+    def _consume_click_snapshot(self):
+        target = self._pending_click_target
+        raw = self._pending_click_raw
+        effective = self._pending_click_effective
+        self._pending_click_target = None
+        self._pending_click_raw = None
+        self._pending_click_effective = None
+        return raw, effective, target
+
 
     # === Global mouse listener + click simulation ===
     def _start_mouse_listener(self):
@@ -639,23 +713,20 @@ class SemanticPointing(QtWidgets.QWidget):
 
         def on_click(x, y, button, pressed):
             if button == button.left and self._is_macos and pressed:
-                click_target = self.detector.find_detection_for_point(
-                    float(self.fake_pos.x()),
-                    float(self.fake_pos.y()),
-                    include_text=False,
-                    fallback_nearest=True,
-                )
+                self._snapshot_click_target(x, y)
+                raw, effective, click_target = self._consume_click_snapshot()
                 if self.logger is not None:
                     self.logger.log_click(
                         technique="semantic",
-                        raw=[x, y],
-                        effective=[round(self.fake_pos.x(), 3), round(self.fake_pos.y(), 3)],
+                        raw=raw,
+                        effective=effective,
                         redirected=False,
                         target=click_target,
                     )
                 QtCore.QMetaObject.invokeMethod(self, "_rehide_cursor", QtCore.Qt.ConnectionType.QueuedConnection)
                 return
             if pressed and button == button.left:
+                self._snapshot_click_target(x, y)
                 # simulate in the Qt thread
                 QtCore.QMetaObject.invokeMethod(self, "_simulate_click", QtCore.Qt.ConnectionType.QueuedConnection)
         self._mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
@@ -689,17 +760,16 @@ class SemanticPointing(QtWidgets.QWidget):
                     self._set_overlay_clickthrough(False)
                 self._simulating_click = False # deactivate the flag and resynchronize
                 self.prev_real = QtCore.QPointF(QtGui.QCursor.pos())
-                click_target = self.detector.find_detection_for_point(
-                    float(self.fake_pos.x()),
-                    float(self.fake_pos.y()),
-                    include_text=False,
-                    fallback_nearest=True,
-                )
+                raw, effective, click_target = self._consume_click_snapshot()
+                if raw is None or effective is None:
+                    raw = [round(self.prev_real.x(), 3), round(self.prev_real.y(), 3)]
+                    effective = [round(self.fake_pos.x(), 3), round(self.fake_pos.y(), 3)]
+                    click_target = self._resolve_click_target(self.prev_real.x(), self.prev_real.y())
                 if self.logger is not None:
                     self.logger.log_click(
                         technique="semantic",
-                        raw=[round(self.prev_real.x(), 3), round(self.prev_real.y(), 3)],
-                        effective=[round(self.fake_pos.x(), 3), round(self.fake_pos.y(), 3)],
+                        raw=raw,
+                        effective=effective,
                         redirected=True,
                         target=click_target,
                     )
