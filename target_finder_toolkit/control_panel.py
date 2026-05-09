@@ -1,5 +1,7 @@
 import json
 import importlib
+import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -79,6 +81,10 @@ DEFAULT_RAKE_GAZE_GAIN_Y = 1.0
 DEFAULT_RAKE_GAZE_OFFSET_X = 0.0
 DEFAULT_RAKE_GAZE_OFFSET_Y = -200.0
 DEFAULT_RAKE_SELECTION_HOLD = 2.0
+DEFAULT_RAKE_USE_CALIBRATION = False
+DEFAULT_RAKE_CALIB_POINTS = 5
+DEFAULT_RAKE_AUTO_CALIBRATE = False
+DEFAULT_RAKE_WITHOUT_TARGETFINDER = True
 
 UI_TEXTS = {
     "English": {
@@ -126,6 +132,29 @@ UI_TEXTS = {
         "rake_spacing_desc": "Controls how widely the 8 cursors are spread. Lower = cursors closer together. Higher = cursors farther apart. The default reproduces the paper-style 4x2 layout.",
         "rake_gaze_smoothing": "Gaze smoothing (range: 0.0-0.95, default: 0.35)",
         "rake_gaze_smoothing_desc": "Per frame, the system keeps this fraction of the previous gaze point and uses the rest from the new webcam sample. Higher = steadier but more lag.",
+        "rake_calibration_section": "Calibration",
+        "rake_use_calibration": "Use calibration (range: off/on, default: off)",
+        "rake_use_calibration_desc": "Enables gaze calibration mode. When active, manual gaze offset and gain tuning are disabled.",
+        "rake_calibration_points": "Calibration points (choices: 5/9/13, default: 5)",
+        "rake_calibration_points_desc": "Number of points used during multi-point calibration. More points usually improve accuracy but take longer.",
+        "rake_calibration_actions": "Calibration actions",
+        "rake_calibration_actions_desc": "When calibration mode is enabled, Start / Apply launches Ninja Cursors(gaze) and begins calibration automatically. Reset calibration returns to manual tuning mode.",
+        "rake_calibration_status": "Calibration status",
+        "rake_calibration_status_desc": "Current calibration state used by the panel.",
+        "rake_calibration_status_not_calibrated": "Not calibrated",
+        "rake_calibration_status_calibrating": "Calibrating...",
+        "rake_calibration_status_calibrated": "Calibrated",
+        "rake_calibration_status_failed": "Calibration failed",
+        "rake_calibration_status_cancelled": "Calibration cancelled",
+        "rake_calibration_status_last_applied": "Last calibration applied",
+        "rake_calibration_mode": "Correction mode",
+        "rake_calibration_mode_desc": "Shows whether Ninja Cursors(gaze) is currently using manual correction or calibration mode.",
+        "rake_calibration_mode_manual": "Manual correction mode",
+        "rake_calibration_mode_active": "Calibration mode",
+        "rake_calibration_manual_enabled": "Manual correction mode: gaze offset and gain remain editable.",
+        "rake_calibration_manual_disabled": "Calibration active: manual gaze offset and gain are disabled.",
+        "rake_manual_disabled_hint": "Disabled when calibration is active",
+        "rake_reset_calibration": "Reset calibration",
         "rake_gaze_gain_x": "Gaze gain X (range: 0.1-10.0, default: 1.0)",
         "rake_gaze_gain_x_desc": "Scales horizontal gaze movement around the screen center before offset is applied. Higher values increase left-right travel.",
         "rake_gaze_gain_y": "Gaze gain Y (range: 0.1-10.0, default: 1.0)",
@@ -138,7 +167,7 @@ UI_TEXTS = {
         "rake_selection_hold_desc": "Seconds the gaze must stay on the same cursor before it locks automatically.",
         "rake_show_gaze": "Show gaze point (rake only, range: off/on, default: on)",
         "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
-        "rake_without_targetfinder": "Without TargetFinder (range: off/on, default: off)",
+        "rake_without_targetfinder": "Without TargetFinder (range: off/on, default: on)",
         "rake_without_targetfinder_desc": "Runs Ninja Cursors(gaze) without detection, target highlighting, or model inference. Only gaze-based cursor selection and redirected clicks remain active.",
         "apply": "Start / Apply",
         "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
@@ -235,6 +264,29 @@ UI_TEXTS = {
         "rake_spacing_desc": "Contrôle à quel point les 8 curseurs sont espacés. Plus bas = plus rapprochés. Plus haut = plus éloignés. La valeur par défaut reproduit la disposition 4x2 de l’article.",
         "rake_gaze_smoothing": "Lissage du regard (plage : 0.0-0.95, défaut : 0.35)",
         "rake_gaze_smoothing_desc": "À chaque frame, le système garde cette fraction de l’ancien point de regard et prend le reste depuis la nouvelle mesure webcam. Plus haut = plus stable mais plus de retard.",
+        "rake_calibration_section": "Calibration",
+        "rake_use_calibration": "Utiliser la calibration (plage : off/on, défaut : off)",
+        "rake_use_calibration_desc": "Active le mode calibration du regard. Quand il est actif, les réglages manuels de gain et de décalage du regard sont désactivés.",
+        "rake_calibration_points": "Points de calibration (choix : 5/9/13, défaut : 5)",
+        "rake_calibration_points_desc": "Nombre de points utilisés pendant la calibration multipoint. Davantage de points améliore souvent la précision mais prend plus de temps.",
+        "rake_calibration_actions": "Actions de calibration",
+        "rake_calibration_actions_desc": "Quand le mode calibration est activé, Démarrer / Appliquer lance Ninja Cursors(gaze) et démarre automatiquement la calibration. Réinitialiser la calibration revient au mode manuel.",
+        "rake_calibration_status": "État de calibration",
+        "rake_calibration_status_desc": "État actuel de calibration utilisé par le panneau.",
+        "rake_calibration_status_not_calibrated": "Non calibré",
+        "rake_calibration_status_calibrating": "Calibration en cours...",
+        "rake_calibration_status_calibrated": "Calibré",
+        "rake_calibration_status_failed": "Calibration échouée",
+        "rake_calibration_status_cancelled": "Calibration annulée",
+        "rake_calibration_status_last_applied": "Dernière calibration appliquée",
+        "rake_calibration_mode": "Mode de correction",
+        "rake_calibration_mode_desc": "Indique si Ninja Cursors(gaze) utilise actuellement le mode manuel ou le mode calibration.",
+        "rake_calibration_mode_manual": "Mode de correction manuelle",
+        "rake_calibration_mode_active": "Mode calibration",
+        "rake_calibration_manual_enabled": "Mode de correction manuelle : le gain et le décalage du regard restent modifiables.",
+        "rake_calibration_manual_disabled": "Calibration active : le gain et le décalage manuels du regard sont désactivés.",
+        "rake_manual_disabled_hint": "Désactivé lorsque la calibration est active",
+        "rake_reset_calibration": "Réinitialiser la calibration",
         "rake_gaze_gain_x": "Gain du regard X (plage : 0.1-10.0, défaut : 1.0)",
         "rake_gaze_gain_x_desc": "Agrandit ou réduit l’amplitude horizontale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement gauche-droite.",
         "rake_gaze_gain_y": "Gain du regard Y (plage : 0.1-10.0, défaut : 1.0)",
@@ -247,7 +299,7 @@ UI_TEXTS = {
         "rake_selection_hold_desc": "Durée pendant laquelle le regard doit rester sur le même curseur avant qu’il se verrouille automatiquement.",
         "rake_show_gaze": "Afficher le point de regard (rake uniquement, plage : off/on, défaut : on)",
         "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
-        "rake_without_targetfinder": "Sans TargetFinder (plage : off/on, défaut : off)",
+        "rake_without_targetfinder": "Sans TargetFinder (plage : off/on, défaut : on)",
         "rake_without_targetfinder_desc": "Lance Ninja Cursors(gaze) sans détection, sans surbrillance de cible et sans inférence du modèle. Seuls la sélection du curseur par le regard et les clics redirigés restent actifs.",
         "apply": "Démarrer / Appliquer",
         "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
@@ -333,7 +385,11 @@ class PanelConfig:
     rake_gaze_offset_y: float = DEFAULT_RAKE_GAZE_OFFSET_Y
     rake_selection_hold: float = DEFAULT_RAKE_SELECTION_HOLD
     rake_show_gaze: bool = True
-    rake_without_targetfinder: bool = False
+    rake_without_targetfinder: bool = DEFAULT_RAKE_WITHOUT_TARGETFINDER
+    rake_use_calibration: bool = DEFAULT_RAKE_USE_CALIBRATION
+    rake_calib_points: int = DEFAULT_RAKE_CALIB_POINTS
+    rake_auto_calibrate: bool = DEFAULT_RAKE_AUTO_CALIBRATE
+    rake_calibration_status: str = "not_calibrated"
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
@@ -373,11 +429,14 @@ class ControlPanel(QtWidgets.QWidget):
         self._selected_mode = None
         self._selected_filter = "none"
         self._selected_language = "French"
+        self._rake_calibration_status = "not_calibrated"
+        self._rake_calibration_status_detail = None
         self.project_root = Path(__file__).resolve().parent.parent
         self.config_path = self.project_root / "control_panel_config.json"
         self._process_watch_timer = QtCore.QTimer(self)
         self._process_watch_timer.setInterval(300)
         self._process_watch_timer.timeout.connect(self._poll_process_state)
+        self._process_output_buffer = ""
 
         self._build_ui()
         self._connect_signals()
@@ -440,6 +499,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._refresh_language_selector_text()
         if hasattr(self, "model_path_edit"):
             self.model_path_edit.setPlaceholderText(self._text("use_default_model"))
+        if hasattr(self, "rake_calibration_status_value"):
+            self._update_rake_calibration_ui()
 
     def _set_status(self, key: str, *, speak: bool = False):
         message = self._text(key)
@@ -682,12 +743,53 @@ class ControlPanel(QtWidgets.QWidget):
         elif widget.objectName() == "ModelPicker":
             widget.setMinimumWidth(320)
             widget.setMaximumWidth(420)
+        elif widget.objectName() == "CalibrationActions":
+            widget.setMinimumWidth(320)
+            widget.setMaximumWidth(420)
         else:
             widget.setMinimumWidth(150)
             widget.setMaximumWidth(170)
 
         layout.addWidget(label_column, 1)
         layout.addWidget(widget, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self._register_help_targets(
+            [row, label_column, label] + ([description] if description is not None else []),
+            text_key,
+            description_key,
+        )
+        return row
+
+    def _create_label_value_row(self, text_key: str, value_widget, description_key: str | None = None):
+        row = QtWidgets.QWidget()
+        row.setObjectName("SettingRow")
+        layout = QtWidgets.QHBoxLayout(row)
+        layout.setContentsMargins(0, 14, 0, 14)
+        layout.setSpacing(16)
+
+        label_column = QtWidgets.QWidget()
+        label_column.setObjectName("LabelColumn")
+        label_layout = QtWidgets.QVBoxLayout(label_column)
+        label_layout.setContentsMargins(0, 0, 0, 0)
+        label_layout.setSpacing(4)
+
+        label = QtWidgets.QLabel()
+        label.setObjectName("SettingLabel")
+        label.setWordWrap(True)
+        self._bind_text(label, text_key)
+        label_layout.addWidget(label)
+
+        if description_key is not None:
+            description = QtWidgets.QLabel()
+            description.setObjectName("SettingHelp")
+            description.setWordWrap(True)
+            self._bind_text(description, description_key)
+            label_layout.addWidget(description)
+        else:
+            description = None
+
+        value_widget.setMinimumWidth(220)
+        layout.addWidget(label_column, 1)
+        layout.addWidget(value_widget, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
         self._register_help_targets(
             [row, label_column, label] + ([description] if description is not None else []),
             text_key,
@@ -910,6 +1012,20 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_gaze_smoothing_spin.setSingleStep(0.01)
         self.rake_gaze_smoothing_spin.setValue(DEFAULT_RAKE_GAZE_SMOOTHING)
 
+        self.rake_gaze_gain_x_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_gaze_gain_x_spin.setKeyboardTracking(False)
+        self.rake_gaze_gain_x_spin.setDecimals(2)
+        self.rake_gaze_gain_x_spin.setRange(0.1, 10.0)
+        self.rake_gaze_gain_x_spin.setSingleStep(0.05)
+        self.rake_gaze_gain_x_spin.setValue(DEFAULT_RAKE_GAZE_GAIN_X)
+
+        self.rake_gaze_gain_y_spin = QtWidgets.QDoubleSpinBox()
+        self.rake_gaze_gain_y_spin.setKeyboardTracking(False)
+        self.rake_gaze_gain_y_spin.setDecimals(2)
+        self.rake_gaze_gain_y_spin.setRange(0.1, 10.0)
+        self.rake_gaze_gain_y_spin.setSingleStep(0.05)
+        self.rake_gaze_gain_y_spin.setValue(DEFAULT_RAKE_GAZE_GAIN_Y)
+
         self.rake_gaze_offset_x_spin = QtWidgets.QDoubleSpinBox()
         self.rake_gaze_offset_x_spin.setKeyboardTracking(False)
         self.rake_gaze_offset_x_spin.setDecimals(1)
@@ -936,6 +1052,33 @@ class ControlPanel(QtWidgets.QWidget):
         self.log_data_cb = self._create_switch()
         self.rake_show_gaze_cb = self._create_switch()
         self.rake_without_targetfinder_cb = self._create_switch()
+        self.rake_use_calibration_cb = self._create_switch()
+        self.rake_calib_points_combo = QtWidgets.QComboBox()
+        self.rake_calib_points_combo.addItems(["5", "9", "13"])
+        self.rake_calib_points_combo.setCurrentText(str(DEFAULT_RAKE_CALIB_POINTS))
+
+        self.rake_reset_calibration_button = QtWidgets.QPushButton()
+        self.rake_reset_calibration_button.setObjectName("SmallActionButton")
+        self._bind_text(self.rake_reset_calibration_button, "rake_reset_calibration")
+
+        self.rake_calibration_actions_widget = QtWidgets.QWidget()
+        self.rake_calibration_actions_widget.setObjectName("CalibrationActions")
+        actions_layout = QtWidgets.QHBoxLayout(self.rake_calibration_actions_widget)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(8)
+        actions_layout.addWidget(self.rake_reset_calibration_button)
+
+        self.rake_calibration_status_value = QtWidgets.QLabel()
+        self.rake_calibration_status_value.setObjectName("SettingValueLabel")
+        self.rake_calibration_status_value.setWordWrap(True)
+
+        self.rake_calibration_mode_value = QtWidgets.QLabel()
+        self.rake_calibration_mode_value.setObjectName("SettingValueLabel")
+        self.rake_calibration_mode_value.setWordWrap(True)
+
+        self.rake_calibration_note = QtWidgets.QLabel()
+        self.rake_calibration_note.setObjectName("SectionNote")
+        self.rake_calibration_note.setWordWrap(True)
 
         self._semantic_rows = [
             self._create_separator(),
@@ -966,6 +1109,22 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("rake_spacing", self.rake_spacing_spin, "rake_spacing_desc"),
             self._create_separator(),
             self._create_field_row("rake_gaze_smoothing", self.rake_gaze_smoothing_spin, "rake_gaze_smoothing_desc"),
+            self._create_separator(),
+            self._create_switch_row("rake_use_calibration", self.rake_use_calibration_cb, "rake_use_calibration_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_calibration_points", self.rake_calib_points_combo, "rake_calibration_points_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_calibration_actions", self.rake_calibration_actions_widget, "rake_calibration_actions_desc"),
+            self._create_separator(),
+            self._create_label_value_row("rake_calibration_status", self.rake_calibration_status_value, "rake_calibration_status_desc"),
+            self._create_separator(),
+            self._create_label_value_row("rake_calibration_mode", self.rake_calibration_mode_value, "rake_calibration_mode_desc"),
+            self._create_separator(),
+            self.rake_calibration_note,
+            self._create_separator(),
+            self._create_field_row("rake_gaze_gain_x", self.rake_gaze_gain_x_spin, "rake_gaze_gain_x_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_gaze_gain_y", self.rake_gaze_gain_y_spin, "rake_gaze_gain_y_desc"),
             self._create_separator(),
             self._create_field_row("rake_gaze_offset_x", self.rake_gaze_offset_x_spin, "rake_gaze_offset_x_desc"),
             self._create_separator(),
@@ -1067,6 +1226,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_screen_height_cm_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_spacing_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_gaze_smoothing_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_gaze_gain_x_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.rake_gaze_gain_y_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_gaze_offset_x_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_gaze_offset_y_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.rake_selection_hold_spin.valueChanged.connect(self._handle_runtime_option_change)
@@ -1075,6 +1236,9 @@ class ControlPanel(QtWidgets.QWidget):
         self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_show_gaze_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_without_targetfinder_cb.toggled.connect(self._handle_runtime_option_change)
+        self.rake_use_calibration_cb.toggled.connect(self._handle_rake_calibration_toggle)
+        self.rake_calib_points_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
+        self.rake_reset_calibration_button.clicked.connect(self._handle_rake_reset_calibration)
 
         self.high_contrast_cb.toggled.connect(self._handle_panel_style_change)
         self.enable_tts_cb.toggled.connect(self._handle_tts_change)
@@ -1092,6 +1256,8 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.rake_screen_height_cm_spin, "rake_screen_height_cm")
         self._register_numeric_field(self.rake_spacing_spin, "rake_spacing")
         self._register_numeric_field(self.rake_gaze_smoothing_spin, "rake_gaze_smoothing")
+        self._register_numeric_field(self.rake_gaze_gain_x_spin, "rake_gaze_gain_x")
+        self._register_numeric_field(self.rake_gaze_gain_y_spin, "rake_gaze_gain_y")
         self._register_numeric_field(self.rake_gaze_offset_x_spin, "rake_gaze_offset_x")
         self._register_numeric_field(self.rake_gaze_offset_y_spin, "rake_gaze_offset_y")
         self._register_numeric_field(self.rake_selection_hold_spin, "rake_selection_hold")
@@ -1171,8 +1337,43 @@ class ControlPanel(QtWidgets.QWidget):
             row.setVisible(dynaspot_enabled)
         for row in getattr(self, "_rake_rows", []):
             row.setVisible(rake_enabled)
+        self._update_rake_calibration_ui(rake_enabled=rake_enabled)
         self._update_action_buttons()
         self.q_hint_label.setVisible(self.pages.currentIndex() == 0 and self._mode_code() is not None)
+
+    def _calibration_status_text_key(self) -> str:
+        return {
+            "calibrating": "rake_calibration_status_calibrating",
+            "calibrated": "rake_calibration_status_calibrated",
+            "failed": "rake_calibration_status_failed",
+            "cancelled": "rake_calibration_status_cancelled",
+            "last_applied": "rake_calibration_status_last_applied",
+        }.get(self._rake_calibration_status, "rake_calibration_status_not_calibrated")
+
+    def _update_rake_calibration_ui(self, *, rake_enabled: bool | None = None):
+        if rake_enabled is None:
+            rake_enabled = self._mode_code() == "rake"
+        use_calibration = self.rake_use_calibration_cb.isChecked()
+        manual_enabled = rake_enabled and not use_calibration
+        for widget in (
+            self.rake_gaze_gain_x_spin,
+            self.rake_gaze_gain_y_spin,
+            self.rake_gaze_offset_x_spin,
+            self.rake_gaze_offset_y_spin,
+        ):
+            widget.setEnabled(manual_enabled)
+        self.rake_calib_points_combo.setEnabled(rake_enabled and use_calibration)
+        self.rake_reset_calibration_button.setEnabled(rake_enabled)
+        status_text = self._text(self._calibration_status_text_key())
+        if self._rake_calibration_status_detail:
+            status_text = f"{status_text} ({self._rake_calibration_status_detail})"
+        self.rake_calibration_status_value.setText(status_text)
+        self.rake_calibration_mode_value.setText(
+            self._text("rake_calibration_mode_active" if use_calibration else "rake_calibration_mode_manual")
+        )
+        self.rake_calibration_note.setText(
+            self._text("rake_calibration_manual_disabled" if use_calibration else "rake_calibration_manual_enabled")
+        )
 
     def _register_numeric_field(self, widget, text_key: str):
         self._focus_prompt_keys[widget] = text_key
@@ -1285,12 +1486,18 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.rake_spacing_spin.text())
         elif sender is self.rake_gaze_smoothing_spin:
             self._speak_auto_text(self.rake_gaze_smoothing_spin.text())
+        elif sender is self.rake_gaze_gain_x_spin:
+            self._speak_auto_text(self.rake_gaze_gain_x_spin.text())
+        elif sender is self.rake_gaze_gain_y_spin:
+            self._speak_auto_text(self.rake_gaze_gain_y_spin.text())
         elif sender is self.rake_gaze_offset_x_spin:
             self._speak_auto_text(self.rake_gaze_offset_x_spin.text())
         elif sender is self.rake_gaze_offset_y_spin:
             self._speak_auto_text(self.rake_gaze_offset_y_spin.text())
         elif sender is self.rake_selection_hold_spin:
             self._speak_auto_text(self.rake_selection_hold_spin.text())
+        elif sender is self.rake_calib_points_combo:
+            self._speak_auto_text(self.rake_calib_points_combo.currentText())
         elif sender is self.display_cb:
             key = "turn_on" if self.display_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("display_short")))
@@ -1306,6 +1513,27 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.rake_without_targetfinder_cb:
             key = "turn_on" if self.rake_without_targetfinder_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("rake_without_targetfinder")))
+
+    def _handle_rake_calibration_toggle(self, checked: bool):
+        if self._suspend_updates:
+            return
+        if not checked:
+            self._rake_calibration_status = "not_calibrated"
+            self._rake_calibration_status_detail = None
+        self._update_rake_calibration_ui()
+        self._handle_runtime_option_change()
+        key = "turn_on" if checked else "turn_off"
+        self._speak_control_name(self._format_text(key, name=self._text("rake_use_calibration")))
+
+    def _handle_rake_reset_calibration(self):
+        self.rake_use_calibration_cb.setChecked(False)
+        self._rake_calibration_status = "not_calibrated"
+        self._rake_calibration_status_detail = None
+        self._update_rake_calibration_ui()
+        cfg = self._save_config()
+        if self._is_demo_running() and self._mode_code() == "rake":
+            self._stop_demo(silent=True)
+            self._launch_demo_for_config(cfg, speak=False)
 
     def _handle_numeric_edit_finished(self, widget):
         if self._suspend_updates:
@@ -1325,6 +1553,11 @@ class ControlPanel(QtWidgets.QWidget):
         if self._mode_code() is None:
             self._set_status("select_mode_first")
             return
+        if cfg.enable_rake_cursor and cfg.rake_use_calibration:
+            cfg.rake_auto_calibrate = True
+            self._rake_calibration_status = "calibrating"
+            self._rake_calibration_status_detail = None
+            self._update_rake_calibration_ui()
         if self._is_demo_running():
             self._stop_demo(silent=True)
         self._launch_demo_for_config(cfg, speak=True)
@@ -1498,6 +1731,13 @@ class ControlPanel(QtWidgets.QWidget):
             QLabel#SettingHelp {{
                 font-size: 12px;
                 color: {text_muted};
+                background: transparent;
+            }}
+
+            QLabel#SettingValueLabel {{
+                font-size: 14px;
+                font-weight: 600;
+                color: {text_main};
                 background: transparent;
             }}
 
@@ -1717,6 +1957,8 @@ class ControlPanel(QtWidgets.QWidget):
             self.rake_screen_height_cm_spin,
             self.rake_spacing_spin,
             self.rake_gaze_smoothing_spin,
+            self.rake_gaze_gain_x_spin,
+            self.rake_gaze_gain_y_spin,
             self.rake_gaze_offset_x_spin,
             self.rake_gaze_offset_y_spin,
             self.rake_selection_hold_spin,
@@ -1749,13 +1991,17 @@ class ControlPanel(QtWidgets.QWidget):
             rake_screen_height_cm=self.rake_screen_height_cm_spin.value(),
             rake_spacing=self.rake_spacing_spin.value(),
             rake_gaze_smoothing=self.rake_gaze_smoothing_spin.value(),
-            rake_gaze_gain_x=DEFAULT_RAKE_GAZE_GAIN_X,
-            rake_gaze_gain_y=DEFAULT_RAKE_GAZE_GAIN_Y,
+            rake_gaze_gain_x=self.rake_gaze_gain_x_spin.value(),
+            rake_gaze_gain_y=self.rake_gaze_gain_y_spin.value(),
             rake_gaze_offset_x=self.rake_gaze_offset_x_spin.value(),
             rake_gaze_offset_y=self.rake_gaze_offset_y_spin.value(),
             rake_selection_hold=self.rake_selection_hold_spin.value(),
             rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
             rake_without_targetfinder=self.rake_without_targetfinder_cb.isChecked(),
+            rake_use_calibration=self.rake_use_calibration_cb.isChecked(),
+            rake_calib_points=int(self.rake_calib_points_combo.currentText()),
+            rake_auto_calibrate=False,
+            rake_calibration_status=self._rake_calibration_status,
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
             enable_dynaspot=mode == "dynaspot",
@@ -1788,11 +2034,17 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_screen_height_cm_spin.setValue(cfg.rake_screen_height_cm)
         self.rake_spacing_spin.setValue(cfg.rake_spacing)
         self.rake_gaze_smoothing_spin.setValue(cfg.rake_gaze_smoothing)
+        self.rake_gaze_gain_x_spin.setValue(cfg.rake_gaze_gain_x)
+        self.rake_gaze_gain_y_spin.setValue(cfg.rake_gaze_gain_y)
         self.rake_gaze_offset_x_spin.setValue(cfg.rake_gaze_offset_x)
         self.rake_gaze_offset_y_spin.setValue(cfg.rake_gaze_offset_y)
         self.rake_selection_hold_spin.setValue(cfg.rake_selection_hold)
         self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
         self.rake_without_targetfinder_cb.setChecked(cfg.rake_without_targetfinder)
+        self.rake_use_calibration_cb.setChecked(cfg.rake_use_calibration)
+        self.rake_calib_points_combo.setCurrentText(str(cfg.rake_calib_points))
+        self._rake_calibration_status = cfg.rake_calibration_status or "not_calibrated"
+        self._rake_calibration_status_detail = None
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
@@ -1859,7 +2111,11 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.rake_gaze_offset_y = DEFAULT_RAKE_GAZE_OFFSET_Y
         cfg.rake_selection_hold = DEFAULT_RAKE_SELECTION_HOLD
         cfg.rake_show_gaze = True
-        cfg.rake_without_targetfinder = False
+        cfg.rake_without_targetfinder = DEFAULT_RAKE_WITHOUT_TARGETFINDER
+        cfg.rake_use_calibration = DEFAULT_RAKE_USE_CALIBRATION
+        cfg.rake_calib_points = DEFAULT_RAKE_CALIB_POINTS
+        cfg.rake_auto_calibrate = DEFAULT_RAKE_AUTO_CALIBRATE
+        cfg.rake_calibration_status = "not_calibrated"
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
         cfg.language = "French"
@@ -1905,18 +2161,26 @@ class ControlPanel(QtWidgets.QWidget):
                 "--reduce-time", str(cfg.dynaspot_reduce_time),
             ]
         if cfg.enable_rake_cursor:
+            gaze_gain_x = cfg.rake_gaze_gain_x if not cfg.rake_use_calibration else 1.0
+            gaze_gain_y = cfg.rake_gaze_gain_y if not cfg.rake_use_calibration else 1.0
+            gaze_offset_x = cfg.rake_gaze_offset_x if not cfg.rake_use_calibration else 0.0
+            gaze_offset_y = cfg.rake_gaze_offset_y if not cfg.rake_use_calibration else 0.0
             cmd += [
                 "--camera-index", str(cfg.rake_camera_index),
                 "--screen-width-cm", str(cfg.rake_screen_width_cm),
                 "--screen-height-cm", str(cfg.rake_screen_height_cm),
                 "--rake-spacing", str(cfg.rake_spacing),
                 "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
-                "--gaze-gain-x", str(cfg.rake_gaze_gain_x),
-                "--gaze-gain-y", str(cfg.rake_gaze_gain_y),
-                "--gaze-offset-x", str(cfg.rake_gaze_offset_x),
-                "--gaze-offset-y", str(cfg.rake_gaze_offset_y),
+                "--gaze-gain-x", str(gaze_gain_x),
+                "--gaze-gain-y", str(gaze_gain_y),
+                "--gaze-offset-x", str(gaze_offset_x),
+                "--gaze-offset-y", str(gaze_offset_y),
                 "--selection-hold", str(cfg.rake_selection_hold),
             ]
+            if cfg.rake_use_calibration:
+                cmd += ["--calib-points", str(cfg.rake_calib_points)]
+                if cfg.rake_auto_calibrate:
+                    cmd.append("--auto-calibrate")
             if not cfg.rake_show_gaze:
                 cmd.append("--hide-gaze-point")
             if cfg.rake_without_targetfinder:
@@ -1926,14 +2190,74 @@ class ControlPanel(QtWidgets.QWidget):
     def _is_demo_running(self):
         return self.process is not None and self.process.poll() is None
 
+    def _handle_process_output_line(self, line: str):
+        prefix = "__RAKE_CALIB__ "
+        if not line.startswith(prefix):
+            return
+        try:
+            payload = json.loads(line[len(prefix):])
+        except Exception:
+            return
+        event = payload.get("event")
+        if event == "started":
+            self._rake_calibration_status = "calibrating"
+            points = payload.get("num_points")
+            self._rake_calibration_status_detail = f"{points} pts" if points else None
+        elif event == "calibrated":
+            self._rake_calibration_status = "calibrated"
+            mean_error_px = payload.get("mean_error_px")
+            self._rake_calibration_status_detail = (
+                f"{float(mean_error_px):.0f}px"
+                if mean_error_px is not None
+                else None
+            )
+        elif event == "failed":
+            self._rake_calibration_status = "failed"
+            self._rake_calibration_status_detail = None
+        elif event == "cancelled":
+            self._rake_calibration_status = "cancelled"
+            self._rake_calibration_status_detail = None
+        else:
+            return
+        self._update_rake_calibration_ui()
+
+    def _drain_process_output(self):
+        if self.process is None or self.process.stdout is None:
+            return
+        fd = self.process.stdout.fileno()
+        chunks = []
+        while True:
+            try:
+                data = os.read(fd, 65536)
+            except BlockingIOError:
+                break
+            except OSError:
+                break
+            if not data:
+                break
+            chunks.append(data.decode("utf-8", errors="replace"))
+        if not chunks:
+            return
+        self._process_output_buffer += "".join(chunks)
+        while True:
+            newline_idx = self._process_output_buffer.find("\n")
+            if newline_idx < 0:
+                break
+            line = self._process_output_buffer[:newline_idx].rstrip("\r")
+            self._process_output_buffer = self._process_output_buffer[newline_idx + 1:]
+            self._handle_process_output_line(line)
+
     def _poll_process_state(self):
         if self.process is None:
             self._process_watch_timer.stop()
             self._update_action_buttons()
             return
+        self._drain_process_output()
         if self.process.poll() is None:
             return
+        self._drain_process_output()
         self.process = None
+        self._process_output_buffer = ""
         self._process_watch_timer.stop()
         restore_default_cursors()
         self._update_action_buttons()
@@ -1957,12 +2281,22 @@ class ControlPanel(QtWidgets.QWidget):
                 self.info_label.setText(f"{self._text('missing_webeyetrack')} ({exc})")
                 return
         cmd = self._build_command(cfg)
-        popen_kwargs = {"cwd": str(self.project_root)}
+        popen_kwargs = {
+            "cwd": str(self.project_root),
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+        }
         if sys.platform.startswith("win"):
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_kwargs["start_new_session"] = True
         self.process = subprocess.Popen(cmd, **popen_kwargs)
+        self._process_output_buffer = ""
+        if self.process.stdout is not None:
+            try:
+                os.set_blocking(self.process.stdout.fileno(), False)
+            except Exception:
+                pass
         self._process_watch_timer.start()
         self._update_action_buttons()
         if cfg.preset == "TargetFinder":
@@ -2003,7 +2337,9 @@ class ControlPanel(QtWidgets.QWidget):
                 self.process.kill()
                 self.process.wait(timeout=3)
         finally:
+            self._drain_process_output()
             self.process = None
+            self._process_output_buffer = ""
             self._process_watch_timer.stop()
             restore_default_cursors()
             self._update_action_buttons()

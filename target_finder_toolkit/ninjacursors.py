@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import json
 import os
 import pathlib
 import signal
@@ -65,6 +66,7 @@ else:
 __all__ = ["ninja_cursors", "main"]
 
 _SESSION_STOP_REASON = None
+_CALIB_EVENT_PREFIX = "__RAKE_CALIB__ "
 
 
 _WEIGHT_FILE_CACHE: dict[str, Optional[str]] = {}
@@ -94,6 +96,13 @@ def _download_model_weight(filename: str, dest_dir: pathlib.Path) -> Optional[st
     except Exception as e:
         print(f"[gaze] Download failed: {e}")
         return None
+
+
+def _emit_calibration_event(event: str, **payload):
+    try:
+        print(f"{_CALIB_EVENT_PREFIX}{json.dumps({'event': event, **payload}, ensure_ascii=False)}", flush=True)
+    except Exception:
+        pass
 
 
 def _normalize_webeyetrack_config_paths(obj):
@@ -476,6 +485,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self._simulating_click = False
         self._pending_click_point = None
         self._pending_click_target = None
+        self._pending_click_cursor_id = None
         self._last_gaze_status = "waiting for webcam"
         self._last_gaze_debug_t = 0.0
         self._last_successful_gaze_t = 0.0
@@ -489,6 +499,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self._calibration = None
         self._calib_status_text = ""
         self._calib_status_until = 0.0
+        self._cleaned_up = False
 
         geom = screen.geometry()
         self.setGeometry(geom)
@@ -778,7 +789,10 @@ class NinjaCursors(QtWidgets.QWidget):
                 gy += self.gaze_offset_y
             gx = max(float(self._screen_rect.left()), min(float(self._screen_rect.right()), gx))
             gy = max(float(self._screen_rect.top()), min(float(self._screen_rect.bottom()), gy))
-            self._apply_gaze_smoothing(gx, gy)
+            if calibrated:
+                self._gaze_point = (gx, gy)
+            else:
+                self._apply_gaze_smoothing(gx, gy)
             self._tracking_ok = True
             self._last_successful_gaze_t = time.time()
             self._set_gaze_status(f"tracking ok gaze=({gx:.0f}, {gy:.0f}) {'[calibrated]' if calibrated else ''}")
@@ -894,6 +908,25 @@ class NinjaCursors(QtWidgets.QWidget):
         )
         painter.restore()
 
+    def _log_mode_fields(self):
+        calibration = self._calibration
+        return {
+            "technique": "ninja cursors",
+            "without_targetfinder": bool(self.detector is None),
+            "use_calibration": bool(calibration is not None),
+            "calibration_active": bool(calibration is not None and calibration.is_calibrating),
+            "calibration_applied": bool(calibration is not None and calibration.is_calibrated),
+            "calibration_points": int(self._calib_points),
+        }
+
+    def _click_cursor_fields(self, cursor_id=None):
+        cid = self._active_cursor_id if cursor_id is None else cursor_id
+        cursor_value = list(cid) if cid is not None else None
+        return {
+            "active_cursor_id": cursor_value,
+            "click_cursor_id": cursor_value,
+        }
+
     def paintEvent(self, event):
         if self._calibration and self._calibration.is_calibrating:
             self._paint_calibration()
@@ -1000,7 +1033,6 @@ class NinjaCursors(QtWidgets.QWidget):
             if self._candidate_cursor_id is not None and self._candidate_cursor_id == active_id:
                 candidate_elapsed_ms = max(0.0, (time.time() - self._candidate_since) * 1000.0)
             fields = {
-                "technique": "rake",
                 "filter_name": self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
                 "active_cursor_id": list(active_id),
                 "active": [round(float(ax), 3), round(float(ay), 3)],
@@ -1017,6 +1049,7 @@ class NinjaCursors(QtWidgets.QWidget):
                 "rake_layout": "ninja8_grid",
                 "detection_count": len(self.detector.get_detections()) if self.detector is not None else 0,
             }
+            fields.update(self._log_mode_fields())
             if self._gaze_point is not None:
                 fields["gaze"] = [round(float(self._gaze_point[0]), 3), round(float(self._gaze_point[1]), 3)]
             self.logger.log_cursor_sample(
@@ -1030,7 +1063,6 @@ class NinjaCursors(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
-        self._cleanup(runtime_reason="quit")
         self.close()
         app = QtWidgets.QApplication.instance()
         if app is not None:
@@ -1041,6 +1073,15 @@ class NinjaCursors(QtWidgets.QWidget):
         super().closeEvent(event)
 
     def _cleanup(self, runtime_reason: str | None):
+        if self._cleaned_up:
+            return
+        self._cleaned_up = True
+        if self._calibration and self._calibration.is_calibrating:
+            try:
+                self._calibration.abort()
+                _emit_calibration_event("cancelled")
+            except Exception:
+                pass
         if self._gaze_timer is not None:
             self._gaze_timer.stop()
         if self._paint_timer is not None:
@@ -1085,6 +1126,7 @@ class NinjaCursors(QtWidgets.QWidget):
                     self._calibration.abort()
                     self._calib_status_text = "Calibration cancelled"
                     self._calib_status_until = time.time() + 2.0
+                    _emit_calibration_event("cancelled")
             if isinstance(key_char, str) and key_char.lower() == "c":
                 has_cmd = keyboard.Key.cmd in self._pressed_keys or keyboard.Key.cmd_r in self._pressed_keys
                 has_shift = keyboard.Key.shift in self._pressed_keys or keyboard.Key.shift_r in self._pressed_keys
@@ -1129,6 +1171,7 @@ class NinjaCursors(QtWidgets.QWidget):
             on_done=self._on_calib_done,
         )
         self._calibration.start(self._tracker)
+        _emit_calibration_event("started", num_points=self._calibration.num_points)
         print(f"Eye calibration started ({self._calibration.num_points} points). "
               "Look at each red dot. Press ESC to cancel.")
 
@@ -1138,8 +1181,10 @@ class NinjaCursors(QtWidgets.QWidget):
     def _on_calib_done(self, success, mean_error_px):
         if success:
             self._calib_status_text = f"Calibrated! Error: {mean_error_px:.0f}px"
+            _emit_calibration_event("calibrated", mean_error_px=round(float(mean_error_px), 3) if mean_error_px is not None else None)
         else:
             self._calib_status_text = "Calibration failed"
+            _emit_calibration_event("failed")
         self._calib_status_until = time.time() + 3.0
 
     def _start_mouse_listener(self):
@@ -1178,19 +1223,21 @@ class NinjaCursors(QtWidgets.QWidget):
         if not self._cursor_locked or self._active_point is None:
             if event_type == Quartz.kCGEventLeftMouseUp and self.logger is not None:
                 self.logger.log_click(
-                    technique="rake",
                     raw=[round(float(px), 3), round(float(py), 3)],
                     effective=[round(float(px), 3), round(float(py), 3)],
                     redirected=False,
                     target=None,
                     ignored=True,
                     reason="cursor_not_locked",
+                    **self._log_mode_fields(),
+                    **self._click_cursor_fields(),
                 )
             return None
 
         if event_type == Quartz.kCGEventLeftMouseDown:
             self._pending_click_point = self._active_point
             self._pending_click_target = self._active_target
+            self._pending_click_cursor_id = self._active_cursor_id
 
         target_point = self._pending_click_point or self._active_point
         if target_point is None:
@@ -1209,14 +1256,16 @@ class NinjaCursors(QtWidgets.QWidget):
         elif event_type == Quartz.kCGEventLeftMouseUp:
             if self.logger is not None:
                 self.logger.log_click(
-                    technique="rake",
                     raw=[round(float(px), 3), round(float(py), 3)],
                     effective=[round(tx, 3), round(ty, 3)],
                     redirected=redirected,
                     target=self._pending_click_target,
+                    **self._log_mode_fields(),
+                    **self._click_cursor_fields(self._pending_click_cursor_id),
                 )
             self._pending_click_point = None
             self._pending_click_target = None
+            self._pending_click_cursor_id = None
             self._unlock_cursor_selection()
         return event
 
@@ -1225,24 +1274,26 @@ class NinjaCursors(QtWidgets.QWidget):
         if self._in_system_reserved_area(orig_x, orig_y):
             if self.logger is not None:
                 self.logger.log_click(
-                    technique="rake",
                     raw=[orig_x, orig_y],
                     effective=[orig_x, orig_y],
                     redirected=False,
                     target=None,
+                    **self._log_mode_fields(),
+                    **self._click_cursor_fields(),
                 )
             return
 
         if not self._cursor_locked or self._active_point is None:
             if self.logger is not None:
                 self.logger.log_click(
-                    technique="rake",
                     raw=[orig_x, orig_y],
                     effective=[orig_x, orig_y],
                     redirected=False,
                     target=None,
                     ignored=True,
                     reason="cursor_not_locked",
+                    **self._log_mode_fields(),
+                    **self._click_cursor_fields(),
                 )
             return
 
@@ -1257,11 +1308,12 @@ class NinjaCursors(QtWidgets.QWidget):
         self._send_click(orig_x, orig_y, tx, ty)
         if self.logger is not None:
             self.logger.log_click(
-                technique="rake",
                 raw=[orig_x, orig_y],
                 effective=[round(float(tx), 3), round(float(ty), 3)],
                 redirected=redirected,
                 target=self._active_target,
+                **self._log_mode_fields(),
+                **self._click_cursor_fields(),
             )
         self._unlock_cursor_selection()
 
@@ -1330,7 +1382,11 @@ def ninja_cursors(detector: Optional[TargetFinder], cursor_filter=None, logger=N
             getattr(signal, "SIGTERM", None),
             getattr(signal, "SIGBREAK", None),
         } else "signal_interrupt"
-        QtWidgets.QApplication.quit()
+        QtCore.QMetaObject.invokeMethod(
+            overlay,
+            "stop_and_quit",
+            QtCore.Qt.ConnectionType.QueuedConnection,
+        )
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -1338,7 +1394,7 @@ def ninja_cursors(detector: Optional[TargetFinder], cursor_filter=None, logger=N
         signal.signal(signal.SIGBREAK, _handle_signal)
     exit_code = app.exec()
     restore_default_cursors()
-    if logger is not None:
+    if logger is not None and not overlay._cleaned_up:
         logger.log_session_end(reason=_SESSION_STOP_REASON or "app_exit")
         logger.close()
     sys.exit(exit_code)
@@ -1393,7 +1449,7 @@ def main():
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
         logger.log_session_start(
-            technique="rake",
+            technique="ninja cursors",
             filter_name=args.filter,
             model_path=args.model_path,
             change_thresh=args.change_thresh,
