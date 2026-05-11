@@ -88,7 +88,7 @@ DEFAULT_RAKE_GAZE_OFFSET_X = 0.0
 DEFAULT_RAKE_GAZE_OFFSET_Y = -200.0
 DEFAULT_RAKE_SELECTION_HOLD = 2.0
 DEFAULT_RAKE_LOCK_ON_DWELL = False
-DEFAULT_RAKE_USE_CALIBRATION = False
+DEFAULT_RAKE_USE_CALIBRATION = True
 DEFAULT_RAKE_CALIB_POINTS = 5
 DEFAULT_RAKE_AUTO_CALIBRATE = False
 DEFAULT_RAKE_WITHOUT_TARGETFINDER = True
@@ -150,12 +150,12 @@ UI_TEXTS = {
         "rake_gaze_smoothing": "Gaze smoothing (range: 0.0-0.95, default: 0.35)",
         "rake_gaze_smoothing_desc": "Per frame, the system keeps this fraction of the previous gaze point and uses the rest from the new webcam sample. Higher = steadier but more lag.",
         "rake_calibration_section": "Calibration",
-        "rake_use_calibration": "Use calibration (range: off/on, default: off)",
-        "rake_use_calibration_desc": "Enables gaze calibration mode. When active, manual gaze offset and gain tuning are disabled.",
+        "rake_use_calibration": "Use calibration (range: off/on, default: on)",
+        "rake_use_calibration_desc": "Runs gaze calibration before Ninja Cursors starts. The resulting correction values fill the editable gain/offset fields.",
         "rake_calibration_points": "Calibration points (choices: 5/9/13, default: 5)",
         "rake_calibration_points_desc": "Number of points used during multi-point calibration. More points usually improve accuracy but take longer.",
         "rake_calibration_actions": "Calibration actions",
-        "rake_calibration_actions_desc": "When calibration mode is enabled, Start / Apply launches Ninja Cursors(gaze) and begins calibration automatically. Reset calibration returns to manual tuning mode.",
+        "rake_calibration_actions_desc": "When calibration is enabled, Start / Apply launches Ninja Cursors(gaze), begins calibration automatically, and fills the correction fields when done.",
         "rake_calibration_status": "Calibration status",
         "rake_calibration_status_desc": "Current calibration state used by the panel.",
         "rake_calibration_status_not_calibrated": "Not calibrated",
@@ -169,8 +169,8 @@ UI_TEXTS = {
         "rake_calibration_mode_manual": "Manual correction mode",
         "rake_calibration_mode_active": "Calibration mode",
         "rake_calibration_manual_enabled": "Manual correction mode: gaze offset and gain remain editable.",
-        "rake_calibration_manual_disabled": "Calibration active: manual gaze offset and gain are disabled.",
-        "rake_manual_disabled_hint": "Disabled when calibration is active",
+        "rake_calibration_manual_disabled": "Calibration active: gain and offset will be filled automatically, then remain editable for manual tuning.",
+        "rake_manual_disabled_hint": "Auto-filled after calibration; still editable",
         "rake_reset_calibration": "Reset calibration",
         "rake_gaze_gain_x": "Gaze gain X (range: 0.1-10.0, default: 1.0)",
         "rake_gaze_gain_x_desc": "Scales horizontal gaze movement around the screen center before offset is applied. Higher values increase left-right travel.",
@@ -294,12 +294,12 @@ UI_TEXTS = {
         "rake_gaze_smoothing": "Lissage du regard (plage : 0.0-0.95, défaut : 0.35)",
         "rake_gaze_smoothing_desc": "À chaque frame, le système garde cette fraction de l’ancien point de regard et prend le reste depuis la nouvelle mesure webcam. Plus haut = plus stable mais plus de retard.",
         "rake_calibration_section": "Calibration",
-        "rake_use_calibration": "Utiliser la calibration (plage : off/on, défaut : off)",
-        "rake_use_calibration_desc": "Active le mode calibration du regard. Quand il est actif, les réglages manuels de gain et de décalage du regard sont désactivés.",
+        "rake_use_calibration": "Utiliser la calibration (plage : off/on, défaut : on)",
+        "rake_use_calibration_desc": "Lance une calibration du regard avant Ninja Cursors. Les corrections obtenues remplissent les champs gain/décalage, qui restent modifiables.",
         "rake_calibration_points": "Points de calibration (choix : 5/9/13, défaut : 5)",
         "rake_calibration_points_desc": "Nombre de points utilisés pendant la calibration multipoint. Davantage de points améliore souvent la précision mais prend plus de temps.",
         "rake_calibration_actions": "Actions de calibration",
-        "rake_calibration_actions_desc": "Quand le mode calibration est activé, Démarrer / Appliquer lance Ninja Cursors(gaze) et démarre automatiquement la calibration. Réinitialiser la calibration revient au mode manuel.",
+        "rake_calibration_actions_desc": "Quand la calibration est activée, Démarrer / Appliquer lance Ninja Cursors(gaze), démarre automatiquement la calibration et remplit les champs de correction.",
         "rake_calibration_status": "État de calibration",
         "rake_calibration_status_desc": "État actuel de calibration utilisé par le panneau.",
         "rake_calibration_status_not_calibrated": "Non calibré",
@@ -313,8 +313,8 @@ UI_TEXTS = {
         "rake_calibration_mode_manual": "Mode de correction manuelle",
         "rake_calibration_mode_active": "Mode calibration",
         "rake_calibration_manual_enabled": "Mode de correction manuelle : le gain et le décalage du regard restent modifiables.",
-        "rake_calibration_manual_disabled": "Calibration active : le gain et le décalage manuels du regard sont désactivés.",
-        "rake_manual_disabled_hint": "Désactivé lorsque la calibration est active",
+        "rake_calibration_manual_disabled": "Calibration active : le gain et le décalage seront remplis automatiquement puis restent modifiables.",
+        "rake_manual_disabled_hint": "Rempli automatiquement après calibration ; reste modifiable",
         "rake_reset_calibration": "Réinitialiser la calibration",
         "rake_gaze_gain_x": "Gain du regard X (plage : 0.1-10.0, défaut : 1.0)",
         "rake_gaze_gain_x_desc": "Agrandit ou réduit l’amplitude horizontale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement gauche-droite.",
@@ -1457,14 +1457,13 @@ class ControlPanel(QtWidgets.QWidget):
         if rake_enabled is None:
             rake_enabled = self._mode_code() == "rake"
         use_calibration = self.rake_use_calibration_cb.isChecked()
-        manual_enabled = rake_enabled and not use_calibration
         for widget in (
             self.rake_gaze_gain_x_spin,
             self.rake_gaze_gain_y_spin,
             self.rake_gaze_offset_x_spin,
             self.rake_gaze_offset_y_spin,
         ):
-            widget.setEnabled(manual_enabled)
+            widget.setEnabled(rake_enabled)
         self.rake_lock_on_dwell_cb.setEnabled(rake_enabled)
         self.rake_selection_hold_spin.setEnabled(rake_enabled and self.rake_lock_on_dwell_cb.isChecked())
         self.rake_calib_points_combo.setEnabled(rake_enabled and use_calibration)
@@ -2304,20 +2303,16 @@ class ControlPanel(QtWidgets.QWidget):
                 "--reduce-time", str(cfg.dynaspot_reduce_time),
             ]
         if cfg.enable_rake_cursor:
-            gaze_gain_x = cfg.rake_gaze_gain_x if not cfg.rake_use_calibration else 1.0
-            gaze_gain_y = cfg.rake_gaze_gain_y if not cfg.rake_use_calibration else 1.0
-            gaze_offset_x = cfg.rake_gaze_offset_x if not cfg.rake_use_calibration else 0.0
-            gaze_offset_y = cfg.rake_gaze_offset_y if not cfg.rake_use_calibration else 0.0
             cmd += [
                 "--camera-index", str(cfg.rake_camera_index),
                 "--screen-width-cm", str(cfg.rake_screen_width_cm),
                 "--screen-height-cm", str(cfg.rake_screen_height_cm),
                 "--ninja-spacing", str(cfg.rake_spacing),
                 "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
-                "--gaze-gain-x", str(gaze_gain_x),
-                "--gaze-gain-y", str(gaze_gain_y),
-                "--gaze-offset-x", str(gaze_offset_x),
-                "--gaze-offset-y", str(gaze_offset_y),
+                "--gaze-gain-x", str(cfg.rake_gaze_gain_x),
+                "--gaze-gain-y", str(cfg.rake_gaze_gain_y),
+                "--gaze-offset-x", str(cfg.rake_gaze_offset_x),
+                "--gaze-offset-y", str(cfg.rake_gaze_offset_y),
                 "--selection-hold", str(cfg.rake_selection_hold),
             ]
             if cfg.rake_lock_on_dwell:
@@ -2356,6 +2351,8 @@ class ControlPanel(QtWidgets.QWidget):
                 if mean_error_px is not None
                 else None
             )
+            correction_values = payload.get("correction_values") or {}
+            self._apply_calibration_correction_values(correction_values)
         elif event == "failed":
             self._rake_calibration_status = "failed"
             self._rake_calibration_status_detail = None
@@ -2365,6 +2362,31 @@ class ControlPanel(QtWidgets.QWidget):
         else:
             return
         self._update_rake_calibration_ui()
+
+    def _apply_calibration_correction_values(self, values):
+        if not isinstance(values, dict):
+            return
+        updates = [
+            (self.rake_gaze_gain_x_spin, values.get("gaze_gain_x")),
+            (self.rake_gaze_gain_y_spin, values.get("gaze_gain_y")),
+            (self.rake_gaze_offset_x_spin, values.get("gaze_offset_x")),
+            (self.rake_gaze_offset_y_spin, values.get("gaze_offset_y")),
+        ]
+        changed = False
+        self._suspend_updates = True
+        try:
+            for widget, value in updates:
+                if value is None:
+                    continue
+                try:
+                    widget.setValue(float(value))
+                    changed = True
+                except (TypeError, ValueError):
+                    continue
+        finally:
+            self._suspend_updates = False
+        if changed:
+            self._save_config()
 
     def _drain_process_output(self):
         if self.process is None or self.process.stdout is None:

@@ -59,6 +59,7 @@ class EyeCalibration:
         self._frame_count = 0
         self._targets = []
         self._calibrated = False
+        self._correction_values = None
 
     @property
     def is_calibrating(self):
@@ -67,6 +68,10 @@ class EyeCalibration:
     @property
     def is_calibrated(self):
         return self._calibrated
+
+    @property
+    def correction_values(self):
+        return self._correction_values
 
     @property
     def current_point_idx(self):
@@ -96,6 +101,7 @@ class EyeCalibration:
         self._tracker_ref = tracker
         tracker.affine_matrix = None
         self._calibrated = False
+        self._correction_values = None
         self._calibrating = True
         self._point_idx = 0
         self._start_time = time.time()
@@ -206,8 +212,17 @@ class EyeCalibration:
 
                 clamped_sx = np.linalg.norm(m[0, :2])
                 clamped_sy = np.linalg.norm(m[1, :2])
+                offset_x_px = float(m[0, 2] * self.screen_w)
+                offset_y_px = float(m[1, 2] * self.screen_h)
+                self._correction_values = {
+                    "gaze_gain_x": float(clamped_sx),
+                    "gaze_gain_y": float(clamped_sy),
+                    "gaze_offset_x": offset_x_px,
+                    "gaze_offset_y": offset_y_px,
+                    "affine_matrix": m.tolist(),
+                }
                 print(f"[calib] scale: raw=({scale_x:.3f}, {scale_y:.3f}) clamped=({clamped_sx:.3f}, {clamped_sy:.3f})")
-                print(f"[calib] offset_px=({m[0, 2] * self.screen_w:.0f}, {m[1, 2] * self.screen_h:.0f})")
+                print(f"[calib] offset_px=({offset_x_px:.0f}, {offset_y_px:.0f})")
 
             preds = np.array(returned_calib)
             targets = np.array(calib_norm_pogs)
@@ -216,6 +231,11 @@ class EyeCalibration:
             mean_err_px = float(np.mean(errors_px))
 
             self._save_result(mean_err_px)
+            # The panel uses calibration as an automatic initializer for the
+            # editable gain/offset fields. Disable WebEyeTrack's affine state so
+            # the runtime does not apply both affine and manual corrections.
+            tracker.affine_matrix = None
+            tracker.affine_matrix_tf = None
             print(f"Eye calibration complete! Mean error: {mean_err_px:.1f}px")
             if self.on_done:
                 self.on_done(True, mean_err_px)
@@ -233,6 +253,7 @@ class EyeCalibration:
             "mean_error_px": mean_error_px,
             "screen_w": self.screen_w,
             "screen_h": self.screen_h,
+            "correction_values": self._correction_values,
             "timestamp": time.time(),
         }
         path.write_text(json.dumps(data, indent=2))

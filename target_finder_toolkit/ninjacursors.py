@@ -780,19 +780,18 @@ class NinjaCursors(QtWidgets.QWidget):
             gx = self._screen_rect.left() + (float(norm_pog[0]) + 0.5) * self._screen_rect.width()
             gy = self._screen_rect.top() + (float(norm_pog[1]) + 0.5) * self._screen_rect.height()
             calibrated = self._calibration and self._calibration.is_calibrated
-            if not calibrated:
-                center_x = self._screen_rect.left() + self._screen_rect.width() * 0.5
-                center_y = self._screen_rect.top() + self._screen_rect.height() * 0.5
-                gx = center_x + (gx - center_x) * self.gaze_gain_x
-                gy = center_y + (gy - center_y) * self.gaze_gain_y
-                assist_start_y = self._screen_rect.top() + self._screen_rect.height() * 0.68
-                if gy < assist_start_y:
-                    assist_span = max(1.0, assist_start_y - float(self._screen_rect.top()))
-                    assist_ratio = max(0.0, min(1.0, (assist_start_y - gy) / assist_span))
-                    assist_strength = math.pow(assist_ratio, 1.35)
-                    gy += self.top_half_extra_y * assist_strength
-                gx += self.gaze_offset_x
-                gy += self.gaze_offset_y
+            center_x = self._screen_rect.left() + self._screen_rect.width() * 0.5
+            center_y = self._screen_rect.top() + self._screen_rect.height() * 0.5
+            gx = center_x + (gx - center_x) * self.gaze_gain_x
+            gy = center_y + (gy - center_y) * self.gaze_gain_y
+            assist_start_y = self._screen_rect.top() + self._screen_rect.height() * 0.68
+            if gy < assist_start_y:
+                assist_span = max(1.0, assist_start_y - float(self._screen_rect.top()))
+                assist_ratio = max(0.0, min(1.0, (assist_start_y - gy) / assist_span))
+                assist_strength = math.pow(assist_ratio, 1.35)
+                gy += self.top_half_extra_y * assist_strength
+            gx += self.gaze_offset_x
+            gy += self.gaze_offset_y
             gx = max(float(self._screen_rect.left()), min(float(self._screen_rect.right()), gx))
             gy = max(float(self._screen_rect.top()), min(float(self._screen_rect.bottom()), gy))
             if calibrated:
@@ -1067,6 +1066,8 @@ class NinjaCursors(QtWidgets.QWidget):
                 "candidate_cursor_id": list(self._candidate_cursor_id) if self._candidate_cursor_id is not None else None,
                 "candidate_elapsed_ms": round(float(candidate_elapsed_ms), 3),
                 "ninja_spacing": round(float(self.rake_spacing), 3),
+                "gaze_gain_x": round(float(self.gaze_gain_x), 3),
+                "gaze_gain_y": round(float(self.gaze_gain_y), 3),
                 "gaze_offset_x": round(float(self.gaze_offset_x), 3),
                 "gaze_offset_y": round(float(self.gaze_offset_y), 3),
                 "selection_mode": (
@@ -1212,7 +1213,17 @@ class NinjaCursors(QtWidgets.QWidget):
     def _on_calib_done(self, success, mean_error_px):
         if success:
             self._calib_status_text = f"Calibrated! Error: {mean_error_px:.0f}px"
-            _emit_calibration_event("calibrated", mean_error_px=round(float(mean_error_px), 3) if mean_error_px is not None else None)
+            correction_values = self._calibration.correction_values if self._calibration is not None else None
+            if correction_values:
+                self.gaze_gain_x = max(0.1, min(float(correction_values["gaze_gain_x"]), 10.0))
+                self.gaze_gain_y = max(0.1, min(float(correction_values["gaze_gain_y"]), 10.0))
+                self.gaze_offset_x = float(correction_values["gaze_offset_x"])
+                self.gaze_offset_y = float(correction_values["gaze_offset_y"])
+            _emit_calibration_event(
+                "calibrated",
+                mean_error_px=round(float(mean_error_px), 3) if mean_error_px is not None else None,
+                correction_values=correction_values,
+            )
         else:
             self._calib_status_text = "Calibration failed"
             _emit_calibration_event("failed")
