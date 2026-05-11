@@ -366,6 +366,7 @@ class NinjaCursors(QtWidgets.QWidget):
     DEFAULT_GAZE_GAIN_Y = 1.0
     DEFAULT_TOP_HALF_EXTRA_Y = -200.0
     DEFAULT_SELECTION_HOLD = 2.0
+    DEFAULT_LOCK_ON_DWELL = False
     DEFAULT_SHOW_GAZE = True
     UPWARD_SMOOTHING_CAP = 0.05
     UPWARD_DELTA_GAIN = 1.28
@@ -431,6 +432,7 @@ class NinjaCursors(QtWidgets.QWidget):
         gaze_gain_x: float = DEFAULT_GAZE_GAIN_X,
         gaze_gain_y: float = DEFAULT_GAZE_GAIN_Y,
         selection_hold: float = DEFAULT_SELECTION_HOLD,
+        lock_on_dwell: bool = DEFAULT_LOCK_ON_DWELL,
         show_gaze: bool = DEFAULT_SHOW_GAZE,
         calib_points: int = 5,
         auto_calibrate: bool = False,
@@ -463,6 +465,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self.gaze_gain_y = max(0.1, min(float(gaze_gain_y), 10.0))
         self.top_half_extra_y = float(self.DEFAULT_TOP_HALF_EXTRA_Y)
         self.selection_hold = max(0.0, float(selection_hold))
+        self.lock_on_dwell = bool(lock_on_dwell)
         self.show_gaze = bool(show_gaze)
         self._calib_points = calib_points if calib_points in (5, 9, 13) else 5
         self._auto_calibrate = auto_calibrate
@@ -660,6 +663,9 @@ class NinjaCursors(QtWidgets.QWidget):
             if candidate_id != self._candidate_cursor_id:
                 self._candidate_cursor_id = candidate_id
                 self._candidate_since = now
+            if not self.lock_on_dwell:
+                self._active_cursor_id = candidate_id
+                return candidate_id
             dwell_time = max(0.0, float(self.selection_hold))
             if dwell_time <= 0.0 or (now - self._candidate_since) >= dwell_time:
                 self._lock_active_cursor(candidate_id)
@@ -879,6 +885,8 @@ class NinjaCursors(QtWidgets.QWidget):
             freshness = "recent" if self._gaze_is_recent() else "stale"
             if self._cursor_locked:
                 cursor_state = "locked"
+            elif not self.lock_on_dwell:
+                cursor_state = "direct"
             elif self._candidate_cursor_id is not None and self._candidate_cursor_id == self._active_cursor_id:
                 dwell_elapsed = max(0.0, time.time() - self._candidate_since)
                 cursor_state = f"candidate {dwell_elapsed:.2f}/{self.selection_hold:.2f}s"
@@ -904,7 +912,11 @@ class NinjaCursors(QtWidgets.QWidget):
         painter.drawText(
             QtCore.QRectF(28.0, 50.0, box.width() - 24.0, 30.0),
             QtCore.Qt.AlignmentFlag.AlignLeft,
-            "Look at one cursor and keep your gaze there to lock it, then use the mouse for local refinement.",
+            (
+                "Look at one cursor and click while it is active."
+                if not self.lock_on_dwell
+                else "Look at one cursor and keep your gaze there to lock it, then use the mouse for local refinement."
+            ),
         )
         painter.restore()
 
@@ -917,6 +929,12 @@ class NinjaCursors(QtWidgets.QWidget):
             "calibration_active": bool(calibration is not None and calibration.is_calibrating),
             "calibration_applied": bool(calibration is not None and calibration.is_calibrated),
             "calibration_points": int(self._calib_points),
+            "lock_on_dwell": bool(self.lock_on_dwell),
+            "selection_mode": (
+                "nearest_gaze_cursor_with_dwell_lock"
+                if self.lock_on_dwell
+                else "nearest_gaze_cursor_direct_click"
+            ),
         }
 
     def _click_cursor_fields(self, cursor_id=None):
@@ -926,6 +944,9 @@ class NinjaCursors(QtWidgets.QWidget):
             "active_cursor_id": cursor_value,
             "click_cursor_id": cursor_value,
         }
+
+    def _cursor_can_click(self) -> bool:
+        return self._active_point is not None and (self._cursor_locked or not self.lock_on_dwell)
 
     def paintEvent(self, event):
         if self._calibration and self._calibration.is_calibrating:
@@ -947,7 +968,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return
 
         active_id = self._active_cursor_from_gaze(points)
-        if mouse_moved and self._cursor_locked:
+        if mouse_moved and (self._cursor_locked or not self.lock_on_dwell):
             self._apply_mouse_delta(dx, dy)
             points = self._grid_points()
             active_id = self._active_cursor_from_gaze(points)
@@ -957,7 +978,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return
 
         ax, ay = self._active_point
-        if self._cursor_locked and self.detector is not None:
+        if (self._cursor_locked or not self.lock_on_dwell) and self.detector is not None:
             self._active_target = self.detector.find_detection_for_point(
                 float(ax),
                 float(ay),
@@ -969,6 +990,9 @@ class NinjaCursors(QtWidgets.QWidget):
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), QtCore.Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
 
         if self._active_target is not None:
             x = self._active_target["x"]
@@ -1038,13 +1062,18 @@ class NinjaCursors(QtWidgets.QWidget):
                 "active": [round(float(ax), 3), round(float(ay), 3)],
                 "tracking_ok": bool(self._tracking_ok),
                 "dwell_lock_time": round(float(self.selection_hold), 3),
+                "lock_on_dwell": bool(self.lock_on_dwell),
                 "cursor_locked": bool(self._cursor_locked),
                 "candidate_cursor_id": list(self._candidate_cursor_id) if self._candidate_cursor_id is not None else None,
                 "candidate_elapsed_ms": round(float(candidate_elapsed_ms), 3),
                 "rake_spacing": round(float(self.rake_spacing), 3),
                 "gaze_offset_x": round(float(self.gaze_offset_x), 3),
                 "gaze_offset_y": round(float(self.gaze_offset_y), 3),
-                "selection_mode": "nearest_gaze_cursor_with_dwell_lock",
+                "selection_mode": (
+                    "nearest_gaze_cursor_with_dwell_lock"
+                    if self.lock_on_dwell
+                    else "nearest_gaze_cursor_direct_click"
+                ),
                 "cursor_count": self.CURSOR_ROWS * self.CURSOR_COLS,
                 "rake_layout": "ninja8_grid",
                 "detection_count": len(self.detector.get_detections()) if self.detector is not None else 0,
@@ -1220,7 +1249,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return event
         if self._in_system_reserved_area(int(px), int(py)):
             return event
-        if not self._cursor_locked or self._active_point is None:
+        if not self._cursor_can_click():
             if event_type == Quartz.kCGEventLeftMouseUp and self.logger is not None:
                 self.logger.log_click(
                     raw=[round(float(px), 3), round(float(py), 3)],
@@ -1283,7 +1312,7 @@ class NinjaCursors(QtWidgets.QWidget):
                 )
             return
 
-        if not self._cursor_locked or self._active_point is None:
+        if not self._cursor_can_click():
             if self.logger is not None:
                 self.logger.log_click(
                     raw=[orig_x, orig_y],
@@ -1421,6 +1450,7 @@ def main():
     parser.add_argument("--gaze-gain-y", type=float, default=NinjaCursors.DEFAULT_GAZE_GAIN_Y, help="Vertical gain applied around the screen center before gaze offset and cursor selection")
     parser.add_argument("--gaze-gain", type=float, default=2.0, help="Deprecated compatibility option from the old local-direction rake; ignored by this 8-cursor version")
     parser.add_argument("--selection-hold", type=float, default=NinjaCursors.DEFAULT_SELECTION_HOLD, help="Seconds gaze must remain on the same cursor before it locks automatically")
+    parser.add_argument("--lock-on-dwell", action="store_true", help="Require gaze dwell locking before clicks. By default, the currently active cursor can be clicked immediately.")
     parser.add_argument("--hide-gaze-point", action="store_true", help="Hide the red on-screen gaze feedback marker")
     parser.add_argument("--calib-points", type=int, choices=[5, 9, 13], default=5, help="Number of calibration points (5, 9, or 13)")
     parser.add_argument("--auto-calibrate", action="store_true", help="Start eye calibration immediately on launch")
@@ -1466,11 +1496,16 @@ def main():
             gaze_gain_x=args.gaze_gain_x,
             gaze_gain_y=args.gaze_gain_y,
             selection_hold=args.selection_hold,
+            lock_on_dwell=bool(args.lock_on_dwell),
             show_gaze=not args.hide_gaze_point,
             without_targetfinder=bool(args.without_targetfinder),
             rake_layout="ninja8_grid",
             cursor_count=NinjaCursors.CURSOR_ROWS * NinjaCursors.CURSOR_COLS,
-            selection_mode="nearest_gaze_cursor_then_mouse_lock",
+            selection_mode=(
+                "nearest_gaze_cursor_with_dwell_lock"
+                if args.lock_on_dwell
+                else "nearest_gaze_cursor_direct_click"
+            ),
         )
         if det is not None:
             det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
@@ -1488,6 +1523,7 @@ def main():
         gaze_gain_x=args.gaze_gain_x,
         gaze_gain_y=args.gaze_gain_y,
         selection_hold=args.selection_hold,
+        lock_on_dwell=args.lock_on_dwell,
         show_gaze=not args.hide_gaze_point,
         calib_points=args.calib_points,
         auto_calibrate=args.auto_calibrate,

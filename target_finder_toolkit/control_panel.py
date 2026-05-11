@@ -81,6 +81,7 @@ DEFAULT_RAKE_GAZE_GAIN_Y = 1.0
 DEFAULT_RAKE_GAZE_OFFSET_X = 0.0
 DEFAULT_RAKE_GAZE_OFFSET_Y = -200.0
 DEFAULT_RAKE_SELECTION_HOLD = 2.0
+DEFAULT_RAKE_LOCK_ON_DWELL = False
 DEFAULT_RAKE_USE_CALIBRATION = False
 DEFAULT_RAKE_CALIB_POINTS = 5
 DEFAULT_RAKE_AUTO_CALIBRATE = False
@@ -163,8 +164,10 @@ UI_TEXTS = {
         "rake_gaze_offset_x_desc": "Shifts the gaze estimate horizontally before selecting the active cursor. Positive = move right, negative = move left.",
         "rake_gaze_offset_y": "Gaze offset Y (px) (range: -1000.0-1000.0, default: -200.0)",
         "rake_gaze_offset_y_desc": "Shifts the gaze estimate vertically before selecting the active cursor. Positive = move down, negative = move up.",
+        "rake_lock_on_dwell": "Lock cursor by gaze dwell (range: off/on, default: off)",
+        "rake_lock_on_dwell_desc": "When enabled, gaze must stay on the same cursor before it locks. When disabled, the current yellow cursor can be clicked immediately.",
         "rake_selection_hold": "Gaze dwell lock time (range: 0.0-5.0, default: 2.0)",
-        "rake_selection_hold_desc": "Seconds the gaze must stay on the same cursor before it locks automatically.",
+        "rake_selection_hold_desc": "Seconds the gaze must stay on the same cursor before it locks automatically. Used only when dwell locking is enabled.",
         "rake_show_gaze": "Show gaze point (rake only, range: off/on, default: on)",
         "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
         "rake_without_targetfinder": "Without TargetFinder (range: off/on, default: on)",
@@ -295,8 +298,10 @@ UI_TEXTS = {
         "rake_gaze_offset_x_desc": "Décale l’estimation du regard horizontalement avant de choisir le curseur actif. Positif = vers la droite, négatif = vers la gauche.",
         "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -1000.0-1000.0, défaut : -200.0)",
         "rake_gaze_offset_y_desc": "Décale l’estimation du regard verticalement avant de choisir le curseur actif. Positif = vers le bas, négatif = vers le haut.",
+        "rake_lock_on_dwell": "Verrouiller par fixation du regard (plage : off/on, défaut : off)",
+        "rake_lock_on_dwell_desc": "Si activé, le regard doit rester sur le même curseur avant verrouillage. Sinon, le curseur jaune courant peut être cliqué immédiatement.",
         "rake_selection_hold": "Temps de verrouillage par fixation du regard (plage : 0.0-5.0, défaut : 2.0)",
-        "rake_selection_hold_desc": "Durée pendant laquelle le regard doit rester sur le même curseur avant qu’il se verrouille automatiquement.",
+        "rake_selection_hold_desc": "Durée pendant laquelle le regard doit rester sur le même curseur avant qu’il se verrouille automatiquement. Utilisé seulement si le verrouillage est activé.",
         "rake_show_gaze": "Afficher le point de regard (rake uniquement, plage : off/on, défaut : on)",
         "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
         "rake_without_targetfinder": "Sans TargetFinder (plage : off/on, défaut : on)",
@@ -384,6 +389,7 @@ class PanelConfig:
     rake_gaze_offset_x: float = DEFAULT_RAKE_GAZE_OFFSET_X
     rake_gaze_offset_y: float = DEFAULT_RAKE_GAZE_OFFSET_Y
     rake_selection_hold: float = DEFAULT_RAKE_SELECTION_HOLD
+    rake_lock_on_dwell: bool = DEFAULT_RAKE_LOCK_ON_DWELL
     rake_show_gaze: bool = True
     rake_without_targetfinder: bool = DEFAULT_RAKE_WITHOUT_TARGETFINDER
     rake_use_calibration: bool = DEFAULT_RAKE_USE_CALIBRATION
@@ -1050,6 +1056,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.display_cb = self._create_switch()
         self.disable_accel_cb = self._create_switch()
         self.log_data_cb = self._create_switch()
+        self.rake_lock_on_dwell_cb = self._create_switch()
         self.rake_show_gaze_cb = self._create_switch()
         self.rake_without_targetfinder_cb = self._create_switch()
         self.rake_use_calibration_cb = self._create_switch()
@@ -1129,6 +1136,8 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("rake_gaze_offset_x", self.rake_gaze_offset_x_spin, "rake_gaze_offset_x_desc"),
             self._create_separator(),
             self._create_field_row("rake_gaze_offset_y", self.rake_gaze_offset_y_spin, "rake_gaze_offset_y_desc"),
+            self._create_separator(),
+            self._create_switch_row("rake_lock_on_dwell", self.rake_lock_on_dwell_cb, "rake_lock_on_dwell_desc"),
             self._create_separator(),
             self._create_field_row("rake_selection_hold", self.rake_selection_hold_spin, "rake_selection_hold_desc"),
             self._create_separator(),
@@ -1234,6 +1243,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.display_cb.toggled.connect(self._handle_runtime_option_change)
         self.disable_accel_cb.toggled.connect(self._handle_runtime_option_change)
         self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
+        self.rake_lock_on_dwell_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_show_gaze_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_without_targetfinder_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_use_calibration_cb.toggled.connect(self._handle_rake_calibration_toggle)
@@ -1362,6 +1372,8 @@ class ControlPanel(QtWidgets.QWidget):
             self.rake_gaze_offset_y_spin,
         ):
             widget.setEnabled(manual_enabled)
+        self.rake_lock_on_dwell_cb.setEnabled(rake_enabled)
+        self.rake_selection_hold_spin.setEnabled(rake_enabled and self.rake_lock_on_dwell_cb.isChecked())
         self.rake_calib_points_combo.setEnabled(rake_enabled and use_calibration)
         self.rake_reset_calibration_button.setEnabled(rake_enabled)
         status_text = self._text(self._calibration_status_text_key())
@@ -1458,6 +1470,7 @@ class ControlPanel(QtWidgets.QWidget):
         if self._suspend_updates:
             return
         self._save_config()
+        self._update_rake_calibration_ui()
         self._set_status("pending_apply")
         sender = self.sender()
         if sender is self.change_thresh_spin:
@@ -1507,6 +1520,9 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.log_data_cb:
             key = "turn_on" if self.log_data_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("record_data")))
+        elif sender is self.rake_lock_on_dwell_cb:
+            key = "turn_on" if self.rake_lock_on_dwell_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("rake_lock_on_dwell")))
         elif sender is self.rake_show_gaze_cb:
             key = "turn_on" if self.rake_show_gaze_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("rake_show_gaze")))
@@ -1996,6 +2012,7 @@ class ControlPanel(QtWidgets.QWidget):
             rake_gaze_offset_x=self.rake_gaze_offset_x_spin.value(),
             rake_gaze_offset_y=self.rake_gaze_offset_y_spin.value(),
             rake_selection_hold=self.rake_selection_hold_spin.value(),
+            rake_lock_on_dwell=self.rake_lock_on_dwell_cb.isChecked(),
             rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
             rake_without_targetfinder=self.rake_without_targetfinder_cb.isChecked(),
             rake_use_calibration=self.rake_use_calibration_cb.isChecked(),
@@ -2039,6 +2056,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_gaze_offset_x_spin.setValue(cfg.rake_gaze_offset_x)
         self.rake_gaze_offset_y_spin.setValue(cfg.rake_gaze_offset_y)
         self.rake_selection_hold_spin.setValue(cfg.rake_selection_hold)
+        self.rake_lock_on_dwell_cb.setChecked(cfg.rake_lock_on_dwell)
         self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
         self.rake_without_targetfinder_cb.setChecked(cfg.rake_without_targetfinder)
         self.rake_use_calibration_cb.setChecked(cfg.rake_use_calibration)
@@ -2110,6 +2128,7 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.rake_gaze_offset_x = DEFAULT_RAKE_GAZE_OFFSET_X
         cfg.rake_gaze_offset_y = DEFAULT_RAKE_GAZE_OFFSET_Y
         cfg.rake_selection_hold = DEFAULT_RAKE_SELECTION_HOLD
+        cfg.rake_lock_on_dwell = DEFAULT_RAKE_LOCK_ON_DWELL
         cfg.rake_show_gaze = True
         cfg.rake_without_targetfinder = DEFAULT_RAKE_WITHOUT_TARGETFINDER
         cfg.rake_use_calibration = DEFAULT_RAKE_USE_CALIBRATION
@@ -2177,6 +2196,8 @@ class ControlPanel(QtWidgets.QWidget):
                 "--gaze-offset-y", str(gaze_offset_y),
                 "--selection-hold", str(cfg.rake_selection_hold),
             ]
+            if cfg.rake_lock_on_dwell:
+                cmd.append("--lock-on-dwell")
             if cfg.rake_use_calibration:
                 cmd += ["--calib-points", str(cfg.rake_calib_points)]
                 if cfg.rake_auto_calibrate:
