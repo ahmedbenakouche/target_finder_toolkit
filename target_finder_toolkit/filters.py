@@ -14,6 +14,28 @@ FILTER_OPTIONS = {
     "one_euro": "One Euro",
 }
 
+DEFAULT_FILTER_FREQ = 120.0
+DEFAULT_FILTER_MIN_CUTOFF = 1.0
+DEFAULT_FILTER_BETA = 0.02
+DEFAULT_FILTER_D_CUTOFF = 1.0
+
+
+def add_filter_arguments(parser):
+    parser.add_argument("--filter", choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    parser.add_argument("--filter-freq", type=float, default=DEFAULT_FILTER_FREQ, help="One Euro filter sampling frequency")
+    parser.add_argument("--filter-min-cutoff", type=float, default=DEFAULT_FILTER_MIN_CUTOFF, help="One Euro filter minimum cutoff")
+    parser.add_argument("--filter-beta", type=float, default=DEFAULT_FILTER_BETA, help="One Euro filter beta")
+    parser.add_argument("--filter-d-cutoff", type=float, default=DEFAULT_FILTER_D_CUTOFF, help="One Euro filter derivative cutoff")
+
+
+def filter_kwargs_from_args(args) -> dict[str, float]:
+    return {
+        "freq": args.filter_freq,
+        "min_cutoff": args.filter_min_cutoff,
+        "beta": args.filter_beta,
+        "d_cutoff": args.filter_d_cutoff,
+    }
+
 
 class OneEuroFilter1D:
     def __init__(
@@ -72,12 +94,16 @@ class PointFilter2D:
         d_cutoff: float = 1.0,
     ):
         self.filter_name = filter_name if filter_name in FILTER_OPTIONS else "none"
+        self.freq = float(freq)
+        self.min_cutoff = float(min_cutoff)
+        self.beta = float(beta)
+        self.d_cutoff = float(d_cutoff)
         if self.filter_name == "one_euro":
             kwargs = {
-                "freq": freq,
-                "min_cutoff": min_cutoff,
-                "beta": beta,
-                "d_cutoff": d_cutoff,
+                "freq": self.freq,
+                "min_cutoff": self.min_cutoff,
+                "beta": self.beta,
+                "d_cutoff": self.d_cutoff,
             }
             self._fx = OneEuroFilter1D(**kwargs)
             self._fy = OneEuroFilter1D(**kwargs)
@@ -88,6 +114,15 @@ class PointFilter2D:
     @property
     def enabled(self) -> bool:
         return self.filter_name != "none"
+
+    @property
+    def params(self) -> dict[str, float]:
+        return {
+            "filter_freq": self.freq,
+            "filter_min_cutoff": self.min_cutoff,
+            "filter_beta": self.beta,
+            "filter_d_cutoff": self.d_cutoff,
+        }
 
     def filter(self, x: float, y: float, timestamp: float | None = None) -> tuple[float, float]:
         if not self.enabled:

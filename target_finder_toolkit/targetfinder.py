@@ -26,7 +26,7 @@ from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
 from pynput import keyboard, mouse
-from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
+from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
 
 __all__ = ["TargetFinder", "show_detections", "main"]
@@ -687,6 +687,7 @@ class OverlayWindow(QtWidgets.QWidget):
                 filtered_y=filt_y,
                 technique="targetfinder",
                 filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
+                **(self.cursor_filter.params if self.cursor_filter is not None else {}),
                 detection_count=len(self.detector.get_detections()),
             )
 
@@ -747,7 +748,7 @@ def main():
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
-    parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    add_filter_arguments(parser)
     parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     args = parser.parse_args()
@@ -758,12 +759,13 @@ def main():
 
     # Instantiate detector and start overlay
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    cursor_filter = PointFilter2D(args.filter)
+    cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args))
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
         logger.log_session_start(
             technique="targetfinder",
             filter_name=args.filter,
+            **filter_kwargs_from_args(args),
             model_path=args.model_path,
             change_thresh=args.change_thresh,
             capture_interval=args.capture_interval,

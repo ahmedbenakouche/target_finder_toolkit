@@ -30,7 +30,7 @@ from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
-from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
+from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
 
 
@@ -425,6 +425,7 @@ class SemanticPointing(QtWidgets.QWidget):
                 filtered_y=filt_y,
                 technique="semantic",
                 filter_name=self.cursor_filter.filter_name if self.cursor_filter is not None else "none",
+                **(self.cursor_filter.params if self.cursor_filter is not None else {}),
                 fake_x=round(self.fake_pos.x(), 3),
                 fake_y=round(self.fake_pos.y(), 3),
                 scale=round(float(s), 4),
@@ -866,7 +867,7 @@ def main():
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     parser.add_argument('--disable-accel', action='store_true', help="Disable system mouse acceleration")
     parser.add_argument('--display', action='store_true', help="Enable on-screen display of target boxe and physical area")
-    parser.add_argument('--filter', choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    add_filter_arguments(parser)
     parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     args = parser.parse_args()
@@ -876,12 +877,13 @@ def main():
         args.model_path = os.path.join(here, "yolo26s_1280.pt")
 
     det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    cursor_filter = PointFilter2D(args.filter) if args.filter != "none" else None
+    cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args)) if args.filter != "none" else None
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
         logger.log_session_start(
             technique="semantic",
             filter_name=args.filter,
+            **filter_kwargs_from_args(args),
             model_path=args.model_path,
             change_thresh=args.change_thresh,
             capture_interval=args.capture_interval,

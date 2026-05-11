@@ -32,7 +32,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from pynput import keyboard, mouse
 
 from target_finder_toolkit.eye_calibration import EyeCalibration
-from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D
+from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.targetfinder import TargetFinder
@@ -66,7 +66,7 @@ else:
 __all__ = ["ninja_cursors", "main"]
 
 _SESSION_STOP_REASON = None
-_CALIB_EVENT_PREFIX = "__RAKE_CALIB__ "
+_CALIB_EVENT_PREFIX = "__NINJA_CALIB__ "
 
 
 _WEIGHT_FILE_CACHE: dict[str, Optional[str]] = {}
@@ -737,7 +737,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self._last_gaze_status = message
         now = time.time()
         if now - self._last_gaze_debug_t >= self.DEBUG_TEXT_REFRESH_SEC:
-            print(f"[rake] {message}", flush=True)
+            print(f"[ninja] {message}", flush=True)
             self._last_gaze_debug_t = now
 
     @QtCore.pyqtSlot()
@@ -1066,7 +1066,7 @@ class NinjaCursors(QtWidgets.QWidget):
                 "cursor_locked": bool(self._cursor_locked),
                 "candidate_cursor_id": list(self._candidate_cursor_id) if self._candidate_cursor_id is not None else None,
                 "candidate_elapsed_ms": round(float(candidate_elapsed_ms), 3),
-                "rake_spacing": round(float(self.rake_spacing), 3),
+                "ninja_spacing": round(float(self.rake_spacing), 3),
                 "gaze_offset_x": round(float(self.gaze_offset_x), 3),
                 "gaze_offset_y": round(float(self.gaze_offset_y), 3),
                 "selection_mode": (
@@ -1075,9 +1075,11 @@ class NinjaCursors(QtWidgets.QWidget):
                     else "nearest_gaze_cursor_direct_click"
                 ),
                 "cursor_count": self.CURSOR_ROWS * self.CURSOR_COLS,
-                "rake_layout": "ninja8_grid",
+                "ninja_layout": "ninja8_grid",
                 "detection_count": len(self.detector.get_detections()) if self.detector is not None else 0,
             }
+            if self.cursor_filter is not None:
+                fields.update(self.cursor_filter.params)
             fields.update(self._log_mode_fields())
             if self._gaze_point is not None:
                 fields["gaze"] = [round(float(self._gaze_point[0]), 3), round(float(self._gaze_point[1]), 3)]
@@ -1277,7 +1279,7 @@ class NinjaCursors(QtWidgets.QWidget):
         redirected = math.hypot(float(px) - tx, float(py) - ty) > self.CLICK_EPSILON
         if event_type == Quartz.kCGEventLeftMouseDown:
             print(
-                f"[rake] retarget native click raw=({float(px):.1f}, {float(py):.1f}) "
+                f"[ninja] retarget native click raw=({float(px):.1f}, {float(py):.1f}) "
                 f"active={self._active_cursor_id} effective=({tx:.1f}, {ty:.1f}) "
                 f"redirected={redirected} gaze_recent={self._gaze_is_recent()}",
                 flush=True,
@@ -1329,7 +1331,7 @@ class NinjaCursors(QtWidgets.QWidget):
         tx, ty = self._active_point
         redirected = math.hypot(float(orig_x) - tx, float(orig_y) - ty) > self.CLICK_EPSILON
         print(
-            f"[rake] click raw=({orig_x}, {orig_y}) active={self._active_cursor_id} "
+            f"[ninja] click raw=({orig_x}, {orig_y}) active={self._active_cursor_id} "
             f"effective=({tx:.1f}, {ty:.1f}) redirected={redirected} gaze_recent={self._gaze_is_recent()}",
             flush=True,
         )
@@ -1362,13 +1364,13 @@ class NinjaCursors(QtWidgets.QWidget):
                 pyautogui.moveTo(orig_x, orig_y)
                 backend = "pyautogui"
             print(
-                f"[rake] sent click backend={backend} effective=({float(tx):.1f}, {float(ty):.1f})",
+                f"[ninja] sent click backend={backend} effective=({float(tx):.1f}, {float(ty):.1f})",
                 flush=True,
             )
         except pyautogui.FailSafeException:
-            print("[rake] click skipped by pyautogui fail-safe", flush=True)
+            print("[ninja] click skipped by pyautogui fail-safe", flush=True)
         except Exception as exc:
-            print(f"[rake] click send error: {type(exc).__name__}: {exc}", flush=True)
+            print(f"[ninja] click send error: {type(exc).__name__}: {exc}", flush=True)
         finally:
             hide_cursor_everywhere()
             self._simulating_click = False
@@ -1436,19 +1438,19 @@ def main():
     parser.add_argument("--capture-interval", type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument("--confidence", type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument("--iou", type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
-    parser.add_argument("--filter", choices=sorted(FILTER_OPTIONS.keys()), default="none", help="Optional pointer filter")
+    add_filter_arguments(parser)
     parser.add_argument("--log-file", default=None, help="Optional JSONL log file path")
     parser.add_argument("--log-cursor-hz", type=float, default=30.0, help="Cursor sampling rate for logging")
     parser.add_argument("--camera-index", type=int, default=NinjaCursors.DEFAULT_CAMERA_INDEX, help="Webcam index used for gaze tracking")
     parser.add_argument("--screen-width-cm", type=float, default=None, help="Approximate physical screen width in centimeters; auto-detected when omitted")
     parser.add_argument("--screen-height-cm", type=float, default=None, help="Approximate physical screen height in centimeters; auto-detected when omitted")
-    parser.add_argument("--rake-spacing", type=float, default=NinjaCursors.DEFAULT_RAKE_SPACING, help="Center-to-center spacing in pixels between neighboring cursors in the 8-cursor Ninja layout")
+    parser.add_argument("--ninja-spacing", dest="ninja_spacing", type=float, default=NinjaCursors.DEFAULT_RAKE_SPACING, help="Center-to-center spacing in pixels between neighboring cursors in the 8-cursor Ninja layout")
     parser.add_argument("--gaze-smoothing", type=float, default=NinjaCursors.DEFAULT_GAZE_SMOOTHING, help="Smoothing factor applied to the gaze point (0 = no smoothing, higher = steadier gaze)")
     parser.add_argument("--gaze-offset-x", type=float, default=NinjaCursors.DEFAULT_GAZE_OFFSET_X, help="Horizontal pixel offset applied to the webcam-estimated gaze point before cursor selection")
     parser.add_argument("--gaze-offset-y", type=float, default=NinjaCursors.DEFAULT_GAZE_OFFSET_Y, help="Vertical pixel offset applied to the webcam-estimated gaze point before cursor selection")
     parser.add_argument("--gaze-gain-x", type=float, default=NinjaCursors.DEFAULT_GAZE_GAIN_X, help="Horizontal gain applied around the screen center before gaze offset and cursor selection")
     parser.add_argument("--gaze-gain-y", type=float, default=NinjaCursors.DEFAULT_GAZE_GAIN_Y, help="Vertical gain applied around the screen center before gaze offset and cursor selection")
-    parser.add_argument("--gaze-gain", type=float, default=2.0, help="Deprecated compatibility option from the old local-direction rake; ignored by this 8-cursor version")
+    parser.add_argument("--gaze-gain", type=float, default=2.0, help="Deprecated compatibility option from the old local-direction cursor version; ignored by this 8-cursor version")
     parser.add_argument("--selection-hold", type=float, default=NinjaCursors.DEFAULT_SELECTION_HOLD, help="Seconds gaze must remain on the same cursor before it locks automatically")
     parser.add_argument("--lock-on-dwell", action="store_true", help="Require gaze dwell locking before clicks. By default, the currently active cursor can be clicked immediately.")
     parser.add_argument("--hide-gaze-point", action="store_true", help="Hide the red on-screen gaze feedback marker")
@@ -1475,12 +1477,13 @@ def main():
     det = None
     if not args.without_targetfinder:
         det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
-    cursor_filter = PointFilter2D(args.filter) if args.filter != "none" else None
+    cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args)) if args.filter != "none" else None
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
         logger.log_session_start(
             technique="ninja cursors",
             filter_name=args.filter,
+            **filter_kwargs_from_args(args),
             model_path=args.model_path,
             change_thresh=args.change_thresh,
             capture_interval=args.capture_interval,
@@ -1489,7 +1492,7 @@ def main():
             camera_index=args.camera_index,
             screen_width_cm=args.screen_width_cm,
             screen_height_cm=args.screen_height_cm,
-            rake_spacing=args.rake_spacing,
+            ninja_spacing=args.ninja_spacing,
             gaze_smoothing=args.gaze_smoothing,
             gaze_offset_x=args.gaze_offset_x,
             gaze_offset_y=args.gaze_offset_y,
@@ -1499,7 +1502,7 @@ def main():
             lock_on_dwell=bool(args.lock_on_dwell),
             show_gaze=not args.hide_gaze_point,
             without_targetfinder=bool(args.without_targetfinder),
-            rake_layout="ninja8_grid",
+            ninja_layout="ninja8_grid",
             cursor_count=NinjaCursors.CURSOR_ROWS * NinjaCursors.CURSOR_COLS,
             selection_mode=(
                 "nearest_gaze_cursor_with_dwell_lock"
@@ -1516,7 +1519,7 @@ def main():
         camera_index=args.camera_index,
         screen_width_cm=args.screen_width_cm,
         screen_height_cm=args.screen_height_cm,
-        rake_spacing=args.rake_spacing,
+        rake_spacing=args.ninja_spacing,
         gaze_smoothing=args.gaze_smoothing,
         gaze_offset_x=args.gaze_offset_x,
         gaze_offset_y=args.gaze_offset_y,

@@ -10,7 +10,13 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from PyQt6 import QtCore, QtWidgets
-from target_finder_toolkit.filters import FILTER_OPTIONS
+from target_finder_toolkit.filters import (
+    DEFAULT_FILTER_BETA,
+    DEFAULT_FILTER_D_CUTOFF,
+    DEFAULT_FILTER_FREQ,
+    DEFAULT_FILTER_MIN_CUTOFF,
+    FILTER_OPTIONS,
+)
 from target_finder_toolkit.logging_utils import make_default_log_path
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 
@@ -106,6 +112,16 @@ UI_TEXTS = {
         "filter_none": "None",
         "filter_one_euro": "One Euro",
         "filter_desc": "Apply an optional cursor filter before the selected technique uses pointer input.",
+        "filter_params": "One Euro filter parameters",
+        "filter_params_desc": "Advanced parameters for the One Euro filter. Usually fixed during demos; tune only if the defaults are not good enough.",
+        "filter_freq": "Filter frequency (range: 1.0-1000.0, default: 120.0)",
+        "filter_freq_desc": "Expected sampling frequency used by the One Euro filter.",
+        "filter_min_cutoff": "Filter min cutoff (range: 0.001-100.0, default: 1.0)",
+        "filter_min_cutoff_desc": "Lower values smooth more at low speed; higher values react faster but can jitter more.",
+        "filter_beta": "Filter beta (range: 0.0-10.0, default: 0.02)",
+        "filter_beta_desc": "Speed adaptation factor. Higher values reduce lag during fast movement.",
+        "filter_d_cutoff": "Filter derivative cutoff (range: 0.001-100.0, default: 1.0)",
+        "filter_d_cutoff_desc": "Smoothing cutoff for the speed estimate used by the filter.",
         "record_data": "Record session data (range: off/on, default: off)",
         "record_data_desc": "Save structured JSONL logs with cursor samples, clicks, and detection changes for later analysis.",
         "mode_targetfinder": "TargetFinder Overlay",
@@ -129,7 +145,7 @@ UI_TEXTS = {
         "rake_screen_width_cm_desc": "Auto-detected physical screen width used by WebEyeTrack. You can override it if detection is wrong.",
         "rake_screen_height_cm": "Screen height (cm) (range: 10.0-200.0, default: auto-detected current screen)",
         "rake_screen_height_cm_desc": "Auto-detected physical screen height used by WebEyeTrack. You can override it if detection is wrong.",
-        "rake_spacing": "Rake spacing (range: 80.0-800.0, default: 320.0)",
+        "rake_spacing": "Ninja spacing (range: 80.0-800.0, default: 320.0)",
         "rake_spacing_desc": "Controls how widely the 8 cursors are spread. Lower = cursors closer together. Higher = cursors farther apart. The default reproduces the paper-style 4x2 layout.",
         "rake_gaze_smoothing": "Gaze smoothing (range: 0.0-0.95, default: 0.35)",
         "rake_gaze_smoothing_desc": "Per frame, the system keeps this fraction of the previous gaze point and uses the rest from the new webcam sample. Higher = steadier but more lag.",
@@ -168,7 +184,7 @@ UI_TEXTS = {
         "rake_lock_on_dwell_desc": "When enabled, gaze must stay on the same cursor before it locks. When disabled, the current yellow cursor can be clicked immediately.",
         "rake_selection_hold": "Gaze dwell lock time (range: 0.0-5.0, default: 2.0)",
         "rake_selection_hold_desc": "Seconds the gaze must stay on the same cursor before it locks automatically. Used only when dwell locking is enabled.",
-        "rake_show_gaze": "Show gaze point (rake only, range: off/on, default: on)",
+        "rake_show_gaze": "Show gaze point (Ninja only, range: off/on, default: on)",
         "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
         "rake_without_targetfinder": "Without TargetFinder (range: off/on, default: on)",
         "rake_without_targetfinder_desc": "Runs Ninja Cursors(gaze) without detection, target highlighting, or model inference. Only gaze-based cursor selection and redirected clicks remain active.",
@@ -240,6 +256,16 @@ UI_TEXTS = {
         "filter_none": "Aucun",
         "filter_one_euro": "One Euro",
         "filter_desc": "Appliquer un filtre optionnel au pointeur avant que la technique sélectionnée n'utilise l'entrée souris.",
+        "filter_params": "Paramètres du filtre One Euro",
+        "filter_params_desc": "Paramètres avancés du filtre One Euro. En démonstration, ils restent généralement fixes ; à modifier seulement si les valeurs par défaut ne conviennent pas.",
+        "filter_freq": "Fréquence du filtre (plage : 1.0-1000.0, défaut : 120.0)",
+        "filter_freq_desc": "Fréquence d'échantillonnage attendue par le filtre One Euro.",
+        "filter_min_cutoff": "Coupure minimale du filtre (plage : 0.001-100.0, défaut : 1.0)",
+        "filter_min_cutoff_desc": "Plus bas = plus lisse à basse vitesse ; plus haut = plus réactif mais potentiellement plus instable.",
+        "filter_beta": "Bêta du filtre (plage : 0.0-10.0, défaut : 0.02)",
+        "filter_beta_desc": "Facteur d'adaptation à la vitesse. Plus haut réduit le retard lors des mouvements rapides.",
+        "filter_d_cutoff": "Coupure dérivée du filtre (plage : 0.001-100.0, défaut : 1.0)",
+        "filter_d_cutoff_desc": "Coupure de lissage pour l'estimation de vitesse utilisée par le filtre.",
         "record_data": "Enregistrer les données (plage : off/on, défaut : off)",
         "record_data_desc": "Enregistrer des journaux JSONL structurés avec la trajectoire du pointeur, les clics et les changements de détection.",
         "mode_targetfinder": "Overlay TargetFinder",
@@ -263,7 +289,7 @@ UI_TEXTS = {
         "rake_screen_width_cm_desc": "Largeur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
         "rake_screen_height_cm": "Hauteur écran (cm) (plage : 10.0-200.0, défaut : écran courant détecté automatiquement)",
         "rake_screen_height_cm_desc": "Hauteur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
-        "rake_spacing": "Espacement du rake (plage : 80.0-800.0, défaut : 320.0)",
+        "rake_spacing": "Espacement Ninja (plage : 80.0-800.0, défaut : 320.0)",
         "rake_spacing_desc": "Contrôle à quel point les 8 curseurs sont espacés. Plus bas = plus rapprochés. Plus haut = plus éloignés. La valeur par défaut reproduit la disposition 4x2 de l’article.",
         "rake_gaze_smoothing": "Lissage du regard (plage : 0.0-0.95, défaut : 0.35)",
         "rake_gaze_smoothing_desc": "À chaque frame, le système garde cette fraction de l’ancien point de regard et prend le reste depuis la nouvelle mesure webcam. Plus haut = plus stable mais plus de retard.",
@@ -302,7 +328,7 @@ UI_TEXTS = {
         "rake_lock_on_dwell_desc": "Si activé, le regard doit rester sur le même curseur avant verrouillage. Sinon, le curseur jaune courant peut être cliqué immédiatement.",
         "rake_selection_hold": "Temps de verrouillage par fixation du regard (plage : 0.0-5.0, défaut : 2.0)",
         "rake_selection_hold_desc": "Durée pendant laquelle le regard doit rester sur le même curseur avant qu’il se verrouille automatiquement. Utilisé seulement si le verrouillage est activé.",
-        "rake_show_gaze": "Afficher le point de regard (rake uniquement, plage : off/on, défaut : on)",
+        "rake_show_gaze": "Afficher le point de regard (Ninja uniquement, plage : off/on, défaut : on)",
         "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
         "rake_without_targetfinder": "Sans TargetFinder (plage : off/on, défaut : on)",
         "rake_without_targetfinder_desc": "Lance Ninja Cursors(gaze) sans détection, sans surbrillance de cible et sans inférence du modèle. Seuls la sélection du curseur par le regard et les clics redirigés restent actifs.",
@@ -372,6 +398,10 @@ class PanelConfig:
     iou: float = DEFAULT_IOU
     model_path: str = ""
     filter_name: str = "none"
+    filter_freq: float = DEFAULT_FILTER_FREQ
+    filter_min_cutoff: float = DEFAULT_FILTER_MIN_CUTOFF
+    filter_beta: float = DEFAULT_FILTER_BETA
+    filter_d_cutoff: float = DEFAULT_FILTER_D_CUTOFF
     enable_logging: bool = False
     display: bool = False
     disable_accel: bool = False
@@ -443,6 +473,7 @@ class ControlPanel(QtWidgets.QWidget):
         self._process_watch_timer.setInterval(300)
         self._process_watch_timer.timeout.connect(self._poll_process_state)
         self._process_output_buffer = ""
+        self._process_output_lines = []
 
         self._build_ui()
         self._connect_signals()
@@ -912,6 +943,34 @@ class ControlPanel(QtWidgets.QWidget):
         self.filter_selector_button.setObjectName("SelectorButton")
         self._refresh_filter_selector_text()
 
+        self.filter_freq_spin = QtWidgets.QDoubleSpinBox()
+        self.filter_freq_spin.setKeyboardTracking(False)
+        self.filter_freq_spin.setDecimals(1)
+        self.filter_freq_spin.setRange(1.0, 1000.0)
+        self.filter_freq_spin.setSingleStep(10.0)
+        self.filter_freq_spin.setValue(DEFAULT_FILTER_FREQ)
+
+        self.filter_min_cutoff_spin = QtWidgets.QDoubleSpinBox()
+        self.filter_min_cutoff_spin.setKeyboardTracking(False)
+        self.filter_min_cutoff_spin.setDecimals(3)
+        self.filter_min_cutoff_spin.setRange(0.001, 100.0)
+        self.filter_min_cutoff_spin.setSingleStep(0.1)
+        self.filter_min_cutoff_spin.setValue(DEFAULT_FILTER_MIN_CUTOFF)
+
+        self.filter_beta_spin = QtWidgets.QDoubleSpinBox()
+        self.filter_beta_spin.setKeyboardTracking(False)
+        self.filter_beta_spin.setDecimals(3)
+        self.filter_beta_spin.setRange(0.0, 10.0)
+        self.filter_beta_spin.setSingleStep(0.01)
+        self.filter_beta_spin.setValue(DEFAULT_FILTER_BETA)
+
+        self.filter_d_cutoff_spin = QtWidgets.QDoubleSpinBox()
+        self.filter_d_cutoff_spin.setKeyboardTracking(False)
+        self.filter_d_cutoff_spin.setDecimals(3)
+        self.filter_d_cutoff_spin.setRange(0.001, 100.0)
+        self.filter_d_cutoff_spin.setSingleStep(0.1)
+        self.filter_d_cutoff_spin.setValue(DEFAULT_FILTER_D_CUTOFF)
+
         self.model_path_edit = QtWidgets.QLineEdit()
         self.model_path_edit.setReadOnly(True)
         self.model_path_edit.setPlaceholderText(self._text("use_default_model"))
@@ -1105,6 +1164,17 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("dynaspot_reduce_time", self.dynaspot_reduce_time_spin, "dynaspot_reduce_time_desc"),
         ]
 
+        self._filter_param_rows = [
+            self._create_separator(),
+            self._create_field_row("filter_freq", self.filter_freq_spin, "filter_freq_desc"),
+            self._create_separator(),
+            self._create_field_row("filter_min_cutoff", self.filter_min_cutoff_spin, "filter_min_cutoff_desc"),
+            self._create_separator(),
+            self._create_field_row("filter_beta", self.filter_beta_spin, "filter_beta_desc"),
+            self._create_separator(),
+            self._create_field_row("filter_d_cutoff", self.filter_d_cutoff_spin, "filter_d_cutoff_desc"),
+        ]
+
         self._rake_rows = [
             self._create_separator(),
             self._create_field_row("rake_camera_index", self.rake_camera_index_spin, "rake_camera_index_desc"),
@@ -1152,6 +1222,7 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("technique", self.mode_selector_button, "mode_note"),
             self._create_separator(),
             self._create_field_row("filter", self.filter_selector_button, "filter_desc"),
+            *self._filter_param_rows,
             self._create_separator(),
             self._create_switch_row("record_data", self.log_data_cb, "record_data_desc"),
             self._create_separator(),
@@ -1226,6 +1297,10 @@ class ControlPanel(QtWidgets.QWidget):
         self.capture_interval_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.confidence_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.iou_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.filter_freq_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.filter_min_cutoff_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.filter_beta_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.filter_d_cutoff_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_min_speed_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_spot_width_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.dynaspot_lag_spin.valueChanged.connect(self._handle_runtime_option_change)
@@ -1257,6 +1332,10 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.capture_interval_spin, "capture_interval")
         self._register_numeric_field(self.confidence_spin, "confidence")
         self._register_numeric_field(self.iou_spin, "iou")
+        self._register_numeric_field(self.filter_freq_spin, "filter_freq")
+        self._register_numeric_field(self.filter_min_cutoff_spin, "filter_min_cutoff")
+        self._register_numeric_field(self.filter_beta_spin, "filter_beta")
+        self._register_numeric_field(self.filter_d_cutoff_spin, "filter_d_cutoff")
         self._register_numeric_field(self.dynaspot_min_speed_spin, "dynaspot_min_speed")
         self._register_numeric_field(self.dynaspot_spot_width_spin, "dynaspot_spot_width")
         self._register_numeric_field(self.dynaspot_lag_spin, "dynaspot_lag")
@@ -1277,6 +1356,10 @@ class ControlPanel(QtWidgets.QWidget):
             "model_path_desc",
         )
         self._register_help_targets([self.filter_selector_button], "filter", "filter_desc")
+        self._register_help_targets([self.filter_freq_spin], "filter_freq", "filter_freq_desc")
+        self._register_help_targets([self.filter_min_cutoff_spin], "filter_min_cutoff", "filter_min_cutoff_desc")
+        self._register_help_targets([self.filter_beta_spin], "filter_beta", "filter_beta_desc")
+        self._register_help_targets([self.filter_d_cutoff_spin], "filter_d_cutoff", "filter_d_cutoff_desc")
 
     # ---------------------------------
     # Navigation
@@ -1339,8 +1422,18 @@ class ControlPanel(QtWidgets.QWidget):
         semantic_enabled = self._mode_code() == "semantic"
         dynaspot_enabled = self._mode_code() == "dynaspot"
         rake_enabled = self._mode_code() == "rake"
+        filter_params_visible = self._selected_filter == "one_euro"
         self.display_cb.setEnabled(semantic_enabled)
         self.disable_accel_cb.setEnabled(semantic_enabled)
+        for row in getattr(self, "_filter_param_rows", []):
+            row.setVisible(filter_params_visible)
+        for widget in (
+            self.filter_freq_spin,
+            self.filter_min_cutoff_spin,
+            self.filter_beta_spin,
+            self.filter_d_cutoff_spin,
+        ):
+            widget.setEnabled(filter_params_visible)
         for row in getattr(self, "_semantic_rows", []):
             row.setVisible(semantic_enabled)
         for row in getattr(self, "_dynaspot_rows", []):
@@ -1463,6 +1556,7 @@ class ControlPanel(QtWidgets.QWidget):
             return
         self._selected_filter = selected
         self._refresh_filter_selector_text()
+        self._update_mode_dependent_fields()
         self._save_config()
         self._set_status("pending_apply")
 
@@ -1481,6 +1575,14 @@ class ControlPanel(QtWidgets.QWidget):
             self._speak_auto_text(self.confidence_spin.text())
         elif sender is self.iou_spin:
             self._speak_auto_text(self.iou_spin.text())
+        elif sender is self.filter_freq_spin:
+            self._speak_auto_text(self.filter_freq_spin.text())
+        elif sender is self.filter_min_cutoff_spin:
+            self._speak_auto_text(self.filter_min_cutoff_spin.text())
+        elif sender is self.filter_beta_spin:
+            self._speak_auto_text(self.filter_beta_spin.text())
+        elif sender is self.filter_d_cutoff_spin:
+            self._speak_auto_text(self.filter_d_cutoff_spin.text())
         elif sender is self.dynaspot_min_speed_spin:
             self._speak_auto_text(self.dynaspot_min_speed_spin.text())
         elif sender is self.dynaspot_spot_width_spin:
@@ -1964,6 +2066,10 @@ class ControlPanel(QtWidgets.QWidget):
             self.capture_interval_spin,
             self.confidence_spin,
             self.iou_spin,
+            self.filter_freq_spin,
+            self.filter_min_cutoff_spin,
+            self.filter_beta_spin,
+            self.filter_d_cutoff_spin,
             self.dynaspot_min_speed_spin,
             self.dynaspot_spot_width_spin,
             self.dynaspot_lag_spin,
@@ -1995,6 +2101,10 @@ class ControlPanel(QtWidgets.QWidget):
             iou=self.iou_spin.value(),
             model_path=self.model_path_edit.text().strip(),
             filter_name=self._selected_filter,
+            filter_freq=self.filter_freq_spin.value(),
+            filter_min_cutoff=self.filter_min_cutoff_spin.value(),
+            filter_beta=self.filter_beta_spin.value(),
+            filter_d_cutoff=self.filter_d_cutoff_spin.value(),
             enable_logging=self.log_data_cb.isChecked(),
             display=self.display_cb.isChecked(),
             disable_accel=self.disable_accel_cb.isChecked(),
@@ -2039,6 +2149,10 @@ class ControlPanel(QtWidgets.QWidget):
         self.iou_spin.setValue(cfg.iou)
         self.model_path_edit.setText(cfg.model_path)
         self._selected_filter = cfg.filter_name if cfg.filter_name in FILTER_OPTIONS else "none"
+        self.filter_freq_spin.setValue(cfg.filter_freq)
+        self.filter_min_cutoff_spin.setValue(cfg.filter_min_cutoff)
+        self.filter_beta_spin.setValue(cfg.filter_beta)
+        self.filter_d_cutoff_spin.setValue(cfg.filter_d_cutoff)
         self.log_data_cb.setChecked(cfg.enable_logging)
         self.display_cb.setChecked(cfg.display)
         self.disable_accel_cb.setChecked(cfg.disable_accel)
@@ -2106,6 +2220,10 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.iou = DEFAULT_IOU
         cfg.model_path = ""
         cfg.filter_name = "none"
+        cfg.filter_freq = DEFAULT_FILTER_FREQ
+        cfg.filter_min_cutoff = DEFAULT_FILTER_MIN_CUTOFF
+        cfg.filter_beta = DEFAULT_FILTER_BETA
+        cfg.filter_d_cutoff = DEFAULT_FILTER_D_CUTOFF
         cfg.enable_logging = False
         cfg.enable_bubble_cursor = False
         cfg.enable_semantic_pointing = False
@@ -2161,6 +2279,12 @@ class ControlPanel(QtWidgets.QWidget):
         cmd += ["--confidence", str(cfg.confidence)]
         cmd += ["--iou", str(cfg.iou)]
         cmd += ["--filter", cfg.filter_name]
+        cmd += [
+            "--filter-freq", str(cfg.filter_freq),
+            "--filter-min-cutoff", str(cfg.filter_min_cutoff),
+            "--filter-beta", str(cfg.filter_beta),
+            "--filter-d-cutoff", str(cfg.filter_d_cutoff),
+        ]
         if cfg.model_path:
             cmd += ["--model-path", cfg.model_path]
         if cfg.enable_logging:
@@ -2188,7 +2312,7 @@ class ControlPanel(QtWidgets.QWidget):
                 "--camera-index", str(cfg.rake_camera_index),
                 "--screen-width-cm", str(cfg.rake_screen_width_cm),
                 "--screen-height-cm", str(cfg.rake_screen_height_cm),
-                "--rake-spacing", str(cfg.rake_spacing),
+                "--ninja-spacing", str(cfg.rake_spacing),
                 "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
                 "--gaze-gain-x", str(gaze_gain_x),
                 "--gaze-gain-y", str(gaze_gain_y),
@@ -2212,7 +2336,7 @@ class ControlPanel(QtWidgets.QWidget):
         return self.process is not None and self.process.poll() is None
 
     def _handle_process_output_line(self, line: str):
-        prefix = "__RAKE_CALIB__ "
+        prefix = "__NINJA_CALIB__ "
         if not line.startswith(prefix):
             return
         try:
@@ -2266,7 +2390,16 @@ class ControlPanel(QtWidgets.QWidget):
                 break
             line = self._process_output_buffer[:newline_idx].rstrip("\r")
             self._process_output_buffer = self._process_output_buffer[newline_idx + 1:]
+            if line:
+                self._process_output_lines.append(line)
+                self._process_output_lines = self._process_output_lines[-20:]
             self._handle_process_output_line(line)
+
+    def _format_process_error(self, exit_code: int) -> str:
+        tail = "\n".join(self._process_output_lines[-8:]).strip()
+        if not tail:
+            return f"{self._text('stopped')} (exit code {exit_code})"
+        return f"{self._text('stopped')} (exit code {exit_code})\n{tail}"
 
     def _poll_process_state(self):
         if self.process is None:
@@ -2277,12 +2410,19 @@ class ControlPanel(QtWidgets.QWidget):
         if self.process.poll() is None:
             return
         self._drain_process_output()
+        exit_code = self.process.poll()
+        if self._process_output_buffer.strip():
+            self._process_output_lines.append(self._process_output_buffer.strip())
+            self._process_output_lines = self._process_output_lines[-20:]
         self.process = None
         self._process_output_buffer = ""
         self._process_watch_timer.stop()
         restore_default_cursors()
         self._update_action_buttons()
-        self._set_status("stopped", speak=False)
+        if exit_code:
+            self.info_label.setText(self._format_process_error(exit_code))
+        else:
+            self._set_status("stopped", speak=False)
 
     def _launch_demo_for_config(self, cfg: PanelConfig, *, speak: bool):
         if cfg.model_path and not Path(cfg.model_path).is_file():
@@ -2313,6 +2453,7 @@ class ControlPanel(QtWidgets.QWidget):
             popen_kwargs["start_new_session"] = True
         self.process = subprocess.Popen(cmd, **popen_kwargs)
         self._process_output_buffer = ""
+        self._process_output_lines = []
         if self.process.stdout is not None:
             try:
                 os.set_blocking(self.process.stdout.fileno(), False)
