@@ -5,3 +5,5 @@ __pycache__/
 *.egg-info/
 _test_output/
 logs/*.jsonl
+task_logs/*.jsonl
+target_finder_toolkit/logs/*.jsonl
