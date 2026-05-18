@@ -23,9 +23,11 @@ from pynput import keyboard, mouse
 import argparse
 
 from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit.annotation_detector import AnnotationDetector
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
+from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
 
 __all__ = ["dynaspot", "main"]
 
@@ -63,6 +65,7 @@ class DynaSpot(QtWidgets.QWidget):
         spot_width: float | None = None,
         lag: float | None = None,
         reduce_time: float | None = None,
+        include_text_targets: bool = False,
     ):
         super().__init__()
         self.detector = detector
@@ -75,6 +78,7 @@ class DynaSpot(QtWidgets.QWidget):
         self.spot_width = float(self.SPOT_WIDTH if spot_width is None else spot_width)
         self.lag = float(self.LAG if lag is None else lag)
         self.reduce_time = float(self.REDUCE_TIME if reduce_time is None else reduce_time)
+        self.include_text_targets = bool(include_text_targets)
 
         self._mouse_listener = None
         self._keyboard_listener = None
@@ -184,7 +188,7 @@ class DynaSpot(QtWidgets.QWidget):
         radius = self._spot_radius()
         candidates = []
         for det in self.detector.get_detection_dicts():
-            if det.get("class_id") == 3:
+            if det.get("class_id") == 3 and not self.include_text_targets:
                 continue
             x = float(det["x"])
             y = float(det["y"])
@@ -622,6 +626,7 @@ def dynaspot(
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     ov = DynaSpot(detector, cursor_filter=cursor_filter, logger=logger, **dynaspot_kwargs)
     ov.show()
+    raise_macos_window_above_system_ui(ov, level_offset=1)
     def _handle_signal(sig, frame):
         global _SESSION_STOP_REASON
         _SESSION_STOP_REASON = "stop_button" if sig in {
@@ -656,13 +661,17 @@ def main():
     parser.add_argument('--spot-width', type=float, default=DynaSpot.SPOT_WIDTH, help="Maximum DynaSpot spot width (diameter in pixels)")
     parser.add_argument('--lag', type=float, default=DynaSpot.LAG, help="Delay before the spot starts shrinking after motion stops")
     parser.add_argument('--reduce-time', type=float, default=DynaSpot.REDUCE_TIME, help="Time used to shrink the spot back to a point")
+    parser.add_argument('--annotation-control-file', default=None, help="Use controlled-task annotations instead of live YOLO detection")
+    parser.add_argument('--include-text-targets', action='store_true', help="Allow Text annotations to be selected by DynaSpot")
     args = parser.parse_args()
 
-    if args.model_path is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "yolo26s_1280.pt")
-
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+    if args.annotation_control_file:
+        det = AnnotationDetector(args.annotation_control_file)
+    else:
+        if args.model_path is None:
+            here = os.path.dirname(os.path.abspath(__file__))
+            args.model_path = os.path.join(here, "yolo26s_1280.pt")
+        det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args))
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
@@ -679,6 +688,9 @@ def main():
             spot_width=args.spot_width,
             lag=args.lag,
             reduce_time=args.reduce_time,
+            detection_source="annotations" if args.annotation_control_file else "yolo",
+            annotation_control_file=args.annotation_control_file,
+            include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
     dynaspot(
@@ -689,6 +701,7 @@ def main():
         spot_width=args.spot_width,
         lag=args.lag,
         reduce_time=args.reduce_time,
+        include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
     )
 
 

@@ -92,6 +92,13 @@ DEFAULT_RAKE_USE_CALIBRATION = True
 DEFAULT_RAKE_CALIB_POINTS = 5
 DEFAULT_RAKE_AUTO_CALIBRATE = False
 DEFAULT_RAKE_WITHOUT_TARGETFINDER = True
+DEFAULT_EXPERIMENT_DATA_DIR = str(Path(__file__).resolve().parents[3] / "data" / "web")
+DEFAULT_EXPERIMENT_TRIALS = 12
+DEFAULT_EXPERIMENT_DIFFICULTY = "mixed"
+DEFAULT_EXPERIMENT_COUNTDOWN = 3
+DEFAULT_EXPERIMENT_MAX_CLICKS = 1
+DEFAULT_EXPERIMENT_FULLSCREEN = True
+DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS = False
 
 UI_TEXTS = {
     "English": {
@@ -103,6 +110,14 @@ UI_TEXTS = {
         "page_accessibility": "Accessibility",
         "page_audio": "Audio",
         "page_language": "Language",
+        "setup_section": "Technique setup",
+        "filter_section": "Pointer filter",
+        "logging_section": "Logging",
+        "detection_section": "Detection refresh",
+        "experiment_options_section": "Experimental task options",
+        "semantic_section": "Semantic Pointing options",
+        "dynaspot_section": "DynaSpot options",
+        "rake_section": "Ninja Cursors(gaze) options",
         "technique": "Technique (5 modes, default: none)",
         "select_technique": "Choose a technique",
         "choose_mode_dialog": "Choose a Technique",
@@ -188,6 +203,24 @@ UI_TEXTS = {
         "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
         "rake_without_targetfinder": "Without TargetFinder (range: off/on, default: on)",
         "rake_without_targetfinder_desc": "Runs Ninja Cursors(gaze) without detection, target highlighting, or model inference. Only gaze-based cursor selection and redirected clicks remain active.",
+        "experiment_section": "Experimental task",
+        "experiment_enabled": "Run experimental task (range: off/on, default: off)",
+        "experiment_enabled_desc": "When enabled, Start / Apply launches the controlled screenshot target-selection task instead of a free demo.",
+        "experiment_data_dir": "Dataset folder (default: stage/data/web)",
+        "experiment_data_dir_desc": "Folder containing the annotated screenshot .png/.txt pairs used to generate trials.",
+        "experiment_trials": "Trials (range: 1-1000, default: 12)",
+        "experiment_trials_desc": "Number of controlled target-selection trials to run.",
+        "experiment_difficulty": "Difficulty (choices: easy/medium/hard/mixed, default: mixed)",
+        "experiment_difficulty_desc": "Difficulty bin sampled by Fitts ID: easy [0,3), medium [3,5), hard [5,8.5). Mixed samples from all bins.",
+        "experiment_countdown": "Countdown (seconds, range: 0-30, default: 3)",
+        "experiment_countdown_desc": "Seconds before each trial starts while the cursor is held at the image center.",
+        "experiment_max_clicks": "Max clicks per trial (range: 1-20, default: 1)",
+        "experiment_max_clicks_desc": "Maximum attempts allowed before a trial is marked failed.",
+        "experiment_fullscreen": "Fullscreen experiment (range: off/on, default: on)",
+        "experiment_fullscreen_desc": "Show the screenshot task fullscreen. Disable only for debugging.",
+        "experiment_show_all_targets": "Show all annotated targets (debug, default: off)",
+        "experiment_show_all_targets_desc": "Draw all dataset annotation boxes in green. Use only for debugging, not participant runs.",
+        "experiment_note": "For the TargetFinder condition, the controlled task uses the annotated dataset as ground truth and runs the mouse baseline internally.",
         "apply": "Start / Apply",
         "change_thresh": "Change Threshold (range: 0-100000, default: 100)",
         "change_thresh_desc": "Higher = fewer refreshes for small screen changes. Lower = reacts sooner.",
@@ -226,9 +259,11 @@ UI_TEXTS = {
         "running_targetfinder": "TargetFinder Overlay is running.",
         "running_dynaspot": "DynaSpot is running.",
         "running_rake": "Ninja Cursors(gaze) is running.",
+        "running_experiment": "Experimental task is running.",
         "stopped": "Stopped the running mode.",
         "no_running": "No running mode was found.",
         "invalid_model_path": "The selected model file was not found.",
+        "invalid_experiment_data_dir": "The selected experimental dataset folder was not found.",
         "missing_one_euro": "OneEuroFilter is not installed or could not be imported in this environment.",
         "missing_webeyetrack": "WebEyeTrack is not installed or could not be imported in this environment.",
         "panel_updated": "Panel appearance updated.",
@@ -247,6 +282,14 @@ UI_TEXTS = {
         "page_accessibility": "Accessibilité",
         "page_audio": "Audio",
         "page_language": "Langue",
+        "setup_section": "Configuration de la technique",
+        "filter_section": "Filtre du pointeur",
+        "logging_section": "Enregistrement",
+        "detection_section": "Détection et rafraîchissement",
+        "experiment_options_section": "Options de la tâche expérimentale",
+        "semantic_section": "Options du pointage sémantique",
+        "dynaspot_section": "Options de DynaSpot",
+        "rake_section": "Options de Ninja Cursors(gaze)",
         "technique": "Technique (5 modes, défaut : aucun)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
@@ -332,6 +375,24 @@ UI_TEXTS = {
         "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
         "rake_without_targetfinder": "Sans TargetFinder (plage : off/on, défaut : on)",
         "rake_without_targetfinder_desc": "Lance Ninja Cursors(gaze) sans détection, sans surbrillance de cible et sans inférence du modèle. Seuls la sélection du curseur par le regard et les clics redirigés restent actifs.",
+        "experiment_section": "Tâche expérimentale",
+        "experiment_enabled": "Lancer la tâche expérimentale (plage : off/on, défaut : off)",
+        "experiment_enabled_desc": "Si activé, Démarrer / Appliquer lance la tâche contrôlée de sélection de cibles sur captures d’écran au lieu d’une démo libre.",
+        "experiment_data_dir": "Dossier du jeu de données (défaut : stage/data/web)",
+        "experiment_data_dir_desc": "Dossier contenant les paires annotées .png/.txt utilisées pour générer les essais.",
+        "experiment_trials": "Essais (plage : 1-1000, défaut : 12)",
+        "experiment_trials_desc": "Nombre d’essais contrôlés de sélection de cible à exécuter.",
+        "experiment_difficulty": "Difficulté (choix : easy/medium/hard/mixed, défaut : mixed)",
+        "experiment_difficulty_desc": "Niveau échantillonné selon l’ID de Fitts : easy [0,3), medium [3,5), hard [5,8.5). Mixed échantillonne tous les niveaux.",
+        "experiment_countdown": "Compte à rebours (secondes, plage : 0-30, défaut : 3)",
+        "experiment_countdown_desc": "Secondes avant le début de chaque essai pendant que le curseur reste au centre de l’image.",
+        "experiment_max_clicks": "Clics max par essai (plage : 1-20, défaut : 1)",
+        "experiment_max_clicks_desc": "Nombre maximal de tentatives avant qu’un essai soit marqué comme échoué.",
+        "experiment_fullscreen": "Expérience en plein écran (plage : off/on, défaut : on)",
+        "experiment_fullscreen_desc": "Affiche la tâche sur capture d’écran en plein écran. À désactiver seulement pour le débogage.",
+        "experiment_show_all_targets": "Afficher toutes les cibles annotées (debug, défaut : off)",
+        "experiment_show_all_targets_desc": "Dessine toutes les boîtes d’annotation en vert. À utiliser seulement pour le débogage, pas pendant les passations.",
+        "experiment_note": "Pour la condition TargetFinder, la tâche contrôlée utilise le jeu de données annoté comme vérité terrain et lance en interne le baseline souris.",
         "apply": "Démarrer / Appliquer",
         "change_thresh": "Seuil de changement (plage : 0-100000, défaut : 100)",
         "change_thresh_desc": "Plus haut = moins de rafraîchissements pour de petits changements. Plus bas = réaction plus rapide.",
@@ -370,9 +431,11 @@ UI_TEXTS = {
         "running_targetfinder": "L'overlay TargetFinder est en cours.",
         "running_dynaspot": "DynaSpot est en cours.",
         "running_rake": "Ninja Cursors(gaze) est en cours.",
+        "running_experiment": "La tâche expérimentale est en cours.",
         "stopped": "Le mode en cours a été arrêté.",
         "no_running": "Aucun mode en cours n'a été trouvé.",
         "invalid_model_path": "Le fichier du modèle sélectionné est introuvable.",
+        "invalid_experiment_data_dir": "Le dossier du jeu de données expérimental est introuvable.",
         "missing_one_euro": "OneEuroFilter n’est pas installé ou n’a pas pu être importé dans cet environnement.",
         "missing_webeyetrack": "WebEyeTrack n’est pas installé ou n’a pas pu être importé dans cet environnement.",
         "panel_updated": "L'apparence du panneau a été mise à jour.",
@@ -426,6 +489,14 @@ class PanelConfig:
     rake_calib_points: int = DEFAULT_RAKE_CALIB_POINTS
     rake_auto_calibrate: bool = DEFAULT_RAKE_AUTO_CALIBRATE
     rake_calibration_status: str = "not_calibrated"
+    experiment_enabled: bool = False
+    experiment_data_dir: str = DEFAULT_EXPERIMENT_DATA_DIR
+    experiment_trials: int = DEFAULT_EXPERIMENT_TRIALS
+    experiment_difficulty: str = DEFAULT_EXPERIMENT_DIFFICULTY
+    experiment_countdown: int = DEFAULT_EXPERIMENT_COUNTDOWN
+    experiment_max_clicks: int = DEFAULT_EXPERIMENT_MAX_CLICKS
+    experiment_fullscreen: bool = DEFAULT_EXPERIMENT_FULLSCREEN
+    experiment_show_all_targets: bool = DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
@@ -703,6 +774,23 @@ class ControlPanel(QtWidgets.QWidget):
         layout.setSpacing(0)
         return card, layout
 
+    def _create_setting_group(self, title_key: str, rows):
+        group = QtWidgets.QFrame()
+        group.setObjectName("SettingGroup")
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(20, 14, 20, 16)
+        layout.setSpacing(0)
+
+        title = QtWidgets.QLabel()
+        title.setObjectName("GroupTitle")
+        title.setWordWrap(True)
+        self._bind_text(title, title_key)
+        layout.addWidget(title)
+
+        for row in rows:
+            layout.addWidget(row)
+        return group
+
     def _create_switch(self):
         checkbox = QtWidgets.QCheckBox()
         checkbox.setText("")
@@ -933,8 +1021,6 @@ class ControlPanel(QtWidgets.QWidget):
         page, page_layout = self._create_scroll_page()
         page_layout.addWidget(self._create_page_header("page_mode"))
 
-        card, card_layout = self._create_card()
-
         self.mode_selector_button = QtWidgets.QPushButton()
         self.mode_selector_button.setObjectName("SelectorButton")
         self._refresh_mode_selector_text()
@@ -1146,6 +1232,49 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_calibration_note.setObjectName("SectionNote")
         self.rake_calibration_note.setWordWrap(True)
 
+        self.experiment_enabled_cb = self._create_switch()
+
+        self.experiment_data_path_edit = QtWidgets.QLineEdit()
+        self.experiment_data_path_edit.setReadOnly(True)
+        self.experiment_data_path_edit.setText(DEFAULT_EXPERIMENT_DATA_DIR)
+        self.experiment_data_path_edit.setMinimumWidth(220)
+        self.experiment_data_path_edit.setClearButtonEnabled(False)
+
+        self.experiment_browse_button = QtWidgets.QPushButton()
+        self.experiment_browse_button.setObjectName("SmallActionButton")
+        self._bind_text(self.experiment_browse_button, "browse")
+
+        self.experiment_data_picker = QtWidgets.QWidget()
+        self.experiment_data_picker.setObjectName("ModelPicker")
+        experiment_data_layout = QtWidgets.QHBoxLayout(self.experiment_data_picker)
+        experiment_data_layout.setContentsMargins(0, 0, 0, 0)
+        experiment_data_layout.setSpacing(8)
+        experiment_data_layout.addWidget(self.experiment_data_path_edit, 1)
+        experiment_data_layout.addWidget(self.experiment_browse_button)
+
+        self.experiment_trials_spin = QtWidgets.QSpinBox()
+        self.experiment_trials_spin.setKeyboardTracking(False)
+        self.experiment_trials_spin.setRange(1, 1000)
+        self.experiment_trials_spin.setValue(DEFAULT_EXPERIMENT_TRIALS)
+
+        self.experiment_difficulty_combo = QtWidgets.QComboBox()
+        self.experiment_difficulty_combo.addItems(["mixed", "easy", "medium", "hard"])
+        self.experiment_difficulty_combo.setCurrentText(DEFAULT_EXPERIMENT_DIFFICULTY)
+
+        self.experiment_countdown_spin = QtWidgets.QSpinBox()
+        self.experiment_countdown_spin.setKeyboardTracking(False)
+        self.experiment_countdown_spin.setRange(0, 30)
+        self.experiment_countdown_spin.setValue(DEFAULT_EXPERIMENT_COUNTDOWN)
+
+        self.experiment_max_clicks_spin = QtWidgets.QSpinBox()
+        self.experiment_max_clicks_spin.setKeyboardTracking(False)
+        self.experiment_max_clicks_spin.setRange(1, 20)
+        self.experiment_max_clicks_spin.setValue(DEFAULT_EXPERIMENT_MAX_CLICKS)
+
+        self.experiment_fullscreen_cb = self._create_switch()
+        self.experiment_fullscreen_cb.setChecked(DEFAULT_EXPERIMENT_FULLSCREEN)
+        self.experiment_show_all_targets_cb = self._create_switch()
+
         self._semantic_rows = [
             self._create_separator(),
             self._create_switch_row("display", self.display_cb, "display_desc"),
@@ -1216,16 +1345,42 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_switch_row("rake_without_targetfinder", self.rake_without_targetfinder_cb, "rake_without_targetfinder_desc"),
         ]
 
-        rows = [
+        self._experiment_param_rows = [
+            self._create_separator(),
+            self._create_field_row("experiment_data_dir", self.experiment_data_picker, "experiment_data_dir_desc"),
+            self._create_separator(),
+            self._create_field_row("experiment_trials", self.experiment_trials_spin, "experiment_trials_desc"),
+            self._create_separator(),
+            self._create_field_row("experiment_difficulty", self.experiment_difficulty_combo, "experiment_difficulty_desc"),
+            self._create_separator(),
+            self._create_field_row("experiment_countdown", self.experiment_countdown_spin, "experiment_countdown_desc"),
+            self._create_separator(),
+            self._create_field_row("experiment_max_clicks", self.experiment_max_clicks_spin, "experiment_max_clicks_desc"),
+            self._create_separator(),
+            self._create_switch_row("experiment_fullscreen", self.experiment_fullscreen_cb, "experiment_fullscreen_desc"),
+            self._create_separator(),
+            self._create_switch_row("experiment_show_all_targets", self.experiment_show_all_targets_cb, "experiment_show_all_targets_desc"),
+            self._create_separator(),
+            self._create_note("experiment_note"),
+        ]
+
+        setup_rows = [
             self._create_field_row("model_path", self.model_picker, "model_path_desc"),
             self._create_separator(),
             self._create_field_row("technique", self.mode_selector_button, "mode_note"),
-            self._create_separator(),
+        ]
+        experiment_toggle_rows = [
+            self._create_switch_row("experiment_enabled", self.experiment_enabled_cb, "experiment_enabled_desc"),
+            *self._experiment_param_rows,
+        ]
+        filter_rows = [
             self._create_field_row("filter", self.filter_selector_button, "filter_desc"),
             *self._filter_param_rows,
-            self._create_separator(),
+        ]
+        logging_rows = [
             self._create_switch_row("record_data", self.log_data_cb, "record_data_desc"),
-            self._create_separator(),
+        ]
+        detection_rows = [
             self._create_field_row("change_thresh", self.change_thresh_spin, "change_thresh_desc"),
             self._create_separator(),
             self._create_field_row("capture_interval", self.capture_interval_spin, "capture_interval_desc"),
@@ -1233,15 +1388,26 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("confidence", self.confidence_spin, "confidence_desc"),
             self._create_separator(),
             self._create_field_row("iou", self.iou_spin, "iou_desc"),
-            *self._semantic_rows,
-            *self._dynaspot_rows,
-            *self._rake_rows,
         ]
 
-        for row in rows:
-            card_layout.addWidget(row)
+        self._experiment_param_group = None
+        self._semantic_group = self._create_setting_group("semantic_section", self._semantic_rows)
+        self._dynaspot_group = self._create_setting_group("dynaspot_section", self._dynaspot_rows)
+        self._rake_group = self._create_setting_group("rake_section", self._rake_rows)
 
-        page_layout.addWidget(card)
+        groups = [
+            self._create_setting_group("setup_section", setup_rows),
+            self._create_setting_group("filter_section", filter_rows),
+            self._create_setting_group("logging_section", logging_rows),
+            self._create_setting_group("detection_section", detection_rows),
+            self._create_setting_group("experiment_section", experiment_toggle_rows),
+            self._semantic_group,
+            self._dynaspot_group,
+            self._rake_group,
+        ]
+
+        for group in groups:
+            page_layout.addWidget(group)
         page_layout.addStretch()
         return page
 
@@ -1291,6 +1457,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.filter_selector_button.clicked.connect(self._handle_filter_selection)
         self.language_selector_button.clicked.connect(self._handle_language_selection)
         self.model_browse_button.clicked.connect(self._handle_model_browse)
+        self.experiment_browse_button.clicked.connect(self._handle_experiment_data_browse)
         self.start_button.clicked.connect(self._handle_apply_clicked)
         self.stop_button.clicked.connect(self._stop_demo)
         self.change_thresh_spin.valueChanged.connect(self._handle_runtime_option_change)
@@ -1324,6 +1491,13 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_use_calibration_cb.toggled.connect(self._handle_rake_calibration_toggle)
         self.rake_calib_points_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
         self.rake_reset_calibration_button.clicked.connect(self._handle_rake_reset_calibration)
+        self.experiment_enabled_cb.toggled.connect(self._handle_runtime_option_change)
+        self.experiment_trials_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.experiment_difficulty_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
+        self.experiment_countdown_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.experiment_max_clicks_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.experiment_fullscreen_cb.toggled.connect(self._handle_runtime_option_change)
+        self.experiment_show_all_targets_cb.toggled.connect(self._handle_runtime_option_change)
 
         self.high_contrast_cb.toggled.connect(self._handle_panel_style_change)
         self.enable_tts_cb.toggled.connect(self._handle_tts_change)
@@ -1350,10 +1524,18 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.rake_gaze_offset_x_spin, "rake_gaze_offset_x")
         self._register_numeric_field(self.rake_gaze_offset_y_spin, "rake_gaze_offset_y")
         self._register_numeric_field(self.rake_selection_hold_spin, "rake_selection_hold")
+        self._register_numeric_field(self.experiment_trials_spin, "experiment_trials")
+        self._register_numeric_field(self.experiment_countdown_spin, "experiment_countdown")
+        self._register_numeric_field(self.experiment_max_clicks_spin, "experiment_max_clicks")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
             "model_path",
             "model_path_desc",
+        )
+        self._register_help_targets(
+            [self.experiment_data_picker, self.experiment_data_path_edit, self.experiment_browse_button],
+            "experiment_data_dir",
+            "experiment_data_dir_desc",
         )
         self._register_help_targets([self.filter_selector_button], "filter", "filter_desc")
         self._register_help_targets([self.filter_freq_spin], "filter_freq", "filter_freq_desc")
@@ -1423,8 +1605,31 @@ class ControlPanel(QtWidgets.QWidget):
         dynaspot_enabled = self._mode_code() == "dynaspot"
         rake_enabled = self._mode_code() == "rake"
         filter_params_visible = self._selected_filter == "one_euro"
+        experiment_enabled = self.experiment_enabled_cb.isChecked()
         self.display_cb.setEnabled(semantic_enabled)
         self.disable_accel_cb.setEnabled(semantic_enabled)
+        if getattr(self, "_experiment_param_group", None) is not None:
+            self._experiment_param_group.setVisible(experiment_enabled)
+        if hasattr(self, "_semantic_group"):
+            self._semantic_group.setVisible(semantic_enabled)
+        if hasattr(self, "_dynaspot_group"):
+            self._dynaspot_group.setVisible(dynaspot_enabled)
+        if hasattr(self, "_rake_group"):
+            self._rake_group.setVisible(rake_enabled)
+        for row in getattr(self, "_experiment_param_rows", []):
+            row.setVisible(experiment_enabled)
+        for widget in (
+            self.experiment_data_picker,
+            self.experiment_data_path_edit,
+            self.experiment_browse_button,
+            self.experiment_trials_spin,
+            self.experiment_difficulty_combo,
+            self.experiment_countdown_spin,
+            self.experiment_max_clicks_spin,
+            self.experiment_fullscreen_cb,
+            self.experiment_show_all_targets_cb,
+        ):
+            widget.setEnabled(experiment_enabled)
         for row in getattr(self, "_filter_param_rows", []):
             row.setVisible(filter_params_visible)
         for widget in (
@@ -1563,6 +1768,8 @@ class ControlPanel(QtWidgets.QWidget):
         if self._suspend_updates:
             return
         self._save_config()
+        if self.sender() is self.experiment_enabled_cb:
+            self._update_mode_dependent_fields()
         self._update_rake_calibration_ui()
         self._set_status("pending_apply")
         sender = self.sender()
@@ -1630,6 +1837,15 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.rake_without_targetfinder_cb:
             key = "turn_on" if self.rake_without_targetfinder_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("rake_without_targetfinder")))
+        elif sender is self.experiment_enabled_cb:
+            key = "turn_on" if self.experiment_enabled_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("experiment_enabled")))
+        elif sender is self.experiment_fullscreen_cb:
+            key = "turn_on" if self.experiment_fullscreen_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("experiment_fullscreen")))
+        elif sender is self.experiment_show_all_targets_cb:
+            key = "turn_on" if self.experiment_show_all_targets_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("experiment_show_all_targets")))
 
     def _handle_rake_calibration_toggle(self, checked: bool):
         if self._suspend_updates:
@@ -1731,6 +1947,18 @@ class ControlPanel(QtWidgets.QWidget):
         if not path:
             return
         self.model_path_edit.setText(path)
+        self._save_config()
+        self._set_status("pending_apply")
+
+    def _handle_experiment_data_browse(self):
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            self._text("experiment_data_dir"),
+            self.experiment_data_path_edit.text().strip() or DEFAULT_EXPERIMENT_DATA_DIR,
+        )
+        if not path:
+            return
+        self.experiment_data_path_edit.setText(path)
         self._save_config()
         self._set_status("pending_apply")
 
@@ -1839,6 +2067,14 @@ class ControlPanel(QtWidgets.QWidget):
                 background: transparent;
             }}
 
+            QLabel#GroupTitle {{
+                font-size: 16px;
+                font-weight: 700;
+                color: {text_main};
+                background: transparent;
+                padding: 4px 2px 10px 2px;
+            }}
+
             QLabel#SettingLabel {{
                 font-size: 14px;
                 font-weight: 600;
@@ -1880,6 +2116,12 @@ class ControlPanel(QtWidgets.QWidget):
                 background: {bg_card};
                 border: 2px solid {border_card};
                 border-radius: 24px;
+            }}
+
+            QFrame#SettingGroup {{
+                background: {bg_card};
+                border: 2px solid {border_card};
+                border-radius: 22px;
             }}
 
             QWidget#SettingRow {{
@@ -2083,6 +2325,9 @@ class ControlPanel(QtWidgets.QWidget):
             self.rake_gaze_offset_x_spin,
             self.rake_gaze_offset_y_spin,
             self.rake_selection_hold_spin,
+            self.experiment_trials_spin,
+            self.experiment_countdown_spin,
+            self.experiment_max_clicks_spin,
         ):
             widget.interpretText()
 
@@ -2128,6 +2373,14 @@ class ControlPanel(QtWidgets.QWidget):
             rake_calib_points=int(self.rake_calib_points_combo.currentText()),
             rake_auto_calibrate=False,
             rake_calibration_status=self._rake_calibration_status,
+            experiment_enabled=self.experiment_enabled_cb.isChecked(),
+            experiment_data_dir=self.experiment_data_path_edit.text().strip() or DEFAULT_EXPERIMENT_DATA_DIR,
+            experiment_trials=self.experiment_trials_spin.value(),
+            experiment_difficulty=self.experiment_difficulty_combo.currentText(),
+            experiment_countdown=self.experiment_countdown_spin.value(),
+            experiment_max_clicks=self.experiment_max_clicks_spin.value(),
+            experiment_fullscreen=self.experiment_fullscreen_cb.isChecked(),
+            experiment_show_all_targets=self.experiment_show_all_targets_cb.isChecked(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
             enable_dynaspot=mode == "dynaspot",
@@ -2176,6 +2429,16 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_calib_points_combo.setCurrentText(str(cfg.rake_calib_points))
         self._rake_calibration_status = cfg.rake_calibration_status or "not_calibrated"
         self._rake_calibration_status_detail = None
+        self.experiment_enabled_cb.setChecked(cfg.experiment_enabled)
+        self.experiment_data_path_edit.setText(cfg.experiment_data_dir or DEFAULT_EXPERIMENT_DATA_DIR)
+        self.experiment_trials_spin.setValue(cfg.experiment_trials)
+        self.experiment_difficulty_combo.setCurrentText(
+            cfg.experiment_difficulty if cfg.experiment_difficulty in {"easy", "medium", "hard", "mixed"} else DEFAULT_EXPERIMENT_DIFFICULTY
+        )
+        self.experiment_countdown_spin.setValue(cfg.experiment_countdown)
+        self.experiment_max_clicks_spin.setValue(cfg.experiment_max_clicks)
+        self.experiment_fullscreen_cb.setChecked(cfg.experiment_fullscreen)
+        self.experiment_show_all_targets_cb.setChecked(cfg.experiment_show_all_targets)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
@@ -2252,6 +2515,14 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.rake_calib_points = DEFAULT_RAKE_CALIB_POINTS
         cfg.rake_auto_calibrate = DEFAULT_RAKE_AUTO_CALIBRATE
         cfg.rake_calibration_status = "not_calibrated"
+        cfg.experiment_enabled = False
+        cfg.experiment_data_dir = DEFAULT_EXPERIMENT_DATA_DIR
+        cfg.experiment_trials = DEFAULT_EXPERIMENT_TRIALS
+        cfg.experiment_difficulty = DEFAULT_EXPERIMENT_DIFFICULTY
+        cfg.experiment_countdown = DEFAULT_EXPERIMENT_COUNTDOWN
+        cfg.experiment_max_clicks = DEFAULT_EXPERIMENT_MAX_CLICKS
+        cfg.experiment_fullscreen = DEFAULT_EXPERIMENT_FULLSCREEN
+        cfg.experiment_show_all_targets = DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
         cfg.language = "French"
@@ -2262,6 +2533,8 @@ class ControlPanel(QtWidgets.QWidget):
     # Command / Process
     # ---------------------------
     def _build_command(self, cfg: PanelConfig):
+        if cfg.experiment_enabled:
+            return self._build_experiment_command(cfg)
         if cfg.preset == "TargetFinder":
             module_name = "target_finder_toolkit.targetfinder"
         elif cfg.enable_bubble_cursor:
@@ -2325,6 +2598,97 @@ class ControlPanel(QtWidgets.QWidget):
                 cmd.append("--hide-gaze-point")
             if cfg.rake_without_targetfinder:
                 cmd.append("--without-targetfinder")
+        return cmd
+
+    def _experiment_technique_for_config(self, cfg: PanelConfig) -> str:
+        if cfg.preset == "TargetFinder":
+            return "mouse"
+        if cfg.enable_bubble_cursor:
+            return "bubble"
+        if cfg.enable_dynaspot:
+            return "dynaspot"
+        if cfg.enable_rake_cursor:
+            return "ninja_cursors"
+        return "semantic"
+
+    def _build_experiment_command(self, cfg: PanelConfig):
+        technique = self._experiment_technique_for_config(cfg)
+        cmd = [
+            sys.executable,
+            "-m",
+            "target_finder_toolkit.experimental_task",
+            "--technique",
+            technique,
+            "--data-dir",
+            cfg.experiment_data_dir,
+            "--trials",
+            str(cfg.experiment_trials),
+            "--difficulty",
+            cfg.experiment_difficulty,
+            "--countdown",
+            str(cfg.experiment_countdown),
+            "--max-clicks",
+            str(cfg.experiment_max_clicks),
+            "--change-thresh",
+            str(cfg.change_thresh),
+            "--capture-interval",
+            str(cfg.capture_interval),
+            "--confidence",
+            str(cfg.confidence),
+            "--iou",
+            str(cfg.iou),
+            "--filter",
+            cfg.filter_name,
+            "--filter-freq",
+            str(cfg.filter_freq),
+            "--filter-min-cutoff",
+            str(cfg.filter_min_cutoff),
+            "--filter-beta",
+            str(cfg.filter_beta),
+            "--filter-d-cutoff",
+            str(cfg.filter_d_cutoff),
+        ]
+        if cfg.model_path:
+            cmd += ["--model-path", cfg.model_path]
+        if not cfg.experiment_fullscreen:
+            cmd.append("--windowed")
+        if cfg.experiment_show_all_targets:
+            cmd.append("--show-all-targets")
+        if not cfg.enable_logging:
+            cmd.append("--no-technique-log")
+        if cfg.enable_semantic_pointing and cfg.display:
+            cmd.append("--semantic-display")
+        if cfg.enable_semantic_pointing and cfg.disable_accel:
+            cmd.append("--semantic-disable-accel")
+        if cfg.enable_dynaspot:
+            cmd += [
+                "--dynaspot-min-speed", str(cfg.dynaspot_min_speed),
+                "--dynaspot-spot-width", str(cfg.dynaspot_spot_width),
+                "--dynaspot-lag", str(cfg.dynaspot_lag),
+                "--dynaspot-reduce-time", str(cfg.dynaspot_reduce_time),
+            ]
+        if cfg.enable_rake_cursor:
+            cmd += [
+                "--ninja-camera-index", str(cfg.rake_camera_index),
+                "--ninja-screen-width-cm", str(cfg.rake_screen_width_cm),
+                "--ninja-screen-height-cm", str(cfg.rake_screen_height_cm),
+                "--ninja-spacing", str(cfg.rake_spacing),
+                "--ninja-gaze-smoothing", str(cfg.rake_gaze_smoothing),
+                "--ninja-gaze-gain-x", str(cfg.rake_gaze_gain_x),
+                "--ninja-gaze-gain-y", str(cfg.rake_gaze_gain_y),
+                "--ninja-gaze-offset-x", str(cfg.rake_gaze_offset_x),
+                "--ninja-gaze-offset-y", str(cfg.rake_gaze_offset_y),
+                "--ninja-selection-hold", str(cfg.rake_selection_hold),
+                "--ninja-calib-points", str(cfg.rake_calib_points),
+            ]
+            if cfg.rake_lock_on_dwell:
+                cmd.append("--ninja-lock-on-dwell")
+            if not cfg.rake_show_gaze:
+                cmd.append("--ninja-hide-gaze-point")
+            if cfg.rake_use_calibration:
+                cmd.append("--ninja-auto-calibrate")
+            if not cfg.rake_without_targetfinder:
+                cmd.append("--ninja-with-targetfinder")
         return cmd
 
     def _is_demo_running(self):
@@ -2447,7 +2811,16 @@ class ControlPanel(QtWidgets.QWidget):
             self._set_status("stopped", speak=False)
 
     def _launch_demo_for_config(self, cfg: PanelConfig, *, speak: bool):
-        if cfg.model_path and not Path(cfg.model_path).is_file():
+        if cfg.experiment_enabled and not Path(cfg.experiment_data_dir).is_dir():
+            self._set_status("invalid_experiment_data_dir", speak=speak)
+            return
+        uses_model = (
+            not cfg.experiment_enabled
+            or cfg.enable_semantic_pointing
+            or cfg.enable_dynaspot
+            or (cfg.enable_rake_cursor and not cfg.rake_without_targetfinder)
+        )
+        if uses_model and cfg.model_path and not Path(cfg.model_path).is_file():
             self._set_status("invalid_model_path", speak=speak)
             return
         if cfg.filter_name == "one_euro":
@@ -2483,7 +2856,9 @@ class ControlPanel(QtWidgets.QWidget):
                 pass
         self._process_watch_timer.start()
         self._update_action_buttons()
-        if cfg.preset == "TargetFinder":
+        if cfg.experiment_enabled:
+            self._set_status("running_experiment", speak=speak)
+        elif cfg.preset == "TargetFinder":
             self._set_status("running_targetfinder", speak=speak)
         elif cfg.enable_bubble_cursor:
             self._set_status("running_bubble", speak=speak)

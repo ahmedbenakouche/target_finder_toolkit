@@ -32,10 +32,12 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from pynput import keyboard, mouse
 
 from target_finder_toolkit.eye_calibration import EyeCalibration
+from target_finder_toolkit.annotation_detector import AnnotationDetector
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
 
 
 def _ensure_mediapipe_python_alias():
@@ -436,6 +438,7 @@ class NinjaCursors(QtWidgets.QWidget):
         show_gaze: bool = DEFAULT_SHOW_GAZE,
         calib_points: int = 5,
         auto_calibrate: bool = False,
+        experiment_control_file: str | None = None,
     ):
         if WebEyeTrack is None:
             raise RuntimeError(
@@ -469,6 +472,8 @@ class NinjaCursors(QtWidgets.QWidget):
         self.show_gaze = bool(show_gaze)
         self._calib_points = calib_points if calib_points in (5, 9, 13) else 5
         self._auto_calibrate = auto_calibrate
+        self._experiment_control_file = pathlib.Path(experiment_control_file) if experiment_control_file else None
+        self._last_experiment_control_state = None
 
         self._mouse_listener = None
         self._keyboard_listener = None
@@ -583,6 +588,12 @@ class NinjaCursors(QtWidgets.QWidget):
         pos = QtGui.QCursor.pos()
         observed_x = float(pos.x())
         observed_y = float(pos.y())
+        if self._experiment_is_paused():
+            self._last_observed_mouse = (observed_x, observed_y)
+            QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
+            self._prev_real = QtCore.QPointF(self._anchor_point)
+            self._ignore_next_mouse_delta = True
+            return observed_x, observed_y, 0.0, 0.0, False
         dx = observed_x - float(self._prev_real.x())
         dy = observed_y - float(self._prev_real.y())
         self._last_observed_mouse = (observed_x, observed_y)
@@ -594,6 +605,37 @@ class NinjaCursors(QtWidgets.QWidget):
             self._ignore_next_mouse_delta = False
             return self._last_observed_mouse[0], self._last_observed_mouse[1], 0.0, 0.0, False
         return self._last_observed_mouse[0], self._last_observed_mouse[1], dx, dy, moved
+
+    def _reset_experiment_layout(self):
+        self._raw_offset_x = 0.0
+        self._raw_offset_y = 0.0
+        self._filtered_offset_x = 0.0
+        self._filtered_offset_y = 0.0
+        self._unlock_cursor_selection()
+        self._active_point = None
+        self._active_target = None
+        self._pending_click_point = None
+        self._pending_click_target = None
+        self._pending_click_cursor_id = None
+        self._ignore_next_mouse_delta = True
+        QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
+        self._prev_real = QtCore.QPointF(self._anchor_point)
+
+    def _read_experiment_control_state(self) -> str:
+        if self._experiment_control_file is None:
+            return ""
+        try:
+            state = self._experiment_control_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+        if state != self._last_experiment_control_state:
+            self._last_experiment_control_state = state
+            if state.startswith("paused"):
+                self._reset_experiment_layout()
+        return state
+
+    def _experiment_is_paused(self) -> bool:
+        return self._read_experiment_control_state().startswith("paused")
 
     def _apply_mouse_delta(self, dx: float, dy: float):
         self._raw_offset_x += dx
@@ -1417,6 +1459,7 @@ def ninja_cursors(detector: Optional[TargetFinder], cursor_filter=None, logger=N
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     overlay = NinjaCursors(detector, cursor_filter=cursor_filter, logger=logger, **kwargs)
     overlay.show()
+    raise_macos_window_above_system_ui(overlay, level_offset=1)
     hide_cursor_everywhere()
     def _handle_signal(sig, frame):
         global _SESSION_STOP_REASON
@@ -1468,6 +1511,8 @@ def main():
     parser.add_argument("--calib-points", type=int, choices=[5, 9, 13], default=5, help="Number of calibration points (5, 9, or 13)")
     parser.add_argument("--auto-calibrate", action="store_true", help="Start eye calibration immediately on launch")
     parser.add_argument("--without-targetfinder", action="store_true", help="Run Ninja Cursors(gaze) without TargetFinder detection or target highlighting")
+    parser.add_argument("--experiment-control-file", default=None, help="Optional control file used by the experimental task to pause/resume cursor movement")
+    parser.add_argument("--annotation-control-file", default=None, help="Use controlled-task annotations instead of live YOLO detection")
     args = parser.parse_args()
 
     if WebEyeTrack is None:
@@ -1486,7 +1531,9 @@ def main():
     )
 
     det = None
-    if not args.without_targetfinder:
+    if args.annotation_control_file:
+        det = AnnotationDetector(args.annotation_control_file)
+    elif not args.without_targetfinder:
         det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args)) if args.filter != "none" else None
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
@@ -1513,6 +1560,8 @@ def main():
             lock_on_dwell=bool(args.lock_on_dwell),
             show_gaze=not args.hide_gaze_point,
             without_targetfinder=bool(args.without_targetfinder),
+            detection_source="annotations" if args.annotation_control_file else ("none" if args.without_targetfinder else "yolo"),
+            annotation_control_file=args.annotation_control_file,
             ninja_layout="ninja8_grid",
             cursor_count=NinjaCursors.CURSOR_ROWS * NinjaCursors.CURSOR_COLS,
             selection_mode=(
@@ -1541,6 +1590,7 @@ def main():
         show_gaze=not args.hide_gaze_point,
         calib_points=args.calib_points,
         auto_calibrate=args.auto_calibrate,
+        experiment_control_file=args.experiment_control_file,
     )
 
 

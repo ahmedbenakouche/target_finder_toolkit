@@ -29,9 +29,11 @@ import pyautogui
 from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import CLASS_NAMES, TargetFinder
+from target_finder_toolkit.annotation_detector import AnnotationDetector
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
+from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
 
 __all__ = ["bubble_cursor", "main"]
 
@@ -62,7 +64,7 @@ class BubbleCursor(QtWidgets.QWidget):
       to the nearest detected target.
     - The real cursor is hidden and replaced by a drawn "fake" cursor.
     """
-    def __init__(self, detector: TargetFinder, cursor_filter=None, logger=None):
+    def __init__(self, detector: TargetFinder, cursor_filter=None, logger=None, *, include_text_targets=False):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
@@ -70,6 +72,7 @@ class BubbleCursor(QtWidgets.QWidget):
             self.detector.hide_overlay_during_capture = False
         self.cursor_filter = cursor_filter
         self.logger = logger
+        self.include_text_targets = bool(include_text_targets)
         self._last_target = None  # to store the active target
         self._last_target_click = None
         self._last_target_info = None
@@ -215,7 +218,7 @@ class BubbleCursor(QtWidgets.QWidget):
             if cls_id != 3 and x <= cx <= x + w and y <= cy <= y + h:
                 cursor_on_non_text = True
                 break
-        if not cursor_on_non_text:
+        if not self.include_text_targets and not cursor_on_non_text:
             for x, y, w, h, score, cls_id in detections:
                 if cls_id == 3:
                     if ((x - text_margin) <= cx <= (x + w + text_margin) and
@@ -259,7 +262,7 @@ class BubbleCursor(QtWidgets.QWidget):
         distances.sort(key=lambda t: t[0])
         IntD1, tx, ty, w, h, nearest_score, nearest_cls_id = distances[0]
 
-        if nearest_cls_id == 3:
+        if nearest_cls_id == 3 and not self.include_text_targets:
             self._last_target = None
             self._last_target_click = None
             self._last_target_info = None
@@ -683,7 +686,7 @@ class BubbleCursor(QtWidgets.QWidget):
         post_mouse_event(Quartz.kCGEventMouseMoved, orig_x, orig_y)
 
 
-def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):
+def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None, *, include_text_targets=False):
     """Launch the Bubble Cursor overlay.
 
     This replaces the system cursor with a dynamic "bubble" that
@@ -701,8 +704,14 @@ def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None):
     if not _CURSOR_RESTORE_REGISTERED:
         atexit.register(restore_default_cursors)
         _CURSOR_RESTORE_REGISTERED = True
-    ov = BubbleCursor(detector, cursor_filter=cursor_filter, logger=logger)
+    ov = BubbleCursor(
+        detector,
+        cursor_filter=cursor_filter,
+        logger=logger,
+        include_text_targets=include_text_targets,
+    )
     ov.show()
+    raise_macos_window_above_system_ui(ov, level_offset=1)
     if sys.platform == "darwin":
         QtCore.QTimer.singleShot(0, hide_cursor_everywhere)
         QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
@@ -762,13 +771,21 @@ def main():
     add_filter_arguments(parser)
     parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
+    parser.add_argument('--annotation-control-file', default=None, help="Use controlled-task annotations instead of live YOLO detection")
+    parser.add_argument('--include-text-targets', action='store_true', help="Allow Text annotations to be acquired by the bubble")
     args = parser.parse_args()
 
-    if args.model_path is None:
+    if args.annotation_control_file:
+        det = AnnotationDetector(args.annotation_control_file)
+    else:
+        if args.model_path is None:
+            here = os.path.dirname(os.path.abspath(__file__))
+            args.model_path = os.path.join(here, "yolo26s_1280.pt")
+        det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+
+    if args.model_path is None and not args.annotation_control_file:
         here = os.path.dirname(os.path.abspath(__file__))
         args.model_path = os.path.join(here, "yolo26s_1280.pt")
-
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args)) if args.filter != "none" else None
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
@@ -781,9 +798,17 @@ def main():
             capture_interval=args.capture_interval,
             confidence=args.confidence,
             iou=args.iou,
+            detection_source="annotations" if args.annotation_control_file else "yolo",
+            annotation_control_file=args.annotation_control_file,
+            include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
-    bubble_cursor(det, cursor_filter=cursor_filter, logger=logger)
+    bubble_cursor(
+        det,
+        cursor_filter=cursor_filter,
+        logger=logger,
+        include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
+    )
 
 if __name__ == "__main__":
     main()

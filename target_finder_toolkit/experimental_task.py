@@ -30,6 +30,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from target_finder_toolkit.filters import add_filter_arguments
 from target_finder_toolkit.logging_utils import make_default_log_path
 from target_finder_toolkit.mouse_utils import restore_default_cursors
+from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
 
 try:
     from target_finder_toolkit.targetfinder import CLASS_NAMES
@@ -40,9 +41,9 @@ except Exception:  # pragma: no cover - targetfinder deps may be unavailable.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = Path("/Users/tangxinqi/Desktop/stage/data/web")
 DIFFICULTY_BINS = {
-    "easy": (1.5, 2.5),
-    "medium": (2.5, 3.5),
-    "hard": (3.5, 5.0),
+    "easy": (0.0, 3.0),
+    "medium": (3.0, 5.0),
+    "hard": (5.0, 8.5),
 }
 TECHNIQUES = [
     "mouse",
@@ -59,6 +60,7 @@ TECHNIQUE_MODULES = {
     "dynaspot": "target_finder_toolkit.dynaspot",
     "ninja_cursors": "target_finder_toolkit.ninjacursors",
 }
+IN_PROCESS_TASK_TECHNIQUES: set[str] = set()
 DEFAULT_CHANGE_THRESH = 100
 DEFAULT_CAPTURE_INTERVAL = 1 / 30
 DEFAULT_CONFIDENCE = 0.28
@@ -86,6 +88,7 @@ class TargetAnnotation:
     distance: float
     width_metric: float
     fitts_id: float
+    source_line_number: int
     source_line: str
 
 
@@ -115,6 +118,8 @@ class TrialSpec:
     distance: float
     width_metric: float
     fitts_id: float
+    source_line_number: int
+    source_line: str
 
 
 def class_name_for_id(class_id: int) -> str:
@@ -179,7 +184,10 @@ def load_dataset(data_dir: Path, *, min_target_size: float = 4.0) -> list[Datase
         start = (image_width / 2.0, image_height / 2.0)
         targets: list[TargetAnnotation] = []
 
-        for line in label_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for source_line_number, line in enumerate(
+            label_path.read_text(encoding="utf-8", errors="replace").splitlines(),
+            start=1,
+        ):
             line = line.strip()
             if not line:
                 continue
@@ -204,6 +212,7 @@ def load_dataset(data_dir: Path, *, min_target_size: float = 4.0) -> list[Datase
                     distance=distance,
                     width_metric=width_metric,
                     fitts_id=fitts_id,
+                    source_line_number=source_line_number,
                     source_line=line,
                 )
             )
@@ -269,6 +278,8 @@ def sample_trials(
                 distance=target.distance,
                 width_metric=target.width_metric,
                 fitts_id=target.fitts_id,
+                source_line_number=target.source_line_number,
+                source_line=target.source_line,
             )
         )
     return trials
@@ -291,7 +302,11 @@ def default_technique_log_path(technique: str) -> Path:
     return make_default_log_path(PROJECT_ROOT, f"{technique}_during_task")
 
 
-def build_technique_command(args, technique_log_file: Path | None) -> list[str] | None:
+def build_technique_command(
+    args,
+    technique_log_file: Path | None,
+    annotation_control_file: Path | None,
+) -> list[str] | None:
     if args.technique == "mouse":
         return None
     module_name = TECHNIQUE_MODULES.get(args.technique)
@@ -323,8 +338,12 @@ def build_technique_command(args, technique_log_file: Path | None) -> list[str] 
         cmd += ["--model-path", args.model_path]
     if technique_log_file is not None:
         cmd += ["--log-file", str(technique_log_file), "--log-cursor-hz", str(args.technique_log_cursor_hz)]
+    if annotation_control_file is not None and args.technique != "targetfinder":
+        cmd += ["--annotation-control-file", str(annotation_control_file)]
 
-    if args.technique == "semantic":
+    if args.technique == "bubble":
+        cmd.append("--include-text-targets")
+    elif args.technique == "semantic":
         if args.semantic_display:
             cmd.append("--display")
         if args.semantic_disable_accel:
@@ -340,6 +359,7 @@ def build_technique_command(args, technique_log_file: Path | None) -> list[str] 
             "--reduce-time",
             str(args.dynaspot_reduce_time),
         ]
+        cmd.append("--include-text-targets")
     elif args.technique == "ninja_cursors":
         cmd += [
             "--camera-index",
@@ -377,8 +397,37 @@ def build_technique_command(args, technique_log_file: Path | None) -> list[str] 
     return cmd
 
 
+def bbox_contains_point(bbox: tuple[float, float, float, float], x: float, y: float) -> bool:
+    bx, by, bw, bh = bbox
+    return bx <= x <= bx + bw and by <= y <= by + bh
+
+
+def point_to_bbox_distance(x: float, y: float, bbox: tuple[float, float, float, float]) -> float:
+    bx, by, bw, bh = bbox
+    cx = bx + bw / 2.0
+    cy = by + bh / 2.0
+    dx = max(0.0, abs(x - cx) - bw / 2.0)
+    dy = max(0.0, abs(y - cy) - bh / 2.0)
+    return math.hypot(dx, dy)
+
+
+def target_to_log_dict(target: TargetAnnotation | None) -> dict | None:
+    if target is None:
+        return None
+    return {
+        "class_id": target.class_id,
+        "class_name": target.class_name,
+        "bbox": [round(value, 3) for value in target.bbox],
+        "center": [round(value, 3) for value in target.center],
+        "fitts_id": round(target.fitts_id, 4),
+    }
+
+
 class TrialCanvas(QtWidgets.QWidget):
-    clicked = QtCore.pyqtSignal(float, float)
+    clicked = QtCore.pyqtSignal(dict)
+    TOP_BAR_HEIGHT = 30
+    TARGET_RED = QtGui.QColor(185, 32, 32)
+    MESSAGE_RED = QtGui.QColor(190, 45, 45)
 
     def __init__(self):
         super().__init__()
@@ -389,6 +438,11 @@ class TrialCanvas(QtWidgets.QWidget):
         self._image_rect = QtCore.QRectF()
         self._status_text = ""
         self._message_text = ""
+        self._message_style = "bottom"
+        self._technique = "mouse"
+        self._cursor_image_point: tuple[float, float] | None = None
+        self._bubble_target: TargetAnnotation | None = None
+        self._bubble_radius = 0.0
         self.setMouseTracking(True)
         self.setMinimumSize(640, 420)
 
@@ -399,19 +453,25 @@ class TrialCanvas(QtWidgets.QWidget):
         *,
         all_targets: tuple[TargetAnnotation, ...] = (),
         show_all_targets: bool = False,
+        technique: str = "mouse",
     ):
         self._image = QtGui.QImage(image_path)
         self._target_bbox = target_bbox
         self._all_targets = all_targets
         self._show_all_targets = show_all_targets
+        self._technique = technique
+        self._cursor_image_point = None
+        self._bubble_target = None
+        self._bubble_radius = 0.0
         self.update()
 
     def set_status_text(self, text: str):
         self._status_text = text
         self.update()
 
-    def set_message_text(self, text: str):
+    def set_message_text(self, text: str, *, style: str = "bottom"):
         self._message_text = text
+        self._message_style = style
         self.update()
 
     def image_to_widget_rect(self, bbox: tuple[float, float, float, float]) -> QtCore.QRectF:
@@ -426,6 +486,21 @@ class TrialCanvas(QtWidgets.QWidget):
             width * scale_x,
             height * scale_y,
         )
+
+    def image_to_widget_point(self, point: tuple[float, float]) -> QtCore.QPointF:
+        if self._image.isNull() or self._image_rect.isNull():
+            return QtCore.QPointF()
+        scale_x = self._image_rect.width() / self._image.width()
+        scale_y = self._image_rect.height() / self._image.height()
+        return QtCore.QPointF(
+            self._image_rect.left() + point[0] * scale_x,
+            self._image_rect.top() + point[1] * scale_y,
+        )
+
+    def image_to_widget_scale(self) -> float:
+        if self._image.isNull() or self._image_rect.isNull():
+            return 1.0
+        return float(self._image_rect.width() / self._image.width())
 
     def widget_to_image_point(self, point: QtCore.QPointF) -> tuple[float, float] | None:
         if self._image.isNull() or not self._image_rect.contains(point):
@@ -443,24 +518,105 @@ class TrialCanvas(QtWidgets.QWidget):
         center = self._image_rect.center()
         return self.mapToGlobal(QtCore.QPoint(int(center.x()), int(center.y())))
 
+    def current_image_rect(self) -> QtCore.QRectF:
+        if self._image.isNull():
+            return QtCore.QRectF()
+        image_area = QtCore.QRectF(
+            0,
+            self.TOP_BAR_HEIGHT,
+            self.width(),
+            max(1.0, self.height() - self.TOP_BAR_HEIGHT),
+        )
+        target_size = self._image.size().scaled(
+            image_area.size().toSize(),
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+        )
+        left = image_area.left() + (image_area.width() - target_size.width()) / 2.0
+        top = image_area.top() + (image_area.height() - target_size.height()) / 2.0
+        return QtCore.QRectF(left, top, target_size.width(), target_size.height())
+
+    def _target_at_point(self, x: float, y: float) -> TargetAnnotation | None:
+        containing = [
+            target
+            for target in self._all_targets
+            if bbox_contains_point(target.bbox, x, y)
+        ]
+        if not containing:
+            return None
+        return min(containing, key=lambda target: target.bbox[2] * target.bbox[3])
+
+    def _update_bubble_target(self, point: tuple[float, float] | None):
+        self._cursor_image_point = point
+        self._bubble_target = None
+        self._bubble_radius = 0.0
+        if self._technique != "bubble" or point is None or not self._all_targets:
+            return
+
+        px, py = point
+        distances = sorted(
+            # The standalone bubblecursor.py skips class_id == 3 (Text).
+            # The controlled experiment intentionally keeps Text selectable.
+            (point_to_bbox_distance(px, py, target.bbox), index, target)
+            for index, target in enumerate(self._all_targets)
+        )
+        if not distances:
+            return
+
+        nearest_distance, _, nearest = distances[0]
+        self._bubble_target = nearest
+        x, y, width, height = nearest.bbox
+        corners = ((x, y), (x + width, y), (x, y + height), (x + width, y + height))
+        containment_distance = max(math.hypot(px - cx, py - cy) for cx, cy in corners)
+        if len(distances) > 1:
+            second_distance = distances[1][0]
+            radius = min(containment_distance, second_distance)
+            if radius == second_distance:
+                radius = max(0.0, radius - 0.01 * radius)
+        else:
+            radius = containment_distance
+        self._bubble_radius = max(float(radius), float(nearest_distance), 8.0)
+
+    def _bubble_click_payload(self, raw_x: float, raw_y: float) -> dict:
+        direct_target = self._target_at_point(raw_x, raw_y)
+        selected_target = self._bubble_target
+        redirected = (
+            selected_target is not None
+            and not bbox_contains_point(selected_target.bbox, raw_x, raw_y)
+        )
+        effective_x = raw_x
+        effective_y = raw_y
+        if redirected and selected_target is not None:
+            effective_x, effective_y = selected_target.center
+        return {
+            "raw_position": [raw_x, raw_y],
+            "effective_position": [effective_x, effective_y],
+            "redirected": redirected,
+            "selected_target": target_to_log_dict(selected_target),
+            "direct_target": target_to_log_dict(direct_target),
+            "interaction_backend": "in_process_bubble",
+        }
+
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QtGui.QColor(18, 18, 18))
+        painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0))
+
+        top_bar = QtCore.QRectF(0, 0, self.width(), self.TOP_BAR_HEIGHT)
+        image_area = QtCore.QRectF(
+            0,
+            top_bar.bottom(),
+            self.width(),
+            max(1.0, self.height() - top_bar.bottom()),
+        )
 
         if self._image.isNull():
             painter.setPen(QtGui.QColor(80, 80, 80))
-            painter.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, "Aucune image")
+            painter.drawText(image_area, QtCore.Qt.AlignmentFlag.AlignCenter, "Aucune image")
+            self._draw_bar_text(painter, top_bar, image_area)
             painter.end()
             return
 
-        target_size = self._image.size().scaled(
-            self.size(),
-            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-        )
-        left = (self.width() - target_size.width()) / 2.0
-        top = (self.height() - target_size.height()) / 2.0
-        self._image_rect = QtCore.QRectF(left, top, target_size.width(), target_size.height())
+        self._image_rect = self.current_image_rect()
         painter.drawImage(self._image_rect, self._image)
 
         if self._show_all_targets:
@@ -471,56 +627,144 @@ class TrialCanvas(QtWidgets.QWidget):
 
         if self._target_bbox is not None:
             rect = self.image_to_widget_rect(self._target_bbox)
-            painter.setPen(QtGui.QPen(QtGui.QColor(230, 40, 40), 4))
-            painter.setBrush(QtGui.QColor(255, 30, 30, 38))
+            painter.setPen(QtGui.QPen(self.TARGET_RED, 4))
+            painter.setBrush(QtGui.QColor(185, 32, 32, 38))
             painter.drawRoundedRect(rect, 8, 8)
 
-        self._draw_overlay_text(painter)
+        self._draw_bubble_overlay(painter)
+
+        self._draw_bar_text(painter, top_bar, image_area)
         painter.end()
 
-    def _draw_overlay_text(self, painter: QtGui.QPainter):
-        margin = 24
+    def _draw_bubble_overlay(self, painter: QtGui.QPainter):
+        if self._technique != "bubble" or self._cursor_image_point is None:
+            return
+        cursor = self.image_to_widget_point(self._cursor_image_point)
+        if self._bubble_target is not None:
+            scale = self.image_to_widget_scale()
+            radius = max(6.0, self._bubble_radius * scale)
+            target_rect = self.image_to_widget_rect(self._bubble_target.bbox)
+
+            main_path = QtGui.QPainterPath()
+            main_path.addEllipse(cursor, radius, radius)
+            env_path = QtGui.QPainterPath()
+            corner = min(target_rect.width(), target_rect.height()) / 2.0
+            d = math.hypot(corner, corner) - corner
+            env_path.addRoundedRect(
+                target_rect.adjusted(-d, -d, d, d),
+                corner + d,
+                corner + d,
+            )
+            painter.setPen(QtGui.QPen(QtGui.QColor(0, 220, 60, 220), 3))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawPath(main_path.united(env_path))
+        self._draw_fake_cursor(painter, cursor)
+
+    def _draw_fake_cursor(self, painter: QtGui.QPainter, cursor: QtCore.QPointF):
+        cx = cursor.x()
+        cy = cursor.y()
+        pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 220), 2)
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        radius_cursor = 6
+        painter.drawEllipse(cursor, radius_cursor, radius_cursor)
+        line_len = 4
+        gap = radius_cursor + 1
+        painter.drawLine(QtCore.QLineF(cx, cy - gap - line_len, cx, cy - gap))
+        painter.drawLine(QtCore.QLineF(cx, cy + gap, cx, cy + gap + line_len))
+        painter.drawLine(QtCore.QLineF(cx + gap, cy, cx + gap + line_len, cy))
+        painter.drawLine(QtCore.QLineF(cx - gap - line_len, cy, cx - gap, cy))
+
+    def _draw_bar_text(
+        self,
+        painter: QtGui.QPainter,
+        top_bar: QtCore.QRectF,
+        image_area: QtCore.QRectF,
+    ):
+        margin = 16
         if self._status_text:
-            painter.setPen(QtCore.Qt.PenStyle.NoPen)
-            painter.setBrush(QtGui.QColor(0, 0, 0, 150))
-            status_rect = QtCore.QRectF(margin, margin, self.width() - margin * 2, 54)
-            painter.drawRoundedRect(status_rect, 14, 14)
             painter.setPen(QtGui.QColor(255, 255, 255))
             font = painter.font()
-            font.setPointSize(16)
+            font.setPointSize(11)
             font.setBold(True)
             painter.setFont(font)
             painter.drawText(
-                status_rect.adjusted(18, 0, -18, 0),
-                QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft,
+                top_bar.adjusted(margin, 0, -margin, 0),
+                QtCore.Qt.AlignmentFlag.AlignVCenter
+                | QtCore.Qt.AlignmentFlag.AlignLeft,
                 self._status_text,
             )
 
         if self._message_text:
             font = painter.font()
-            font.setPointSize(34)
+            is_countdown = self._message_text.strip().isdigit()
+            is_centered = self._message_style == "center"
+            if is_countdown:
+                font.setPointSize(72)
+            elif is_centered and len(self._message_text) <= 12:
+                font.setPointSize(56)
+            elif is_centered:
+                font.setPointSize(30)
+            else:
+                font.setPointSize(20)
             font.setBold(True)
             painter.setFont(font)
-            metrics = painter.fontMetrics()
-            text_width = min(metrics.horizontalAdvance(self._message_text) + 64, self.width() - margin * 2)
-            message_rect = QtCore.QRectF(
-                (self.width() - text_width) / 2,
-                self.height() - 110,
-                text_width,
-                70,
-            )
-            painter.setPen(QtCore.Qt.PenStyle.NoPen)
-            painter.setBrush(QtGui.QColor(0, 0, 0, 160))
-            painter.drawRoundedRect(message_rect, 18, 18)
-            painter.setPen(QtGui.QColor(255, 80, 80))
-            painter.drawText(message_rect, QtCore.Qt.AlignmentFlag.AlignCenter, self._message_text)
+            painter.setPen(self.MESSAGE_RED)
+            if is_countdown or is_centered:
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(QtGui.QColor(0, 0, 0, 120))
+                if is_countdown or len(self._message_text) <= 12:
+                    metrics = painter.fontMetrics()
+                    text_rect = metrics.boundingRect(self._message_text)
+                    message_box = QtCore.QRectF(
+                        0,
+                        0,
+                        min(max(220.0, text_rect.width() + 96.0), image_area.width() * 0.9),
+                        150,
+                    )
+                else:
+                    message_box = QtCore.QRectF(
+                        0,
+                        0,
+                        min(900.0, image_area.width() * 0.78),
+                        190,
+                    )
+                message_box.moveCenter(image_area.center())
+                painter.drawRoundedRect(message_box, 26, 26)
+                painter.setPen(self.MESSAGE_RED)
+                painter.drawText(
+                    message_box.adjusted(24, 10, -24, -10),
+                    QtCore.Qt.AlignmentFlag.AlignCenter
+                    | QtCore.Qt.TextFlag.TextWordWrap,
+                    self._message_text,
+                )
+                return
 
     def mousePressEvent(self, event):
         if event.button() != QtCore.Qt.MouseButton.LeftButton:
             return
         point = self.widget_to_image_point(event.position())
         if point is not None:
-            self.clicked.emit(point[0], point[1])
+            self._update_bubble_target(point)
+            if self._technique == "bubble":
+                self.clicked.emit(self._bubble_click_payload(point[0], point[1]))
+            else:
+                self.clicked.emit(
+                    {
+                        "raw_position": [point[0], point[1]],
+                        "effective_position": [point[0], point[1]],
+                        "redirected": False,
+                        "selected_target": None,
+                        "direct_target": target_to_log_dict(self._target_at_point(point[0], point[1])),
+                        "interaction_backend": "direct_click",
+                    }
+                )
+
+    def mouseMoveEvent(self, event):
+        self._update_bubble_target(self.widget_to_image_point(event.position()))
+        if self._technique == "bubble":
+            self.update()
+        super().mouseMoveEvent(event)
 
 
 class ExperimentalTaskWindow(QtWidgets.QWidget):
@@ -535,6 +779,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         show_all_targets: bool = False,
         technique_command: list[str] | None = None,
         technique_log_file: Path | None = None,
+        annotation_control_file: Path | None = None,
         technique_start_delay_sec: float = 3.0,
         fullscreen: bool = True,
     ):
@@ -548,6 +793,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.show_all_targets = show_all_targets
         self.technique_command = list(technique_command) if technique_command else None
         self.technique_log_file = Path(technique_log_file) if technique_log_file else None
+        self.annotation_control_file = Path(annotation_control_file) if annotation_control_file else None
         self.technique_start_delay_sec = max(0.0, float(technique_start_delay_sec))
         self.fullscreen = bool(fullscreen)
         self.technique_process: subprocess.Popen | None = None
@@ -559,6 +805,16 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._countdown_remaining = 0
         self._accept_clicks = False
         self._session_ended = False
+        self._process_output_buffer = ""
+        self._process_output_lines: list[str] = []
+        self._waiting_for_ninja_calibration = False
+        self._pending_external_click_payload: dict | None = None
+        self.technique_name = self.trials[0].technique if self.trials else None
+        self.ninja_control_file: Path | None = None
+        if self.technique_command is not None and self._uses_ninja_cursors():
+            self.ninja_control_file = self.log_file.with_suffix(".ninja_control")
+            self.technique_command += ["--experiment-control-file", str(self.ninja_control_file)]
+            self._set_ninja_control_state("paused")
 
         self.setWindowTitle("Tache experimentale")
         self.resize(1200, 820)
@@ -580,8 +836,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.cursor_lock_timer.timeout.connect(self._set_cursor_to_start)
 
         self.technique_watch_timer = QtCore.QTimer(self)
-        self.technique_watch_timer.setInterval(1000)
+        self.technique_watch_timer.setInterval(100)
         self.technique_watch_timer.timeout.connect(self._check_technique_process)
+
+        self.external_click_timer = QtCore.QTimer(self)
+        self.external_click_timer.setSingleShot(True)
+        self.external_click_timer.setInterval(180)
+        self.external_click_timer.timeout.connect(self._flush_pending_external_click)
 
         self._write_event(
             {
@@ -591,22 +852,29 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 "trial_count": len(self.trials),
                 "countdown_sec": self.countdown_sec,
                 "max_clicks": self.max_clicks,
+                "technique": self.technique_name,
+                "interaction_backend": (
+                    "in_process_bubble"
+                    if self.technique_name in IN_PROCESS_TASK_TECHNIQUES
+                    else ("external_process" if self.technique_command is not None else "direct_click")
+                ),
                 "technique_process_enabled": self.technique_command is not None,
                 "technique_command": self.technique_command,
                 "technique_log_file": str(self.technique_log_file) if self.technique_log_file else None,
+                "annotation_control_file": (
+                    str(self.annotation_control_file) if self.annotation_control_file else None
+                ),
             }
         )
-        if self.technique_command is not None:
-            QtCore.QTimer.singleShot(300, self._start_technique_process)
-            first_trial_delay = int(max(0.5, self.technique_start_delay_sec) * 1000)
-        else:
-            first_trial_delay = 200
-        QtCore.QTimer.singleShot(first_trial_delay, self.next_trial)
+        QtCore.QTimer.singleShot(200, self.next_trial)
 
     def closeEvent(self, event):
         self.timer.stop()
         self.cursor_lock_timer.stop()
+        self.external_click_timer.stop()
         self._stop_technique_process()
+        self._cleanup_ninja_control_file()
+        self._cleanup_annotation_control_file()
         self._end_session("window_close")
         super().closeEvent(event)
 
@@ -624,13 +892,22 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
     def _start_technique_process(self):
         if self.technique_command is None or self.technique_process is not None:
             return
-        popen_kwargs = {"cwd": str(PROJECT_ROOT)}
+        popen_kwargs = {
+            "cwd": str(PROJECT_ROOT),
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+        }
         if sys.platform.startswith("win"):
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_kwargs["start_new_session"] = True
         try:
             self.technique_process = subprocess.Popen(self.technique_command, **popen_kwargs)
+            if self.technique_process.stdout is not None:
+                try:
+                    os.set_blocking(self.technique_process.stdout.fileno(), False)
+                except Exception:
+                    pass
         except Exception as exc:
             self._write_event(
                 {
@@ -651,17 +928,97 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         )
         self.technique_watch_timer.start()
 
+    def _technique_command_has(self, value: str) -> bool:
+        return bool(self.technique_command and value in self.technique_command)
+
+    def _should_wait_for_ninja_calibration(self) -> bool:
+        return (
+            self._technique_command_has("target_finder_toolkit.ninjacursors")
+            and self._technique_command_has("--auto-calibrate")
+        )
+
+    def _drain_technique_output(self):
+        if self.technique_process is None or self.technique_process.stdout is None:
+            return
+        fd = self.technique_process.stdout.fileno()
+        chunks = []
+        while True:
+            try:
+                data = os.read(fd, 65536)
+            except BlockingIOError:
+                break
+            except OSError:
+                break
+            if not data:
+                break
+            chunks.append(data.decode("utf-8", errors="replace"))
+        if not chunks:
+            return
+        self._process_output_buffer += "".join(chunks)
+        while True:
+            newline_idx = self._process_output_buffer.find("\n")
+            if newline_idx < 0:
+                break
+            line = self._process_output_buffer[:newline_idx].rstrip("\r")
+            self._process_output_buffer = self._process_output_buffer[newline_idx + 1:]
+            if line:
+                self._process_output_lines.append(line)
+                self._process_output_lines = self._process_output_lines[-40:]
+                self._write_event({"type": "technique_process_output", "line": line})
+            self._handle_technique_output_line(line)
+
+    def _handle_technique_output_line(self, line: str):
+        prefix = "__NINJA_CALIB__ "
+        if not line.startswith(prefix):
+            return
+        try:
+            payload = json.loads(line[len(prefix):])
+        except Exception:
+            return
+        event = payload.get("event")
+        self._write_event({"type": "ninja_calibration_event", **payload})
+        if event == "started":
+            points = payload.get("num_points")
+            suffix = f" ({points} points)" if points else ""
+            self._set_message_text(f"Calibration Ninja Cursors{suffix}...", style="center")
+            return
+        if event not in {"calibrated", "failed", "cancelled"}:
+            return
+        if not self._waiting_for_ninja_calibration:
+            return
+        self._waiting_for_ninja_calibration = False
+        if event == "calibrated":
+            self._set_message_text("Calibration terminee", style="center")
+        elif event == "failed":
+            self._set_message_text("Calibration echouee", style="center")
+        else:
+            self._set_message_text("Calibration annulee", style="center")
+        QtCore.QTimer.singleShot(900, self._show_trial_intro)
+
     def _check_technique_process(self):
         if self.technique_process is None:
             self.technique_watch_timer.stop()
             return
+        self._drain_technique_output()
         exit_code = self.technique_process.poll()
         if exit_code is None:
             return
+        self._drain_technique_output()
+        if self._process_output_buffer.strip():
+            line = self._process_output_buffer.strip()
+            self._process_output_lines.append(line)
+            self._process_output_lines = self._process_output_lines[-40:]
+            self._write_event({"type": "technique_process_output", "line": line})
+            self._handle_technique_output_line(line)
+            self._process_output_buffer = ""
         self._write_event({"type": "technique_process_exit", "exit_code": exit_code})
         self.technique_process = None
         self.technique_watch_timer.stop()
         self._set_status_text(f"{self._status_text()} | Technique arretee ({exit_code})")
+        if self._waiting_for_ninja_calibration:
+            self._waiting_for_ninja_calibration = False
+            self._set_message_text(f"Ninja Cursors arrete ({exit_code})", style="center")
+            QtCore.QTimer.singleShot(900, self._show_trial_intro)
 
     def _stop_technique_process(self):
         if self.technique_process is None:
@@ -669,6 +1026,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             restore_default_cursors()
             return
         proc = self.technique_process
+        self._drain_technique_output()
         self.technique_process = None
         self.technique_watch_timer.stop()
         try:
@@ -698,26 +1056,148 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
     def _set_cursor_to_start(self):
         QtGui.QCursor.setPos(self.canvas.image_center_global())
 
+    def _uses_ninja_cursors(self) -> bool:
+        return self.technique_name == "ninja_cursors" or self._technique_command_has(
+            "target_finder_toolkit.ninjacursors"
+        )
+
+    def _set_ninja_control_state(self, state: str):
+        if self.ninja_control_file is None:
+            return
+        try:
+            self.ninja_control_file.write_text(state, encoding="utf-8")
+            self._write_event({"type": "ninja_control_state", "state": state})
+        except OSError as exc:
+            self._write_event({"type": "ninja_control_error", "error": str(exc)})
+
+    def _cleanup_ninja_control_file(self):
+        if self.ninja_control_file is None:
+            return
+        try:
+            self.ninja_control_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _cleanup_annotation_control_file(self):
+        if self.annotation_control_file is None:
+            return
+        try:
+            self.annotation_control_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _write_annotation_control_state(self, state: str):
+        if self.annotation_control_file is None or self.current_trial is None:
+            return
+        item = self.dataset_by_image[self.current_trial.image_path]
+        image_rect = self.canvas.current_image_rect()
+        if image_rect.isNull() or self.canvas._image.isNull():
+            return
+        canvas_origin = self.canvas.mapToGlobal(QtCore.QPoint(0, 0))
+        scale_x = image_rect.width() / max(float(item.width), 1.0)
+        scale_y = image_rect.height() / max(float(item.height), 1.0)
+        detections = []
+        for index, target in enumerate(item.targets):
+            x, y, width, height = target.bbox
+            screen_x = canvas_origin.x() + image_rect.left() + x * scale_x
+            screen_y = canvas_origin.y() + image_rect.top() + y * scale_y
+            detections.append(
+                {
+                    "id": index + 1,
+                    "target_index": index,
+                    "class_id": target.class_id,
+                    "class_name": target.class_name,
+                    "x": screen_x,
+                    "y": screen_y,
+                    "width": width * scale_x,
+                    "height": height * scale_y,
+                    "score": 1.0,
+                    "image_bbox": list(target.bbox),
+                    "image_center": list(target.center),
+                    "source_line_number": target.source_line_number,
+                    "source_line": target.source_line,
+                }
+            )
+        payload = {
+            "version": 1,
+            "state": state,
+            "trial_id": self.current_trial.trial_id,
+            "technique": self.current_trial.technique,
+            "image_path": self.current_trial.image_path,
+            "image_size": [item.width, item.height],
+            "image_rect_global": [
+                canvas_origin.x() + image_rect.left(),
+                canvas_origin.y() + image_rect.top(),
+                image_rect.width(),
+                image_rect.height(),
+            ],
+            "detections": detections,
+        }
+        tmp_path = self.annotation_control_file.with_suffix(
+            self.annotation_control_file.suffix + ".tmp"
+        )
+        try:
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp_path, self.annotation_control_file)
+            self._write_event(
+                {
+                    "type": "annotation_control_state",
+                    "state": state,
+                    "trial_id": self.current_trial.trial_id,
+                    "target_count": len(detections),
+                }
+            )
+        except OSError as exc:
+            self._write_event({"type": "annotation_control_error", "error": str(exc)})
+
+    def _start_cursor_lock_if_needed(self):
+        if self._uses_ninja_cursors():
+            self.cursor_lock_timer.stop()
+            return
+        self._set_cursor_to_start()
+        self.cursor_lock_timer.start()
+
+    def _set_cursor_to_start_if_needed(self):
+        if not self._uses_ninja_cursors():
+            self._set_cursor_to_start()
+
     def _status_text(self) -> str:
         return self.canvas._status_text
+
+    def show_desktop_fullscreen(self):
+        """Cover the screen without entering the macOS fullscreen Space."""
+        self.setWindowFlags(
+            QtCore.Qt.WindowType.FramelessWindowHint
+            | QtCore.Qt.WindowType.WindowStaysOnTopHint
+        )
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            self.setGeometry(screen.geometry())
+        self.show()
+        raise_macos_window_above_system_ui(self, level_offset=0)
+        self.raise_()
+        self.activateWindow()
 
     def _set_status_text(self, text: str):
         self.canvas.set_status_text(text)
 
-    def _set_message_text(self, text: str):
-        self.canvas.set_message_text(text)
+    def _set_message_text(self, text: str, *, style: str = "bottom"):
+        self.canvas.set_message_text(text, style=style)
 
     def next_trial(self):
         self.current_index += 1
         if self.current_index >= len(self.trials):
             self._set_status_text(f"Termine. Journal : {self.log_file}")
-            self._set_message_text("Termine")
+            self._set_message_text("Termine", style="center")
             self._stop_technique_process()
+            self._cleanup_ninja_control_file()
+            self._cleanup_annotation_control_file()
             self._end_session("completed")
             QtCore.QTimer.singleShot(1200, QtWidgets.QApplication.instance().quit)
             return
 
         self.current_trial = self.trials[self.current_index]
+        self._set_ninja_control_state("paused")
         item = self.dataset_by_image[self.current_trial.image_path]
         self.click_count = 0
         self.miss_count = 0
@@ -727,7 +1207,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             self.current_trial.target_bbox,
             all_targets=item.targets,
             show_all_targets=self.show_all_targets,
+            technique=(
+                self.current_trial.technique
+                if self.current_trial.technique in IN_PROCESS_TASK_TECHNIQUES
+                else "mouse"
+            ),
         )
+        self._write_annotation_control_state("paused")
         self._set_status_text(
             f"Essai {self.current_trial.trial_id}/{len(self.trials)} | "
             f"Technique: {self.current_trial.technique} | "
@@ -736,43 +1222,96 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             f"Cible: {self.current_trial.target_class_name}"
         )
         self._write_event({"type": "trial_start", **asdict(self.current_trial)})
-        QtCore.QTimer.singleShot(100, self._start_countdown)
+        if self.current_index == 0 and self.technique_command is not None and self.technique_process is None:
+            self._set_message_text("Preparation de la technique...", style="center")
+            self._start_technique_process()
+            if self._should_wait_for_ninja_calibration():
+                self._waiting_for_ninja_calibration = True
+                self._set_message_text("Initialisation de Ninja Cursors...", style="center")
+                return
+            countdown_delay = int(max(0.5, self.technique_start_delay_sec) * 1000)
+        else:
+            countdown_delay = 100
+        QtCore.QTimer.singleShot(countdown_delay, self._show_trial_intro)
+
+    def _show_trial_intro(self):
+        if self.current_trial is None:
+            return
+        self._accept_clicks = False
+        self._start_cursor_lock_if_needed()
+        if self.current_index == 0:
+            self._set_message_text(
+                f"Après un compte à rebours de {self.countdown_sec} s,\n"
+                "cliquez sur la cible rouge.",
+                style="center",
+            )
+            QtCore.QTimer.singleShot(5000, self._start_countdown)
+            return
+        self._set_message_text(f"Image {self.current_index + 1}", style="center")
+        QtCore.QTimer.singleShot(800, self._start_countdown)
 
     def _start_countdown(self):
         self._accept_clicks = False
-        self._set_cursor_to_start()
-        self.cursor_lock_timer.start()
+        self._start_cursor_lock_if_needed()
+        self._write_annotation_control_state("paused")
         self._countdown_remaining = self.countdown_sec
         if self._countdown_remaining <= 0:
             self._begin_click_phase()
             return
-        self._set_message_text(str(self._countdown_remaining))
+        self._set_message_text(str(self._countdown_remaining), style="center")
         self.timer.start()
 
     def _tick_countdown(self):
-        self._set_cursor_to_start()
+        self._set_cursor_to_start_if_needed()
         self._countdown_remaining -= 1
         if self._countdown_remaining <= 0:
             self.timer.stop()
             self._begin_click_phase()
         else:
-            self._set_message_text(str(self._countdown_remaining))
+            self._set_message_text(str(self._countdown_remaining), style="center")
 
     def _begin_click_phase(self):
         self.cursor_lock_timer.stop()
-        self._set_cursor_to_start()
-        self._set_message_text("Cliquez sur la cible rouge")
+        self._set_cursor_to_start_if_needed()
+        self._set_ninja_control_state("active")
+        self._write_annotation_control_state("active")
+        self._set_message_text("")
         self._accept_clicks = True
         self.trial_started_at = time.monotonic()
 
     def _target_contains(self, x: float, y: float) -> bool:
         if self.current_trial is None:
             return False
-        tx, ty, tw, th = self.current_trial.target_bbox
-        return tx <= x <= tx + tw and ty <= y <= ty + th
+        return bbox_contains_point(self.current_trial.target_bbox, x, y)
 
-    def _handle_click(self, x: float, y: float):
+    def _handle_click(self, click_payload: dict):
+        if self._should_delay_external_click(click_payload):
+            self._pending_external_click_payload = click_payload
+            if not self.external_click_timer.isActive():
+                self.external_click_timer.start()
+            return
+        self._process_click_payload(click_payload)
+
+    def _should_delay_external_click(self, click_payload: dict) -> bool:
+        return (
+            self.technique_process is not None
+            and click_payload.get("interaction_backend") == "direct_click"
+            and self.current_trial is not None
+            and self._accept_clicks
+        )
+
+    def _flush_pending_external_click(self):
+        payload = self._pending_external_click_payload
+        self._pending_external_click_payload = None
+        if payload is not None:
+            self._process_click_payload(payload)
+
+    def _process_click_payload(self, click_payload: dict):
         if not self._accept_clicks or self.current_trial is None:
+            return
+        raw_x, raw_y = click_payload.get("raw_position", [None, None])
+        x, y = click_payload.get("effective_position", [raw_x, raw_y])
+        if x is None or y is None or raw_x is None or raw_y is None:
             return
         self.click_count += 1
         success = self._target_contains(x, y)
@@ -787,6 +1326,12 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 "technique": self.current_trial.technique,
                 "click_index": self.click_count,
                 "click_position": [round(x, 3), round(y, 3)],
+                "raw_click_position": [round(raw_x, 3), round(raw_y, 3)],
+                "effective_click_position": [round(x, 3), round(y, 3)],
+                "redirected": bool(click_payload.get("redirected", False)),
+                "interaction_backend": click_payload.get("interaction_backend"),
+                "selected_target": click_payload.get("selected_target"),
+                "direct_target": click_payload.get("direct_target"),
                 "success": success,
                 "movement_time_ms": round(elapsed_ms, 3),
                 "miss_count": self.miss_count,
@@ -812,10 +1357,10 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                     "miss_count": self.miss_count,
                 }
             )
-            self._set_message_text("Reussi" if success else "Echec")
+            self._set_message_text("Reussi" if success else "Echec", style="center")
             QtCore.QTimer.singleShot(700, self.next_trial)
         else:
-            self._set_message_text("Echec - recommencez")
+            self._set_message_text("Echec - recommencez", style="center")
 
     def keyPressEvent(self, event):
         if event.key() in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
@@ -838,7 +1383,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run a controlled target-selection experimental task prototype")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Directory containing .png/.txt annotated pairs")
     parser.add_argument("--technique", choices=TECHNIQUES, default="mouse", help="Technique label to store in task logs")
-    parser.add_argument("--trials", type=int, default=12, help="Number of trials to generate")
+    parser.add_argument("--trials", "--trial", dest="trials", type=int, default=12, help="Number of trials to generate")
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "mixed"], default="mixed", help="Target difficulty bin")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible trial sampling")
     parser.add_argument("--countdown", type=int, default=3, help="Countdown seconds before each trial starts")
@@ -897,6 +1442,9 @@ def main():
         print(
             f"  trial={trial.trial_id} difficulty={trial.difficulty} "
             f"ID={trial.fitts_id:.2f} image={Path(trial.image_path).name} "
+            f"target_index={trial.target_index} "
+            f"source_line_number={trial.source_line_number} "
+            f"source_line={trial.source_line!r} "
             f"bbox={[round(v, 1) for v in trial.target_bbox]}"
         )
 
@@ -910,7 +1458,11 @@ def main():
         if args.log_file
         else default_log_path(technique=args.technique, difficulty=args.difficulty)
     )
-    launch_technique = args.technique != "mouse" and not args.no_launch_technique
+    launch_technique = (
+        args.technique != "mouse"
+        and args.technique not in IN_PROCESS_TASK_TECHNIQUES
+        and not args.no_launch_technique
+    )
     technique_log_file = None
     if launch_technique and not args.no_technique_log:
         technique_log_file = (
@@ -918,7 +1470,14 @@ def main():
             if args.technique_log_file
             else default_technique_log_path(args.technique)
         )
-    technique_command = build_technique_command(args, technique_log_file) if launch_technique else None
+    annotation_control_file = (
+        log_file.with_suffix(".annotations.json") if launch_technique else None
+    )
+    technique_command = (
+        build_technique_command(args, technique_log_file, annotation_control_file)
+        if launch_technique
+        else None
+    )
     window = ExperimentalTaskWindow(
         trials,
         dataset_by_image,
@@ -928,11 +1487,14 @@ def main():
         show_all_targets=args.show_all_targets,
         technique_command=technique_command,
         technique_log_file=technique_log_file,
+        annotation_control_file=annotation_control_file,
         technique_start_delay_sec=args.technique_start_delay,
         fullscreen=not args.windowed,
     )
     if args.windowed:
         window.show()
+    elif sys.platform == "darwin" and launch_technique:
+        window.show_desktop_fullscreen()
     else:
         window.showFullScreen()
     sys.exit(app.exec())

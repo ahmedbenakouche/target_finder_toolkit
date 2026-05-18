@@ -29,9 +29,11 @@ import pyautogui
 from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit.annotation_detector import AnnotationDetector
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
+from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
 
 
 
@@ -808,6 +810,7 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
         disable_mouse_acceleration()
     ov = SemanticPointing(detector, display, disable_accel, cursor_filter=cursor_filter, logger=logger)
     ov.show()
+    raise_macos_window_above_system_ui(ov, level_offset=1)
 
     def _handle_signal(sig, frame):
         global _SESSION_STOP_REASON
@@ -870,13 +873,16 @@ def main():
     add_filter_arguments(parser)
     parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
+    parser.add_argument('--annotation-control-file', default=None, help="Use controlled-task annotations instead of live YOLO detection")
     args = parser.parse_args()
 
-    if args.model_path is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        args.model_path = os.path.join(here, "yolo26s_1280.pt")
-
-    det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
+    if args.annotation_control_file:
+        det = AnnotationDetector(args.annotation_control_file)
+    else:
+        if args.model_path is None:
+            here = os.path.dirname(os.path.abspath(__file__))
+            args.model_path = os.path.join(here, "yolo26s_1280.pt")
+        det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args)) if args.filter != "none" else None
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     if logger is not None:
@@ -891,6 +897,8 @@ def main():
             iou=args.iou,
             display=args.display,
             disable_accel=args.disable_accel,
+            detection_source="annotations" if args.annotation_control_file else "yolo",
+            annotation_control_file=args.annotation_control_file,
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
     semantic_pointing(det, args.display, args.disable_accel, cursor_filter=cursor_filter, logger=logger)
