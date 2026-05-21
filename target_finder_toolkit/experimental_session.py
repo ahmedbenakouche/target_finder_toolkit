@@ -83,7 +83,7 @@ def show_break_screen(
 ):
     """Keep a fullscreen rest page visible between two external block processes."""
     if seconds <= 0 and not wait_for_click:
-        return
+        return False
 
     from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -97,6 +97,7 @@ def show_break_screen(
             super().__init__()
             self.setWindowTitle("Pause")
             self.setCursor(QtCore.Qt.CursorShape.BlankCursor)
+            self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
             self.setStyleSheet(
                 """
                 QWidget {
@@ -160,9 +161,16 @@ def show_break_screen(
             layout.addStretch(1)
 
             self.deadline = time.monotonic() + max(0.0, float(seconds))
+            self.aborted = False
             self.timer = QtCore.QTimer(self)
             self.timer.timeout.connect(self._tick)
             self.timer.start(100)
+            self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
+            self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+            self._escape_shortcut.activated.connect(self._abort)
+            self._q_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
+            self._q_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+            self._q_shortcut.activated.connect(self._abort)
             self._tick()
 
         def _tick(self):
@@ -176,6 +184,9 @@ def show_break_screen(
             self.countdown_label.setText(f"{remaining:.0f} s")
 
         def keyPressEvent(self, event: QtGui.QKeyEvent):
+            if event.key() in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
+                self._abort()
+                return
             if wait_for_click and self.deadline <= time.monotonic():
                 if event.key() in (
                     QtCore.Qt.Key.Key_Return,
@@ -192,9 +203,16 @@ def show_break_screen(
                 return
             super().mousePressEvent(event)
 
+        def _abort(self):
+            self.aborted = True
+            app = QtWidgets.QApplication.instance()
+            if app is not None:
+                app.exit(130)
+
         def closeEvent(self, event: QtGui.QCloseEvent):
             self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
-            QtWidgets.QApplication.instance().quit()
+            if not self.aborted:
+                QtWidgets.QApplication.instance().quit()
             super().closeEvent(event)
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -206,7 +224,7 @@ def show_break_screen(
         window.showFullScreen()
     if raise_macos_window_above_system_ui is not None:
         raise_macos_window_above_system_ui(window)
-    app.exec()
+    return app.exec() == 130 or bool(getattr(window, "aborted", False))
 
 
 def build_block_command(
@@ -386,11 +404,12 @@ def main():
             },
         )
         if result.returncode != 0:
+            reason = "escape_in_block" if result.returncode == 130 else "block_failed"
             write_event(
                 session_log,
                 {
                     "type": "session_end",
-                    "reason": "block_failed",
+                    "reason": reason,
                     "failed_block_index": block_index,
                     "returncode": result.returncode,
                 },
@@ -405,13 +424,23 @@ def main():
                     f"pause avant le prochain bloc: {next_block.block_id} "
                     f"({args.break_seconds:g}s)"
                 )
-                show_break_screen(
+                break_aborted = show_break_screen(
                     current_block=block,
                     next_block=next_block,
                     seconds=max(0.0, float(args.break_seconds)),
                     windowed=args.windowed,
                     wait_for_click=args.pause_between_blocks,
                 )
+                if break_aborted:
+                    write_event(
+                        session_log,
+                        {
+                            "type": "session_end",
+                            "reason": "escape_on_break",
+                            "after_block_index": block_index,
+                        },
+                    )
+                    raise SystemExit(130)
 
     write_event(session_log, {"type": "session_end", "reason": "completed"})
     print(f"\nsession completed: {session_log}")

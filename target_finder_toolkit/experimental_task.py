@@ -811,6 +811,8 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._process_output_lines: list[str] = []
         self._waiting_for_ninja_calibration = False
         self._pending_external_click_payload: dict | None = None
+        self._exit_code = 0
+        self._aborting = False
         self.technique_name = self.trials[0].technique if self.trials else None
         self.ninja_control_file: Path | None = None
         if self.technique_command is not None and self._uses_ninja_cursors():
@@ -820,6 +822,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
         self.setWindowTitle("Tache experimentale")
         self.resize(1200, 820)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -845,6 +848,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.external_click_timer.setSingleShot(True)
         self.external_click_timer.setInterval(180)
         self.external_click_timer.timeout.connect(self._flush_pending_external_click)
+
+        self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
+        self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+        self._escape_shortcut.activated.connect(lambda: self._abort_experiment("escape"))
+        self._q_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
+        self._q_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+        self._q_shortcut.activated.connect(lambda: self._abort_experiment("keyboard_q"))
 
         self._write_event(
             {
@@ -875,7 +885,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.timer.stop()
         self.cursor_lock_timer.stop()
         self.external_click_timer.stop()
-        self._stop_technique_process()
+        self._stop_technique_process(wait=not self._aborting)
         self._cleanup_ninja_control_file()
         self._cleanup_annotation_control_file()
         self._end_session("window_close")
@@ -891,6 +901,22 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             return
         self._session_ended = True
         self._write_event({"type": "session_end", "reason": reason})
+
+    def _abort_experiment(self, reason: str):
+        if self._aborting:
+            return
+        self._aborting = True
+        self._exit_code = 130
+        self.timer.stop()
+        self.cursor_lock_timer.stop()
+        self.external_click_timer.stop()
+        self._stop_technique_process(wait=False)
+        self._cleanup_ninja_control_file()
+        self._cleanup_annotation_control_file()
+        self._end_session(reason)
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.exit(self._exit_code)
 
     def _start_technique_process(self):
         if self.technique_command is None or self.technique_process is not None:
@@ -1023,7 +1049,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             self._set_message_text(f"Ninja Cursors arrete ({exit_code})", style="center")
             QtCore.QTimer.singleShot(900, self._show_trial_intro)
 
-    def _stop_technique_process(self):
+    def _stop_technique_process(self, *, wait: bool = True):
         if self.technique_process is None:
             self.technique_watch_timer.stop()
             restore_default_cursors()
@@ -1038,7 +1064,8 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                     proc.send_signal(signal.CTRL_BREAK_EVENT)
                 else:
                     proc.send_signal(signal.SIGTERM)
-                proc.wait(timeout=3)
+                if wait:
+                    proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=3)
@@ -1378,7 +1405,8 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
     def keyPressEvent(self, event):
         if event.key() in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
-            self.close()
+            reason = "escape" if event.key() == QtCore.Qt.Key.Key_Escape else "keyboard_q"
+            self._abort_experiment(reason)
             return
         super().keyPressEvent(event)
 
@@ -1536,7 +1564,8 @@ def main():
         window.show_desktop_fullscreen()
     else:
         window.showFullScreen()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    sys.exit(window._exit_code or exit_code)
 
 
 if __name__ == "__main__":
