@@ -48,9 +48,9 @@ class DynaSpot(QtWidgets.QWidget):
 
     POINT_WIDTH = 1.0
     MIN_SPEED = 100.0
-    SPOT_WIDTH = 32.0
-    LAG = 0.12
-    REDUCE_TIME = 0.18
+    SPOT_WIDTH = 128.0
+    LAG = 0.300
+    REDUCE_TIME = 0.500
     GROWTH_FACTOR = 1.2
     CO_EXPONENTIAL_POWER = 3.0
     CLICK_EPSILON = 3.0

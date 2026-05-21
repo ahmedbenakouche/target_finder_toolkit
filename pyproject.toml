@@ -44,6 +44,7 @@ dynaspot         = "target_finder_toolkit.dynaspot:main"
 rakecursor       = "target_finder_toolkit.rakecursor:main"
 ninjacursors     = "target_finder_toolkit.ninjacursors:main"
 experimental-task = "target_finder_toolkit.experimental_task:main"
+experimental-session = "target_finder_toolkit.experimental_session:main"
 
 [project.urls]
 Repository = "https://anonymous.4open.science/r/target_finder_toolkit-9A81/README.md"

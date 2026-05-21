@@ -66,9 +66,9 @@ DEFAULT_CAPTURE_INTERVAL = 1 / 30
 DEFAULT_CONFIDENCE = 0.28
 DEFAULT_IOU = 0.3
 DEFAULT_DYNASPOT_MIN_SPEED = 100.0
-DEFAULT_DYNASPOT_SPOT_WIDTH = 32.0
-DEFAULT_DYNASPOT_LAG = 0.12
-DEFAULT_DYNASPOT_REDUCE_TIME = 0.18
+DEFAULT_DYNASPOT_SPOT_WIDTH = 128.0
+DEFAULT_DYNASPOT_LAG = 0.300
+DEFAULT_DYNASPOT_REDUCE_TIME = 0.500
 DEFAULT_NINJA_CAMERA_INDEX = 0
 DEFAULT_NINJA_SPACING = 320.0
 DEFAULT_NINJA_GAZE_SMOOTHING = 0.35
@@ -782,6 +782,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         annotation_control_file: Path | None = None,
         technique_start_delay_sec: float = 3.0,
         fullscreen: bool = True,
+        session_metadata: dict | None = None,
     ):
         super().__init__()
         self.trials = trials
@@ -796,6 +797,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.annotation_control_file = Path(annotation_control_file) if annotation_control_file else None
         self.technique_start_delay_sec = max(0.0, float(technique_start_delay_sec))
         self.fullscreen = bool(fullscreen)
+        self.session_metadata = dict(session_metadata or {})
         self.technique_process: subprocess.Popen | None = None
         self.current_index = -1
         self.current_trial: TrialSpec | None = None
@@ -864,6 +866,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 "annotation_control_file": (
                     str(self.annotation_control_file) if self.annotation_control_file else None
                 ),
+                **self.session_metadata,
             }
         )
         QtCore.QTimer.singleShot(200, self.next_trial)
@@ -1221,7 +1224,14 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             f"ID={self.current_trial.fitts_id:.2f} | "
             f"Cible: {self.current_trial.target_class_name}"
         )
-        self._write_event({"type": "trial_start", **asdict(self.current_trial)})
+        self._write_event(
+            {
+                "type": "trial_start",
+                **self.session_metadata,
+                "global_trial_id": self._global_trial_id(),
+                **asdict(self.current_trial),
+            }
+        )
         if self.current_index == 0 and self.technique_command is not None and self.technique_process is None:
             self._set_message_text("Preparation de la technique...", style="center")
             self._start_technique_process()
@@ -1323,6 +1333,8 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             {
                 "type": "trial_click",
                 "trial_id": self.current_trial.trial_id,
+                "global_trial_id": self._global_trial_id(),
+                **self.session_metadata,
                 "technique": self.current_trial.technique,
                 "click_index": self.click_count,
                 "click_position": [round(x, 3), round(y, 3)],
@@ -1350,6 +1362,8 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 {
                     "type": "trial_end",
                     "trial_id": self.current_trial.trial_id,
+                    "global_trial_id": self._global_trial_id(),
+                    **self.session_metadata,
                     "technique": self.current_trial.technique,
                     "success": success,
                     "movement_time_ms": round(elapsed_ms, 3),
@@ -1367,6 +1381,15 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             self.close()
             return
         super().keyPressEvent(event)
+
+    def _global_trial_id(self) -> int | None:
+        offset = self.session_metadata.get("trial_offset")
+        if offset is None or self.current_trial is None:
+            return None
+        try:
+            return int(offset) + int(self.current_trial.trial_id)
+        except (TypeError, ValueError):
+            return None
 
 
 def print_dataset_summary(dataset: list[DatasetImage]):
@@ -1389,6 +1412,13 @@ def main():
     parser.add_argument("--countdown", type=int, default=3, help="Countdown seconds before each trial starts")
     parser.add_argument("--max-clicks", type=int, default=1, help="Maximum clicks allowed per trial")
     parser.add_argument("--log-file", default=None, help="JSONL log path")
+    parser.add_argument("--participant-id", default=None, help="Participant identifier stored in trial logs")
+    parser.add_argument("--session-id", default=None, help="Experimental session identifier stored in trial logs")
+    parser.add_argument("--block-index", type=int, default=None, help="1-based block position in the session order")
+    parser.add_argument("--block-count", type=int, default=None, help="Total number of blocks in the session")
+    parser.add_argument("--block-id", default=None, help="Stable block identifier stored in trial logs")
+    parser.add_argument("--block-order", default=None, help="Comma-separated ordered block ids stored in logs")
+    parser.add_argument("--trial-offset", type=int, default=0, help="Number of trials before this block in the session")
     parser.add_argument("--show-all-targets", action="store_true", help="Draw all annotated targets in green for debugging")
     parser.add_argument("--windowed", action="store_true", help="Run in a normal window instead of fullscreen")
     parser.add_argument("--summary-only", action="store_true", help="Only print dataset and trial summary; do not open GUI")
@@ -1490,6 +1520,15 @@ def main():
         annotation_control_file=annotation_control_file,
         technique_start_delay_sec=args.technique_start_delay,
         fullscreen=not args.windowed,
+        session_metadata={
+            "participant_id": args.participant_id,
+            "session_id": args.session_id,
+            "block_index": args.block_index,
+            "block_count": args.block_count,
+            "block_id": args.block_id,
+            "block_order": args.block_order,
+            "trial_offset": args.trial_offset,
+        },
     )
     if args.windowed:
         window.show()
