@@ -314,11 +314,14 @@ class SemanticPointing(QtWidgets.QWidget):
         self.control_panel.hide()
         if self._is_macos:
             self._set_overlay_clickthrough(True)
-        
-  
+
+    def _detector_active(self) -> bool:
+        is_active = getattr(self.detector, "is_active", None)
+        return not callable(is_active) or bool(is_active())
+
     # === Paint ===
     def paintEvent(self, event):
-        if not self.enabled:
+        if not self.enabled or not self._detector_active():
             return
         detections = self.detector.get_detections()
 
@@ -529,7 +532,7 @@ class SemanticPointing(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def _rehide_cursor(self):
-        if not self.enabled:
+        if not self.enabled or not self._detector_active():
             return
         hide_cursor_everywhere()
         if self._is_macos:
@@ -706,7 +709,7 @@ class SemanticPointing(QtWidgets.QWidget):
     # === Global mouse listener + click simulation ===
     def _start_mouse_listener(self):
         def on_move(x, y):
-            if not self._is_macos or not self.enabled:
+            if not self._detector_active() or not self._is_macos or not self.enabled:
                 return
             now = time.monotonic()
             if now - self._last_rehide_at < 0.016:
@@ -715,6 +718,8 @@ class SemanticPointing(QtWidgets.QWidget):
             QtCore.QMetaObject.invokeMethod(self, "_rehide_cursor", QtCore.Qt.ConnectionType.QueuedConnection)
 
         def on_click(x, y, button, pressed):
+            if not self._detector_active():
+                return
             if button == button.left and self._is_macos and pressed:
                 self._snapshot_click_target(x, y)
                 raw, effective, click_target = self._consume_click_snapshot()
@@ -737,6 +742,8 @@ class SemanticPointing(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def _simulate_click(self):
+        if not self._detector_active():
+            return
         if self._is_macos:
             return
         if self.enabled:
@@ -805,12 +812,14 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
         None: Blocks until the Qt application is closed.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    hide_cursor_everywhere()
     if disable_accel:
         disable_mouse_acceleration()
     ov = SemanticPointing(detector, display, disable_accel, cursor_filter=cursor_filter, logger=logger)
     ov.show()
     raise_macos_window_above_system_ui(ov, level_offset=1)
+    is_active = getattr(detector, "is_active", None)
+    if not callable(is_active) or bool(is_active()):
+        hide_cursor_everywhere()
 
     def _handle_signal(sig, frame):
         global _SESSION_STOP_REASON

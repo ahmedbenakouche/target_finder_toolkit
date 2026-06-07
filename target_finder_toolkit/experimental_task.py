@@ -443,6 +443,10 @@ class TrialCanvas(QtWidgets.QWidget):
         self._cursor_image_point: tuple[float, float] | None = None
         self._bubble_target: TargetAnnotation | None = None
         self._bubble_radius = 0.0
+        self._attention_started_at: float | None = None
+        self._attention_duration = 1.0
+        self._attention_timer = QtCore.QTimer(self)
+        self._attention_timer.timeout.connect(self._tick_attention_cue)
         self.setMouseTracking(True)
         self.setMinimumSize(640, 420)
 
@@ -463,6 +467,7 @@ class TrialCanvas(QtWidgets.QWidget):
         self._cursor_image_point = None
         self._bubble_target = None
         self._bubble_radius = 0.0
+        self.clear_attention_cue()
         self.update()
 
     def set_status_text(self, text: str):
@@ -472,6 +477,26 @@ class TrialCanvas(QtWidgets.QWidget):
     def set_message_text(self, text: str, *, style: str = "bottom"):
         self._message_text = text
         self._message_style = style
+        self.update()
+
+    def start_attention_cue(self, *, duration: float = 1.0):
+        self._attention_duration = max(0.1, float(duration))
+        self._attention_started_at = time.monotonic()
+        self._attention_timer.start(16)
+        self.update()
+
+    def clear_attention_cue(self):
+        self._attention_started_at = None
+        if self._attention_timer.isActive():
+            self._attention_timer.stop()
+        self.update()
+
+    def _tick_attention_cue(self):
+        if self._attention_started_at is None:
+            self._attention_timer.stop()
+            return
+        if time.monotonic() - self._attention_started_at >= self._attention_duration:
+            self._attention_timer.stop()
         self.update()
 
     def image_to_widget_rect(self, bbox: tuple[float, float, float, float]) -> QtCore.QRectF:
@@ -630,11 +655,35 @@ class TrialCanvas(QtWidgets.QWidget):
             painter.setPen(QtGui.QPen(self.TARGET_RED, 4))
             painter.setBrush(QtGui.QColor(185, 32, 32, 38))
             painter.drawRoundedRect(rect, 8, 8)
+            self._draw_attention_cue(painter, rect)
 
         self._draw_bubble_overlay(painter)
 
         self._draw_bar_text(painter, top_bar, image_area)
         painter.end()
+
+    def _draw_attention_cue(self, painter: QtGui.QPainter, target_rect: QtCore.QRectF):
+        if self._attention_started_at is None or target_rect.isNull():
+            return
+        elapsed = time.monotonic() - self._attention_started_at
+        progress = max(0.0, min(elapsed / self._attention_duration, 1.0))
+        if progress >= 1.0:
+            return
+
+        eased = 1.0 - pow(1.0 - progress, 3)
+        target_radius = math.hypot(target_rect.width(), target_rect.height()) / 2.0
+        end_radius = max(28.0, target_radius + 14.0)
+        start_radius = max(end_radius + 90.0, min(260.0, end_radius * 4.5))
+        radius = start_radius + (end_radius - start_radius) * eased
+        alpha = int(210 * (1.0 - 0.35 * progress))
+
+        painter.save()
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.setPen(QtGui.QPen(QtGui.QColor(180, 54, 44, alpha), 7))
+        painter.drawEllipse(target_rect.center(), radius, radius)
+        painter.setPen(QtGui.QPen(QtGui.QColor(255, 210, 120, max(80, alpha // 2)), 2))
+        painter.drawEllipse(target_rect.center(), max(end_radius, radius * 0.74), max(end_radius, radius * 0.74))
+        painter.restore()
 
     def _draw_bubble_overlay(self, painter: QtGui.QPainter):
         if self._technique != "bubble" or self._cursor_image_point is None:
@@ -780,8 +829,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         technique_command: list[str] | None = None,
         technique_log_file: Path | None = None,
         annotation_control_file: Path | None = None,
+        ninja_control_file: Path | None = None,
+        external_technique_active: bool = False,
+        cleanup_control_files: bool = True,
         technique_start_delay_sec: float = 3.0,
+        cursor_log_hz: float = 30.0,
         fullscreen: bool = True,
+        emit_session_events: bool = True,
         session_metadata: dict | None = None,
     ):
         super().__init__()
@@ -795,12 +849,17 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.technique_command = list(technique_command) if technique_command else None
         self.technique_log_file = Path(technique_log_file) if technique_log_file else None
         self.annotation_control_file = Path(annotation_control_file) if annotation_control_file else None
+        self.external_technique_active = bool(external_technique_active)
+        self.cleanup_control_files = bool(cleanup_control_files)
         self.technique_start_delay_sec = max(0.0, float(technique_start_delay_sec))
+        self.cursor_log_interval_ms = max(1, int(round(1000.0 / max(float(cursor_log_hz), 1.0))))
         self.fullscreen = bool(fullscreen)
+        self.emit_session_events = bool(emit_session_events)
         self.session_metadata = dict(session_metadata or {})
         self.technique_process: subprocess.Popen | None = None
         self.current_index = -1
         self.current_trial: TrialSpec | None = None
+        self._start_monotonic = time.monotonic()
         self.trial_started_at = 0.0
         self.click_count = 0
         self.miss_count = 0
@@ -814,10 +873,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._exit_code = 0
         self._aborting = False
         self.technique_name = self.trials[0].technique if self.trials else None
-        self.ninja_control_file: Path | None = None
+        self.ninja_control_file: Path | None = Path(ninja_control_file) if ninja_control_file else None
         if self.technique_command is not None and self._uses_ninja_cursors():
-            self.ninja_control_file = self.log_file.with_suffix(".ninja_control")
+            if self.ninja_control_file is None:
+                self.ninja_control_file = self.log_file.with_suffix(".ninja_control")
             self.technique_command += ["--experiment-control-file", str(self.ninja_control_file)]
+            self._set_ninja_control_state("paused")
+        elif self.ninja_control_file is not None:
             self._set_ninja_control_state("paused")
 
         self.setWindowTitle("Tache experimentale")
@@ -849,6 +911,10 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.external_click_timer.setInterval(180)
         self.external_click_timer.timeout.connect(self._flush_pending_external_click)
 
+        self.cursor_sample_timer = QtCore.QTimer(self)
+        self.cursor_sample_timer.setInterval(self.cursor_log_interval_ms)
+        self.cursor_sample_timer.timeout.connect(self._write_cursor_sample)
+
         self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
         self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
         self._escape_shortcut.activated.connect(lambda: self._abort_experiment("escape"))
@@ -856,34 +922,41 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._q_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
         self._q_shortcut.activated.connect(lambda: self._abort_experiment("keyboard_q"))
 
-        self._write_event(
-            {
-                "type": "session_start",
-                "log_kind": "experimental_task_trials",
-                "task": "controlled_target_selection",
-                "trial_count": len(self.trials),
-                "countdown_sec": self.countdown_sec,
-                "max_clicks": self.max_clicks,
-                "technique": self.technique_name,
-                "interaction_backend": (
-                    "in_process_bubble"
-                    if self.technique_name in IN_PROCESS_TASK_TECHNIQUES
-                    else ("external_process" if self.technique_command is not None else "direct_click")
-                ),
-                "technique_process_enabled": self.technique_command is not None,
-                "technique_command": self.technique_command,
-                "technique_log_file": str(self.technique_log_file) if self.technique_log_file else None,
-                "annotation_control_file": (
-                    str(self.annotation_control_file) if self.annotation_control_file else None
-                ),
-                **self.session_metadata,
-            }
-        )
+        if self.emit_session_events:
+            self._write_event(
+                {
+                    "type": "session_start",
+                    "log_kind": "experimental_task_trials",
+                    "task": "controlled_target_selection",
+                    "trial_count": len(self.trials),
+                    "countdown_sec": self.countdown_sec,
+                    "max_clicks": self.max_clicks,
+                    "technique": self.technique_name,
+                    "interaction_backend": (
+                        "in_process_bubble"
+                        if self.technique_name in IN_PROCESS_TASK_TECHNIQUES
+                        else (
+                            "external_process"
+                            if self.technique_command is not None or self.external_technique_active
+                            else "direct_click"
+                        )
+                    ),
+                    "technique_process_enabled": self.technique_command is not None,
+                    "external_technique_active": self.external_technique_active,
+                    "technique_command": self.technique_command,
+                    "technique_log_file": str(self.technique_log_file) if self.technique_log_file else None,
+                    "annotation_control_file": (
+                        str(self.annotation_control_file) if self.annotation_control_file else None
+                    ),
+                    **self.session_metadata,
+                }
+            )
         QtCore.QTimer.singleShot(200, self.next_trial)
 
     def closeEvent(self, event):
         self.timer.stop()
         self.cursor_lock_timer.stop()
+        self.cursor_sample_timer.stop()
         self.external_click_timer.stop()
         self._stop_technique_process(wait=not self._aborting)
         self._cleanup_ninja_control_file()
@@ -892,7 +965,11 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         super().closeEvent(event)
 
     def _write_event(self, payload: dict):
-        payload = {"timestamp": time.time(), **payload}
+        payload = {
+            "timestamp": time.time(),
+            "t": round(time.monotonic() - self._start_monotonic, 6),
+            **payload,
+        }
         with self.log_file.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
@@ -900,7 +977,8 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         if self._session_ended:
             return
         self._session_ended = True
-        self._write_event({"type": "session_end", "reason": reason})
+        if self.emit_session_events:
+            self._write_event({"type": "session_end", "reason": reason})
 
     def _abort_experiment(self, reason: str):
         if self._aborting:
@@ -909,6 +987,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._exit_code = 130
         self.timer.stop()
         self.cursor_lock_timer.stop()
+        self.cursor_sample_timer.stop()
         self.external_click_timer.stop()
         self._stop_technique_process(wait=False)
         self._cleanup_ninja_control_file()
@@ -1100,8 +1179,11 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         except OSError as exc:
             self._write_event({"type": "ninja_control_error", "error": str(exc)})
 
+    def _ninja_pretrial_state(self) -> str:
+        return "ready" if self._uses_ninja_cursors() else "paused"
+
     def _cleanup_ninja_control_file(self):
-        if self.ninja_control_file is None:
+        if self.ninja_control_file is None or not self.cleanup_control_files:
             return
         try:
             self.ninja_control_file.unlink(missing_ok=True)
@@ -1109,7 +1191,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             pass
 
     def _cleanup_annotation_control_file(self):
-        if self.annotation_control_file is None:
+        if self.annotation_control_file is None or not self.cleanup_control_files:
             return
         try:
             self.annotation_control_file.unlink(missing_ok=True)
@@ -1197,7 +1279,8 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
     def show_desktop_fullscreen(self):
         """Cover the screen without entering the macOS fullscreen Space."""
         self.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint
+            QtCore.Qt.WindowType.Window
+            | QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
         )
         screen = QtWidgets.QApplication.primaryScreen()
@@ -1227,7 +1310,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             return
 
         self.current_trial = self.trials[self.current_index]
-        self._set_ninja_control_state("paused")
+        self._set_ninja_control_state(self._ninja_pretrial_state())
         item = self.dataset_by_image[self.current_trial.image_path]
         self.click_count = 0
         self.miss_count = 0
@@ -1275,6 +1358,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         if self.current_trial is None:
             return
         self._accept_clicks = False
+        self._set_ninja_control_state(self._ninja_pretrial_state())
         self._start_cursor_lock_if_needed()
         if self.current_index == 0:
             self._set_message_text(
@@ -1289,12 +1373,14 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
     def _start_countdown(self):
         self._accept_clicks = False
+        self._set_ninja_control_state(self._ninja_pretrial_state())
         self._start_cursor_lock_if_needed()
         self._write_annotation_control_state("paused")
         self._countdown_remaining = self.countdown_sec
         if self._countdown_remaining <= 0:
             self._begin_click_phase()
             return
+        self.canvas.start_attention_cue(duration=1.0)
         self._set_message_text(str(self._countdown_remaining), style="center")
         self.timer.start()
 
@@ -1312,9 +1398,36 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._set_cursor_to_start_if_needed()
         self._set_ninja_control_state("active")
         self._write_annotation_control_state("active")
+        self.canvas.clear_attention_cue()
         self._set_message_text("")
         self._accept_clicks = True
         self.trial_started_at = time.monotonic()
+        self._write_cursor_sample()
+        self.cursor_sample_timer.start()
+
+    def _write_cursor_sample(self):
+        if not self._accept_clicks or self.current_trial is None:
+            return
+        global_pos = QtGui.QCursor.pos()
+        widget_pos = self.canvas.mapFromGlobal(global_pos)
+        image_point = self.canvas.widget_to_image_point(QtCore.QPointF(widget_pos))
+        payload = {
+            "type": "cursor_sample",
+            "trial_id": self.current_trial.trial_id,
+            "global_trial_id": self._global_trial_id(),
+            **self.session_metadata,
+            "technique": self.current_trial.technique,
+            "difficulty": self.current_trial.difficulty,
+            "screen_position": [round(float(global_pos.x()), 3), round(float(global_pos.y()), 3)],
+            "widget_position": [round(float(widget_pos.x()), 3), round(float(widget_pos.y()), 3)],
+            "inside_image": image_point is not None,
+            "target_bbox": list(self.current_trial.target_bbox),
+        }
+        if image_point is not None:
+            payload["image_position"] = [round(float(image_point[0]), 3), round(float(image_point[1]), 3)]
+        else:
+            payload["image_position"] = None
+        self._write_event(payload)
 
     def _target_contains(self, x: float, y: float) -> bool:
         if self.current_trial is None:
@@ -1331,7 +1444,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
     def _should_delay_external_click(self, click_payload: dict) -> bool:
         return (
-            self.technique_process is not None
+            (self.technique_process is not None or self.external_technique_active)
             and click_payload.get("interaction_backend") == "direct_click"
             and self.current_trial is not None
             and self._accept_clicks
@@ -1358,13 +1471,15 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
         self._write_event(
             {
-                "type": "trial_click",
+                "type": "click",
                 "trial_id": self.current_trial.trial_id,
                 "global_trial_id": self._global_trial_id(),
                 **self.session_metadata,
                 "technique": self.current_trial.technique,
                 "click_index": self.click_count,
                 "click_position": [round(x, 3), round(y, 3)],
+                "raw": [round(raw_x, 3), round(raw_y, 3)],
+                "effective": [round(x, 3), round(y, 3)],
                 "raw_click_position": [round(raw_x, 3), round(raw_y, 3)],
                 "effective_click_position": [round(x, 3), round(y, 3)],
                 "redirected": bool(click_payload.get("redirected", False)),
@@ -1385,6 +1500,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
         if success or self.click_count >= self.max_clicks:
             self._accept_clicks = False
+            self.cursor_sample_timer.stop()
             self._write_event(
                 {
                     "type": "trial_end",
@@ -1455,6 +1571,11 @@ def main():
     parser.add_argument("--technique-log-file", default=None, help="Optional JSONL log path for the launched technique process")
     parser.add_argument("--no-technique-log", action="store_true", help="Do not write a separate technique runtime log")
     parser.add_argument("--technique-log-cursor-hz", type=float, default=30.0, help="Cursor sampling rate for the technique runtime log")
+    parser.add_argument("--cursor-log-hz", type=float, default=30.0, help="Experiment-level cursor sampling rate")
+    parser.add_argument("--no-task-session-events", action="store_true", help="Do not write task-level session_start/session_end events")
+    parser.add_argument("--annotation-control-file", default=None, help="Existing annotation control file updated by this task")
+    parser.add_argument("--ninja-control-file", default=None, help="Existing Ninja experiment control file updated by this task")
+    parser.add_argument("--keep-control-files", action="store_true", help="Do not delete external control files on task exit")
     parser.add_argument("--model-path", default=None, help="Optional YOLO model path for launched TargetFinder-based techniques")
     parser.add_argument("--change-thresh", type=int, default=DEFAULT_CHANGE_THRESH, help="Screen-change threshold for launched techniques")
     parser.add_argument("--capture-interval", type=float, default=DEFAULT_CAPTURE_INTERVAL, help="Screen capture interval for launched techniques")
@@ -1529,7 +1650,9 @@ def main():
             else default_technique_log_path(args.technique)
         )
     annotation_control_file = (
-        log_file.with_suffix(".annotations.json") if launch_technique else None
+        Path(args.annotation_control_file).expanduser()
+        if args.annotation_control_file
+        else (log_file.with_suffix(".annotations.json") if launch_technique else None)
     )
     technique_command = (
         build_technique_command(args, technique_log_file, annotation_control_file)
@@ -1546,8 +1669,13 @@ def main():
         technique_command=technique_command,
         technique_log_file=technique_log_file,
         annotation_control_file=annotation_control_file,
+        ninja_control_file=Path(args.ninja_control_file).expanduser() if args.ninja_control_file else None,
+        external_technique_active=bool(args.no_launch_technique and annotation_control_file is not None and args.technique != "mouse"),
+        cleanup_control_files=not args.keep_control_files,
         technique_start_delay_sec=args.technique_start_delay,
+        cursor_log_hz=args.cursor_log_hz,
         fullscreen=not args.windowed,
+        emit_session_events=not args.no_task_session_events,
         session_metadata={
             "participant_id": args.participant_id,
             "session_id": args.session_id,

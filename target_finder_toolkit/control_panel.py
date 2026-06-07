@@ -101,7 +101,6 @@ DEFAULT_EXPERIMENT_FULLSCREEN = True
 DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS = False
 DEFAULT_EXPERIMENT_SESSION_ENABLED = False
 DEFAULT_EXPERIMENT_PARTICIPANT_ID = "P01"
-DEFAULT_EXPERIMENT_BREAK_SECONDS = 10.0
 DEFAULT_USAGE_MODE = "test"
 
 UI_TEXTS = {
@@ -228,8 +227,6 @@ UI_TEXTS = {
         "experiment_trials_desc": "Single-task mode: total number of trials. Full-session mode: number of trials in each technique × difficulty block.",
         "experiment_difficulty": "Difficulty (choices: easy/medium/hard/mixed, default: mixed)",
         "experiment_difficulty_desc": "Difficulty bin sampled by Fitts ID: easy [0,3), medium [3,5), hard [5,8.5). Mixed samples from all bins.",
-        "experiment_break_seconds": "Break between blocks (seconds, range: 0-600, default: 10)",
-        "experiment_break_seconds_desc": "Pause inserted by the automated full-session runner between two experimental blocks.",
         "experiment_countdown": "Countdown (seconds, range: 0-30, default: 3)",
         "experiment_countdown_desc": "Seconds before each trial starts while the cursor is held at the image center.",
         "experiment_max_clicks": "Max clicks per trial (range: 1-20, default: 1)",
@@ -415,8 +412,6 @@ UI_TEXTS = {
         "experiment_trials_desc": "Mode tâche simple : nombre total d’essais. Mode session complète : nombre d’essais dans chaque bloc technique × difficulté.",
         "experiment_difficulty": "Difficulté (choix : easy/medium/hard/mixed, défaut : mixed)",
         "experiment_difficulty_desc": "Niveau échantillonné selon l’ID de Fitts : easy [0,3), medium [3,5), hard [5,8.5). Mixed échantillonne tous les niveaux.",
-        "experiment_break_seconds": "Pause entre blocs (secondes, plage : 0-600, défaut : 10)",
-        "experiment_break_seconds_desc": "Pause insérée par le lanceur automatique de session complète entre deux blocs expérimentaux.",
         "experiment_countdown": "Compte à rebours (secondes, plage : 0-30, défaut : 3)",
         "experiment_countdown_desc": "Secondes avant le début de chaque essai pendant que le curseur reste au centre de l’image.",
         "experiment_max_clicks": "Clics max par essai (plage : 1-20, défaut : 1)",
@@ -534,7 +529,6 @@ class PanelConfig:
     experiment_show_all_targets: bool = DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS
     experiment_session_enabled: bool = DEFAULT_EXPERIMENT_SESSION_ENABLED
     experiment_participant_id: str = DEFAULT_EXPERIMENT_PARTICIPANT_ID
-    experiment_break_seconds: float = DEFAULT_EXPERIMENT_BREAK_SECONDS
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
@@ -1347,13 +1341,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_participant_id_edit.setText(DEFAULT_EXPERIMENT_PARTICIPANT_ID)
         self.experiment_participant_id_edit.setMinimumWidth(160)
 
-        self.experiment_break_seconds_spin = QtWidgets.QDoubleSpinBox()
-        self.experiment_break_seconds_spin.setKeyboardTracking(False)
-        self.experiment_break_seconds_spin.setRange(0.0, 600.0)
-        self.experiment_break_seconds_spin.setDecimals(1)
-        self.experiment_break_seconds_spin.setSingleStep(1.0)
-        self.experiment_break_seconds_spin.setValue(DEFAULT_EXPERIMENT_BREAK_SECONDS)
-
         self._semantic_rows = [
             self._create_separator(),
             self._create_switch_row("display", self.display_cb, "display_desc"),
@@ -1431,7 +1418,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_difficulty_row = self._create_field_row("experiment_difficulty", self.experiment_difficulty_combo, "experiment_difficulty_desc")
         self.experiment_countdown_row = self._create_field_row("experiment_countdown", self.experiment_countdown_spin, "experiment_countdown_desc")
         self.experiment_max_clicks_row = self._create_field_row("experiment_max_clicks", self.experiment_max_clicks_spin, "experiment_max_clicks_desc")
-        self.experiment_break_seconds_row = self._create_field_row("experiment_break_seconds", self.experiment_break_seconds_spin, "experiment_break_seconds_desc")
         self.experiment_fullscreen_row = self._create_switch_row("experiment_fullscreen", self.experiment_fullscreen_cb, "experiment_fullscreen_desc")
         self.experiment_show_all_targets_row = self._create_switch_row("experiment_show_all_targets", self.experiment_show_all_targets_cb, "experiment_show_all_targets_desc")
         self.experiment_note_row = self._create_note("experiment_note")
@@ -1450,8 +1436,6 @@ class ControlPanel(QtWidgets.QWidget):
             self.experiment_countdown_row,
             self._create_separator(),
             self.experiment_max_clicks_row,
-            self._create_separator(),
-            self.experiment_break_seconds_row,
             self._create_separator(),
             self.experiment_fullscreen_row,
             self._create_separator(),
@@ -1600,7 +1584,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_difficulty_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
         self.experiment_countdown_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.experiment_max_clicks_spin.valueChanged.connect(self._handle_runtime_option_change)
-        self.experiment_break_seconds_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.experiment_fullscreen_cb.toggled.connect(self._handle_runtime_option_change)
         self.experiment_show_all_targets_cb.toggled.connect(self._handle_runtime_option_change)
 
@@ -1632,7 +1615,6 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.experiment_trials_spin, "experiment_trials")
         self._register_numeric_field(self.experiment_countdown_spin, "experiment_countdown")
         self._register_numeric_field(self.experiment_max_clicks_spin, "experiment_max_clicks")
-        self._register_numeric_field(self.experiment_break_seconds_spin, "experiment_break_seconds")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
             "model_path",
@@ -1767,7 +1749,6 @@ class ControlPanel(QtWidgets.QWidget):
             row.setVisible(experiment_enabled)
         for row in (
             getattr(self, "experiment_participant_id_row", None),
-            getattr(self, "experiment_break_seconds_row", None),
         ):
             if row is not None:
                 row.setVisible(experiment_session_enabled)
@@ -1783,13 +1764,11 @@ class ControlPanel(QtWidgets.QWidget):
             self.experiment_difficulty_combo,
             self.experiment_countdown_spin,
             self.experiment_max_clicks_spin,
-            self.experiment_break_seconds_spin,
             self.experiment_fullscreen_cb,
             self.experiment_show_all_targets_cb,
         ):
             widget.setEnabled(experiment_enabled)
         self.experiment_participant_id_edit.setEnabled(experiment_session_enabled)
-        self.experiment_break_seconds_spin.setEnabled(experiment_session_enabled)
         self.experiment_difficulty_combo.setEnabled(experiment_enabled and not experiment_session_enabled)
         for row in getattr(self, "_filter_param_rows", []):
             row.setVisible(filter_params_visible)
@@ -2489,7 +2468,6 @@ class ControlPanel(QtWidgets.QWidget):
             self.experiment_trials_spin,
             self.experiment_countdown_spin,
             self.experiment_max_clicks_spin,
-            self.experiment_break_seconds_spin,
         ):
             widget.interpretText()
 
@@ -2547,7 +2525,6 @@ class ControlPanel(QtWidgets.QWidget):
             experiment_show_all_targets=self.experiment_show_all_targets_cb.isChecked(),
             experiment_session_enabled=usage_experiment or self.experiment_session_enabled_cb.isChecked(),
             experiment_participant_id=self.experiment_participant_id_edit.text().strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
-            experiment_break_seconds=self.experiment_break_seconds_spin.value(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
             enable_dynaspot=mode == "dynaspot",
@@ -2609,7 +2586,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_show_all_targets_cb.setChecked(cfg.experiment_show_all_targets)
         self.experiment_session_enabled_cb.setChecked(cfg.experiment_session_enabled)
         self.experiment_participant_id_edit.setText(cfg.experiment_participant_id or DEFAULT_EXPERIMENT_PARTICIPANT_ID)
-        self.experiment_break_seconds_spin.setValue(cfg.experiment_break_seconds)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
@@ -2698,7 +2674,6 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.experiment_show_all_targets = DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS
         cfg.experiment_session_enabled = DEFAULT_EXPERIMENT_SESSION_ENABLED
         cfg.experiment_participant_id = DEFAULT_EXPERIMENT_PARTICIPANT_ID
-        cfg.experiment_break_seconds = DEFAULT_EXPERIMENT_BREAK_SECONDS
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
         cfg.language = "French"
@@ -2885,8 +2860,6 @@ class ControlPanel(QtWidgets.QWidget):
             str(cfg.experiment_countdown),
             "--max-clicks",
             str(cfg.experiment_max_clicks),
-            "--break-seconds",
-            str(cfg.experiment_break_seconds),
             "--change-thresh",
             str(cfg.change_thresh),
             "--capture-interval",

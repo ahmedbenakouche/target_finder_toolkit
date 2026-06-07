@@ -48,7 +48,6 @@
   "experiment_show_all_targets": false,
   "experiment_session_enabled": true,
   "experiment_participant_id": "P01",
-  "experiment_break_seconds": 10.0,
   "enable_bubble_cursor": false,
   "enable_semantic_pointing": false,
   "enable_dynaspot": false,

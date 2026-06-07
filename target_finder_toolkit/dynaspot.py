@@ -125,6 +125,10 @@ class DynaSpot(QtWidgets.QWidget):
         self._timer.timeout.connect(self.update)
         self._timer.start(10)
 
+    def _detector_active(self) -> bool:
+        is_active = getattr(self.detector, "is_active", None)
+        return not callable(is_active) or bool(is_active())
+
     def _screen_for_point(self, x: int, y: int):
         app = QtWidgets.QApplication.instance()
         if app is None:
@@ -374,6 +378,8 @@ class DynaSpot(QtWidgets.QWidget):
 
     def _start_mouse_listener(self):
         def on_move(x, y):
+            if not self._detector_active():
+                return
             QtCore.QMetaObject.invokeMethod(
                 self,
                 "_handle_pointer_move_event",
@@ -383,6 +389,8 @@ class DynaSpot(QtWidgets.QWidget):
             )
 
         def on_click(x, y, button, pressed):
+            if not self._detector_active():
+                return
             if sys.platform == "darwin":
                 return
             if pressed and button == button.left:
@@ -404,6 +412,8 @@ class DynaSpot(QtWidgets.QWidget):
         self._mouse_listener.start()
 
     def _intercept_mouse_event(self, event_type, event):
+        if not self._detector_active():
+            return event
         try:
             import Quartz
         except Exception:
@@ -504,6 +514,8 @@ class DynaSpot(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
+        if not self._detector_active():
+            return
         click_target, click_target_info = self._take_click_target_snapshot()
         if click_target is None:
             click_target = self._last_target

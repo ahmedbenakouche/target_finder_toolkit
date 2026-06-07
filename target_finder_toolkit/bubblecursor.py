@@ -118,6 +118,10 @@ class BubbleCursor(QtWidgets.QWidget):
             self._cursor_refresh_timer.timeout.connect(self._rehide_cursor)
             self._cursor_refresh_timer.start(30)
 
+    def _detector_active(self) -> bool:
+        is_active = getattr(self.detector, "is_active", None)
+        return not callable(is_active) or bool(is_active())
+
     def _resolve_target_info(self, tx, ty, w, h, cls_id, score):
         target_info = self.detector.find_detection_by_geometry(
             tx, ty, w, h, class_id=cls_id
@@ -429,7 +433,7 @@ class BubbleCursor(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def _rehide_cursor(self):
-        if not self.bubble_enabled:
+        if not self.bubble_enabled or not self._detector_active():
             return
         hide_cursor_everywhere()
         if sys.platform == "darwin":
@@ -451,9 +455,13 @@ class BubbleCursor(QtWidgets.QWidget):
             )
 
         def on_move(x, y):
+            if not self._detector_active():
+                return
             queue_rehide()
 
         def on_click(x, y, button, pressed):
+            if not self._detector_active():
+                return
             if sys.platform == "darwin":
                 return
             if button == button.left:
@@ -470,6 +478,8 @@ class BubbleCursor(QtWidgets.QWidget):
         self._mouse_listener.start()
 
     def _intercept_mouse_event(self, event_type, event):
+        if not self._detector_active():
+            return event
         try:
             import Quartz
         except Exception:
@@ -550,6 +560,8 @@ class BubbleCursor(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot(int, int)
     def _simulate_click(self, orig_x, orig_y):
+        if not self._detector_active():
+            return
         click_target, logical_target, click_target_info, click_enabled = self._take_click_target_snapshot()
         if click_target is None:
             click_target = self._last_target_click
@@ -712,11 +724,13 @@ def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None, *, in
     )
     ov.show()
     raise_macos_window_above_system_ui(ov, level_offset=1)
-    if sys.platform == "darwin":
-        QtCore.QTimer.singleShot(0, hide_cursor_everywhere)
-        QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
-    else:
-        hide_cursor_everywhere()
+    is_active = getattr(detector, "is_active", None)
+    if not callable(is_active) or bool(is_active()):
+        if sys.platform == "darwin":
+            QtCore.QTimer.singleShot(0, hide_cursor_everywhere)
+            QtCore.QTimer.singleShot(25, hide_cursor_everywhere)
+        else:
+            hide_cursor_everywhere()
     def _handle_signal(sig, frame):
         global _SESSION_STOP_REASON
         _SESSION_STOP_REASON = "stop_button" if sig in {
