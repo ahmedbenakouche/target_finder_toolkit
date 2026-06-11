@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def make_default_log_path(project_root: Path, technique: str) -> Path:
-    logs_dir = Path(project_root) / "logs"
+    logs_dir = Path(project_root) / "test_logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = technique.replace(" ", "_").lower()

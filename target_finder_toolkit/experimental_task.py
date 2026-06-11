@@ -290,7 +290,7 @@ def safe_log_name(value: str) -> str:
 
 
 def default_log_path(*, technique: str, difficulty: str) -> Path:
-    logs_dir = PROJECT_ROOT / "task_logs"
+    logs_dir = PROJECT_ROOT / "experience_logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     technique_name = safe_log_name(technique)
@@ -299,7 +299,10 @@ def default_log_path(*, technique: str, difficulty: str) -> Path:
 
 
 def default_technique_log_path(technique: str) -> Path:
-    return make_default_log_path(PROJECT_ROOT, f"{technique}_during_task")
+    logs_dir = PROJECT_ROOT / "experience_logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return logs_dir / f"{stamp}_{safe_log_name(technique)}_during_task.jsonl"
 
 
 def build_technique_command(
@@ -425,6 +428,7 @@ def target_to_log_dict(target: TargetAnnotation | None) -> dict | None:
 
 class TrialCanvas(QtWidgets.QWidget):
     clicked = QtCore.pyqtSignal(dict)
+    mouse_event = QtCore.pyqtSignal(dict)
     TOP_BAR_HEIGHT = 30
     TARGET_RED = QtGui.QColor(185, 32, 32)
     MESSAGE_RED = QtGui.QColor(190, 45, 45)
@@ -621,6 +625,25 @@ class TrialCanvas(QtWidgets.QWidget):
             "interaction_backend": "in_process_bubble",
         }
 
+    def _mouse_event_payload(self, event, event_type: str) -> dict:
+        widget_pos = event.position()
+        global_pos = event.globalPosition()
+        image_point = self.widget_to_image_point(widget_pos)
+        payload = {
+            "event_type": event_type,
+            "button": "left" if event.button() == QtCore.Qt.MouseButton.LeftButton else str(int(event.button())),
+            "screen_position": [round(float(global_pos.x()), 3), round(float(global_pos.y()), 3)],
+            "widget_position": [round(float(widget_pos.x()), 3), round(float(widget_pos.y()), 3)],
+            "inside_image": image_point is not None,
+        }
+        if image_point is None:
+            payload["image_position"] = None
+            payload["direct_target"] = None
+        else:
+            payload["image_position"] = [round(float(image_point[0]), 3), round(float(image_point[1]), 3)]
+            payload["direct_target"] = target_to_log_dict(self._target_at_point(image_point[0], image_point[1]))
+        return payload
+
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -792,6 +815,7 @@ class TrialCanvas(QtWidgets.QWidget):
     def mousePressEvent(self, event):
         if event.button() != QtCore.Qt.MouseButton.LeftButton:
             return
+        self.mouse_event.emit(self._mouse_event_payload(event, "mouse_down"))
         point = self.widget_to_image_point(event.position())
         if point is not None:
             self._update_bubble_target(point)
@@ -808,6 +832,11 @@ class TrialCanvas(QtWidgets.QWidget):
                         "interaction_backend": "direct_click",
                     }
                 )
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.mouse_event.emit(self._mouse_event_payload(event, "mouse_up"))
+        super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
         self._update_bubble_target(self.widget_to_image_point(event.position()))
@@ -892,6 +921,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
         self.canvas = TrialCanvas()
         self.canvas.clicked.connect(self._handle_click)
+        self.canvas.mouse_event.connect(self._handle_mouse_event)
         layout.addWidget(self.canvas, 1)
 
         self.timer = QtCore.QTimer(self)
@@ -978,7 +1008,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             return
         self._session_ended = True
         if self.emit_session_events:
-            self._write_event({"type": "session_end", "reason": reason})
+            self._write_event(
+                {
+                    "type": "session_end",
+                    "reason": reason,
+                    "total_duration_sec": round(time.monotonic() - self._start_monotonic, 3),
+                }
+            )
 
     def _abort_experiment(self, reason: str):
         if self._aborting:
@@ -1142,11 +1178,20 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 if sys.platform.startswith("win"):
                     proc.send_signal(signal.CTRL_BREAK_EVENT)
                 else:
-                    proc.send_signal(signal.SIGTERM)
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                    except Exception:
+                        proc.send_signal(signal.SIGTERM)
                 if wait:
                     proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            if not sys.platform.startswith("win"):
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    proc.kill()
+            else:
+                proc.kill()
             proc.wait(timeout=3)
         except Exception:
             try:
@@ -1456,6 +1501,39 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         if payload is not None:
             self._process_click_payload(payload)
 
+    def _handle_mouse_event(self, mouse_payload: dict):
+        if not self._accept_clicks or self.current_trial is None:
+            return
+        event_type = mouse_payload.get("event_type")
+        if event_type not in {"mouse_down", "mouse_up"}:
+            return
+        image_position = mouse_payload.get("image_position")
+        inside_target = False
+        if image_position is not None:
+            inside_target = self._target_contains(float(image_position[0]), float(image_position[1]))
+        elapsed_ms = (time.monotonic() - self.trial_started_at) * 1000.0
+        self._write_event(
+            {
+                "type": event_type,
+                "trial_id": self.current_trial.trial_id,
+                "global_trial_id": self._global_trial_id(),
+                **self.session_metadata,
+                "technique": self.current_trial.technique,
+                "difficulty": self.current_trial.difficulty,
+                "movement_time_ms": round(elapsed_ms, 3),
+                "inside_target": bool(inside_target),
+                "target_bbox": list(self.current_trial.target_bbox),
+                "target_class_id": self.current_trial.target_class_id,
+                "target_class_name": self.current_trial.target_class_name,
+                "fitts_id": round(self.current_trial.fitts_id, 4),
+                **{
+                    key: value
+                    for key, value in mouse_payload.items()
+                    if key != "event_type"
+                },
+            }
+        )
+
     def _process_click_payload(self, click_payload: dict):
         if not self._accept_clicks or self.current_trial is None:
             return
@@ -1549,19 +1627,19 @@ def print_dataset_summary(dataset: list[DatasetImage]):
 def main():
     parser = argparse.ArgumentParser(description="Run a controlled target-selection experimental task prototype")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Directory containing .png/.txt annotated pairs")
-    parser.add_argument("--technique", choices=TECHNIQUES, default="mouse", help="Technique label to store in task logs")
+    parser.add_argument("--technique", choices=TECHNIQUES, default="mouse", help="Technique label to store in experience logs")
     parser.add_argument("--trials", "--trial", dest="trials", type=int, default=12, help="Number of trials to generate")
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "mixed"], default="mixed", help="Target difficulty bin")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible trial sampling")
     parser.add_argument("--countdown", type=int, default=3, help="Countdown seconds before each trial starts")
     parser.add_argument("--max-clicks", type=int, default=1, help="Maximum clicks allowed per trial")
     parser.add_argument("--log-file", default=None, help="JSONL log path")
-    parser.add_argument("--participant-id", default=None, help="Participant identifier stored in trial logs")
-    parser.add_argument("--session-id", default=None, help="Experimental session identifier stored in trial logs")
+    parser.add_argument("--participant-id", default=None, help="Participant identifier stored in experience logs")
+    parser.add_argument("--session-id", default=None, help="Experimental session identifier stored in experience logs")
     parser.add_argument("--block-index", type=int, default=None, help="1-based block position in the session order")
     parser.add_argument("--block-count", type=int, default=None, help="Total number of blocks in the session")
-    parser.add_argument("--block-id", default=None, help="Stable block identifier stored in trial logs")
-    parser.add_argument("--block-order", default=None, help="Comma-separated ordered block ids stored in logs")
+    parser.add_argument("--block-id", default=None, help="Stable block identifier stored in experience logs")
+    parser.add_argument("--block-order", default=None, help="Comma-separated ordered block ids stored in experience logs")
     parser.add_argument("--trial-offset", type=int, default=0, help="Number of trials before this block in the session")
     parser.add_argument("--show-all-targets", action="store_true", help="Draw all annotated targets in green for debugging")
     parser.add_argument("--windowed", action="store_true", help="Run in a normal window instead of fullscreen")

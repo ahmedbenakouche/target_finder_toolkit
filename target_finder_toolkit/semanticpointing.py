@@ -312,6 +312,7 @@ class SemanticPointing(QtWidgets.QWidget):
         self.control_panel = ControlPanel(self.detector)
         self.control_panel.move(20,20)
         self.control_panel.hide()
+        self._last_control_trial_id = None
         if self._is_macos:
             self._set_overlay_clickthrough(True)
 
@@ -319,10 +320,42 @@ class SemanticPointing(QtWidgets.QWidget):
         is_active = getattr(self.detector, "is_active", None)
         return not callable(is_active) or bool(is_active())
 
+    def _control_center_for_current_trial(self):
+        get_payload = getattr(self.detector, "get_control_payload", None)
+        if not callable(get_payload):
+            return None, None
+        payload = get_payload() or {}
+        trial_id = payload.get("trial_id")
+        rect = payload.get("image_rect_global")
+        if trial_id is None or not isinstance(rect, (list, tuple)) or len(rect) != 4:
+            return trial_id, None
+        try:
+            left = float(rect[0])
+            top = float(rect[1])
+            width = float(rect[2])
+            height = float(rect[3])
+        except (TypeError, ValueError):
+            return trial_id, None
+        if width <= 0.0 or height <= 0.0:
+            return trial_id, None
+        return trial_id, QtCore.QPointF(left + width / 2.0, top + height / 2.0)
+
+    def _reset_to_experimental_center_if_needed(self):
+        trial_id, center = self._control_center_for_current_trial()
+        if trial_id is None or center is None or trial_id == self._last_control_trial_id:
+            return
+        self._last_control_trial_id = trial_id
+        self.fake_pos = QtCore.QPointF(center)
+        self.prev_real = QtCore.QPointF(center)
+        if self.cursor_filter is not None:
+            self.cursor_filter.reset(float(center.x()), float(center.y()))
+        QtGui.QCursor.setPos(int(center.x()), int(center.y()))
+
     # === Paint ===
     def paintEvent(self, event):
         if not self.enabled or not self._detector_active():
             return
+        self._reset_to_experimental_center_if_needed()
         detections = self.detector.get_detections()
 
         painter = QtGui.QPainter(self)

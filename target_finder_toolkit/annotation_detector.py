@@ -33,6 +33,7 @@ class AnnotationDetector:
         self._with_frame = False
         self._last_payload_key = None
         self._state = "inactive"
+        self._payload = {}
 
     def set_callback(self, fn, with_frame=False, diff_iou=0.5):
         self._on_change = fn if callable(fn) else None
@@ -55,6 +56,10 @@ class AnnotationDetector:
     def get_detection_dicts(self):
         self._load()
         return [dict(det) for det in self._latest_det_dicts]
+
+    def get_control_payload(self):
+        self._load()
+        return dict(self._payload)
 
     @staticmethod
     def _compact_detection(det):
@@ -140,6 +145,7 @@ class AnnotationDetector:
         except (OSError, json.JSONDecodeError):
             return
 
+        self._payload = dict(payload)
         self._state = str(payload.get("state") or "active").strip().lower()
         if self._state != "active":
             previous = self._latest_det_dicts

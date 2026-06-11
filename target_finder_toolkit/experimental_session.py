@@ -68,6 +68,7 @@ class PreloadedTechnique:
     technique_log_file: Path | None = None
     output_buffer: str = ""
     exit_logged: bool = False
+    ready: bool = False
 
 
 def make_blocks(trials_per_block: int) -> list[ExperimentBlock]:
@@ -231,6 +232,7 @@ def create_session_screen(*, windowed: bool):
             super().__init__()
             self._windowed = bool(windowed)
             self.aborted = False
+            self._keyboard_grabbed = False
             self.setWindowTitle("Expérience")
             self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
             self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -315,6 +317,24 @@ def create_session_screen(*, windowed: bool):
             self._q_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
             self._q_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
             self._q_shortcut.activated.connect(self._abort)
+            app = QtWidgets.QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+
+        def eventFilter(self, watched, event):
+            if self.isVisible() and event.type() == QtCore.QEvent.Type.KeyPress:
+                key = event.key()
+                if key in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
+                    self._abort()
+                    return True
+                if self.continue_button.isVisible() and key in (
+                    QtCore.Qt.Key.Key_Return,
+                    QtCore.Qt.Key.Key_Enter,
+                    QtCore.Qt.Key.Key_Space,
+                ):
+                    self._continue()
+                    return True
+            return super().eventFilter(watched, event)
 
         def show_content(
             self,
@@ -323,6 +343,7 @@ def create_session_screen(*, windowed: bool):
             body: str = "",
             hint: str = "",
             button_text: str | None = None,
+            level_offset: int = 2,
         ):
             self.aborted = False
             self.title_label.setText(title)
@@ -343,9 +364,10 @@ def create_session_screen(*, windowed: bool):
                     self.setGeometry(screen.geometry())
                 self.show()
                 if raise_macos_window_above_system_ui is not None:
-                    raise_macos_window_above_system_ui(self, level_offset=0)
+                    raise_macos_window_above_system_ui(self, level_offset=level_offset)
             self.raise_()
             self.activateWindow()
+            self._grab_session_keyboard()
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.processEvents()
@@ -370,13 +392,47 @@ def create_session_screen(*, windowed: bool):
                 return
             super().keyPressEvent(event)
 
+        def hide(self):
+            self._release_session_keyboard()
+            super().hide()
+
+        def closeEvent(self, event):
+            self._release_session_keyboard()
+            super().closeEvent(event)
+
+        def _grab_session_keyboard(self):
+            if sys.platform == "darwin":
+                # Qt keyboard grabs can crash with the macOS input-method
+                # service. The event filter and shortcuts are enough here.
+                return
+            if self._keyboard_grabbed:
+                return
+            try:
+                self.grabKeyboard()
+                self._keyboard_grabbed = True
+            except Exception:
+                self._keyboard_grabbed = False
+
+        def _release_session_keyboard(self):
+            if not self._keyboard_grabbed:
+                return
+            try:
+                self.releaseKeyboard()
+            except Exception:
+                pass
+            self._keyboard_grabbed = False
+
+        @QtCore.pyqtSlot()
         def _continue(self):
+            self._release_session_keyboard()
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.exit(0)
 
+        @QtCore.pyqtSlot()
         def _abort(self):
             self.aborted = True
+            self._release_session_keyboard()
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.exit(130)
@@ -548,14 +604,25 @@ def _drain_preloaded_outputs(
                     "line": line,
                 },
             )
-            prefix = "__NINJA_CALIB__ "
-            if technique == "ninja_cursors" and line.startswith(prefix):
+            calib_prefix = "__NINJA_CALIB__ "
+            runtime_prefix = "__NINJA_EVENT__ "
+            if technique == "ninja_cursors" and line.startswith(calib_prefix):
                 try:
-                    payload = json.loads(line[len(prefix):])
+                    payload = json.loads(line[len(calib_prefix):])
                 except Exception:
                     payload = {}
                 if payload:
                     write_event(session_log, {"type": "ninja_calibration_event", **payload})
+                    events.append((technique, payload))
+            elif technique == "ninja_cursors" and line.startswith(runtime_prefix):
+                try:
+                    payload = json.loads(line[len(runtime_prefix):])
+                except Exception:
+                    payload = {}
+                if payload:
+                    if payload.get("event") == "ready":
+                        item.ready = True
+                    write_event(session_log, {"type": "ninja_runtime_event", **payload})
                     events.append((technique, payload))
         exit_code = proc.poll()
         if exit_code is not None and not item.exit_logged:
@@ -644,17 +711,20 @@ def wait_for_initial_ninja_calibration(
     session_log: Path,
     *,
     app=None,
-):
+    abort_check=None,
+) -> str:
     if "ninja_cursors" not in processes:
-        return
+        return "missing"
     print("waiting for Ninja Cursors calibration...")
     while True:
         if app is not None:
             app.processEvents()
+        if abort_check is not None and abort_check():
+            return "aborted"
         for technique, payload in _drain_preloaded_outputs(processes, session_log):
             if technique == "ninja_cursors" and payload.get("event") in {"calibrated", "failed", "cancelled"}:
                 print(f"Ninja Cursors calibration: {payload.get('event')}")
-                return
+                return str(payload.get("event"))
         proc = processes["ninja_cursors"].process
         exit_code = proc.poll()
         if exit_code is not None:
@@ -667,7 +737,47 @@ def wait_for_initial_ninja_calibration(
                     "during": "initial_calibration",
                 },
             )
-            return
+            return "exited"
+        time.sleep(0.1)
+
+
+def wait_for_ninja_ready(
+    processes: dict[str, PreloadedTechnique],
+    session_log: Path,
+    *,
+    app=None,
+    abort_check=None,
+) -> str:
+    item = processes.get("ninja_cursors")
+    if item is None:
+        return "missing"
+    if item.ready:
+        return "ready"
+    print("waiting for Ninja Cursors to become ready...")
+    while True:
+        if app is not None:
+            app.processEvents()
+        if abort_check is not None and abort_check():
+            return "aborted"
+        if item.ready:
+            return "ready"
+        for technique, payload in _drain_preloaded_outputs(processes, session_log):
+            if technique == "ninja_cursors" and payload.get("event") == "ready":
+                item.ready = True
+                print("Ninja Cursors ready.")
+                return "ready"
+        exit_code = item.process.poll()
+        if exit_code is not None:
+            write_event(
+                session_log,
+                {
+                    "type": "technique_process_exit",
+                    "technique": "ninja_cursors",
+                    "exit_code": exit_code,
+                    "during": "wait_ready",
+                },
+            )
+            return "exited"
         time.sleep(0.1)
 
 
@@ -677,16 +787,44 @@ def wait_for_preloaded_startup(
     *,
     seconds: float,
     app=None,
-):
+    abort_check=None,
+) -> bool:
     deadline = time.monotonic() + max(0.0, seconds)
     while time.monotonic() < deadline:
         if app is not None:
             app.processEvents()
+        if abort_check is not None and abort_check():
+            return True
         _drain_preloaded_outputs(processes, session_log)
         time.sleep(0.1)
     _drain_preloaded_outputs(processes, session_log)
     if app is not None:
         app.processEvents()
+    return bool(abort_check is not None and abort_check())
+
+
+def cleanup_session_resources(
+    *,
+    preloaded_processes: dict[str, PreloadedTechnique],
+    session_log: Path,
+    ninja_control_file: Path | None = None,
+    session_screen=None,
+    app=None,
+):
+    try:
+        if session_screen is not None:
+            session_screen.hide()
+        if app is not None:
+            app.processEvents()
+    except Exception:
+        pass
+    if preloaded_processes:
+        stop_preloaded_techniques(preloaded_processes, session_log)
+    if ninja_control_file is not None:
+        try:
+            ninja_control_file.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def stop_preloaded_techniques(
@@ -702,10 +840,19 @@ def stop_preloaded_techniques(
                 if sys.platform.startswith("win"):
                     proc.send_signal(signal.CTRL_BREAK_EVENT)
                 else:
-                    proc.send_signal(signal.SIGTERM)
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                    except Exception:
+                        proc.send_signal(signal.SIGTERM)
                 proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            if not sys.platform.startswith("win"):
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    proc.kill()
+            else:
+                proc.kill()
             proc.wait(timeout=3)
         except Exception:
             try:
@@ -741,6 +888,8 @@ def run_block_in_process(
     preloaded: PreloadedTechnique | None,
     transition_screen=None,
 ) -> int:
+    from PyQt6 import QtCore
+
     app = _ensure_qapplication()
     trials = sample_trials(
         dataset,
@@ -798,7 +947,10 @@ def run_block_in_process(
         window.show_desktop_fullscreen()
     app.processEvents()
     if transition_screen is not None:
-        transition_screen.hide()
+        # Keep the black transition screen visible briefly while the next task
+        # window finishes becoming fullscreen. This avoids exposing the real
+        # desktop between two experimental blocks on macOS.
+        QtCore.QTimer.singleShot(150, transition_screen.hide)
         app.processEvents()
 
     qt_exit_code = app.exec()
@@ -806,8 +958,8 @@ def run_block_in_process(
 
     if transition_screen is not None and exit_code == 0:
         transition_screen.show_content(
-            title="Préparation",
-            body="Veuillez patienter...",
+            title="",
+            body="",
             hint="",
             button_text=None,
         )
@@ -825,7 +977,7 @@ def main():
     )
     parser.add_argument("--participant", required=True, help="Participant id, e.g. P01")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Annotated dataset directory")
-    parser.add_argument("--trials-per-block", type=int, default=20, help="Trials per technique/difficulty block")
+    parser.add_argument("--trials-per-block", type=int, default=6, help="Trials per technique/difficulty block")
     parser.add_argument("--countdown", type=int, default=3, help="Countdown seconds passed to each block")
     parser.add_argument("--max-clicks", type=int, default=1, help="Maximum clicks per trial")
     parser.add_argument("--seed", type=int, default=None, help="Optional seed combined with participant id")
@@ -852,7 +1004,7 @@ def main():
     output_dir = (
         Path(args.output_dir).expanduser()
         if args.output_dir
-        else PROJECT_ROOT / "logs" / "experimental_sessions" / session_id
+        else PROJECT_ROOT / "experience_logs" / session_id
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -875,6 +1027,19 @@ def main():
     for index, block in enumerate(ordered_blocks, start=1):
         print(f"    {index:02d}. {block.block_id} ({block.trials} trials)")
 
+    session_started_at = time.time()
+
+    def write_session_end(reason: str, **fields):
+        write_event(
+            session_log,
+            {
+                "type": "session_end",
+                "reason": reason,
+                "total_duration_sec": round(time.time() - session_started_at, 3),
+                **fields,
+            },
+        )
+
     write_event(
         session_log,
         {
@@ -891,7 +1056,7 @@ def main():
     )
 
     if args.dry_run:
-        write_event(session_log, {"type": "session_end", "reason": "dry_run"})
+        write_session_end("dry_run")
         return
 
     app = _ensure_qapplication()
@@ -926,33 +1091,116 @@ def main():
             session_log,
             seconds=args.technique_start_delay if args.technique_start_delay is not None else 3.0,
             app=app,
+            abort_check=lambda: bool(session_screen.aborted),
         )
+        if session_screen.aborted:
+            write_session_end("escape_during_initialization")
+            cleanup_session_resources(
+                preloaded_processes=preloaded_processes,
+                session_log=session_log,
+                ninja_control_file=ninja_control_file,
+                session_screen=session_screen,
+                app=app,
+            )
+            raise SystemExit(130)
         if args.ninja_auto_calibrate:
+            session_screen.show_content(
+                title="Initialisation de l'expérience",
+                body=(
+                    "Préparation du suivi du regard.\n"
+                    "Veuillez patienter pendant l'initialisation de Ninja Cursors avant la calibration..."
+                ),
+                hint="Cette étape peut prendre quelques secondes selon la machine.",
+                button_text=None,
+            )
+            ninja_ready = wait_for_ninja_ready(
+                preloaded_processes,
+                session_log,
+                app=app,
+                abort_check=lambda: bool(session_screen.aborted),
+            )
+            if ninja_ready == "aborted":
+                write_session_end("escape_during_initialization")
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
+                raise SystemExit(130)
+            if ninja_ready == "exited":
+                write_session_end("ninja_exited_during_initialization")
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
+                raise SystemExit(130)
             session_screen.show_content(
                 title="Calibration du regard",
                 body=(
                     "Avant de commencer l'expérience, une calibration du regard va être effectuée.\n"
                     "Des points rouges apparaîtront successivement à l'écran.\n"
                     "Regardez chaque point rouge sans bouger la tête jusqu'au point suivant.\n"
-                    "Après la calibration, l'expérience commencera automatiquement."
+                    "Après la calibration, un écran vous indiquera que l'expérience peut commencer."
                 ),
                 hint="Cliquez sur Commencer quand vous êtes prêt(e).",
                 button_text="Commencer la calibration",
             )
             write_event(session_log, {"type": "calibration_instructions"})
             if session_screen.wait_for_continue():
-                write_event(session_log, {"type": "session_end", "reason": "escape_before_calibration"})
+                write_session_end("escape_before_calibration")
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
                 raise SystemExit(130)
             session_screen.show_content(
                 title="Calibration en cours",
                 body="Regardez le point rouge affiché à l'écran jusqu'à la fin de la calibration.",
                 hint="Ne cliquez pas et évitez de bouger la tête pendant cette étape.",
                 button_text=None,
+                level_offset=0,
             )
             ninja_control_file.write_text("calibrate", encoding="utf-8")
             write_event(session_log, {"type": "calibration_start_requested"})
-            wait_for_initial_ninja_calibration(preloaded_processes, session_log, app=app)
+            calibration_result = wait_for_initial_ninja_calibration(
+                preloaded_processes,
+                session_log,
+                app=app,
+                abort_check=lambda: bool(session_screen.aborted),
+            )
             ninja_control_file.write_text("paused", encoding="utf-8")
+            if calibration_result in {"aborted", "cancelled"}:
+                write_session_end(
+                    "escape_during_calibration"
+                    if calibration_result == "aborted"
+                    else "calibration_cancelled"
+                )
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
+                raise SystemExit(130)
+            if calibration_result == "exited":
+                write_session_end("ninja_exited_during_calibration")
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
+                raise SystemExit(130)
             session_screen.show_content(
                 title="Calibration terminée",
                 body=(
@@ -964,7 +1212,14 @@ def main():
             )
             write_event(session_log, {"type": "experiment_start_instructions"})
             if session_screen.wait_for_continue():
-                write_event(session_log, {"type": "session_end", "reason": "escape_before_first_block"})
+                write_session_end("escape_before_first_block")
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
                 raise SystemExit(130)
     write_event(session_log, {"type": "initialization_end"})
 
@@ -977,16 +1232,12 @@ def main():
             technique_log_file = output_dir / f"{block_prefix}_technique.jsonl"
             preloaded = preloaded_processes.get(block.technique)
             if preloaded is not None and preloaded.process.poll() is not None:
-                write_event(
-                    session_log,
-                    {
-                        "type": "session_end",
-                        "reason": "preloaded_technique_exited",
-                        "failed_block_index": block_index,
-                        "failed_block_id": block.block_id,
-                        "technique": block.technique,
-                        "exit_code": preloaded.process.poll(),
-                    },
+                write_session_end(
+                    "preloaded_technique_exited",
+                    failed_block_index=block_index,
+                    failed_block_id=block.block_id,
+                    technique=block.technique,
+                    exit_code=preloaded.process.poll(),
                 )
                 raise SystemExit(preloaded.process.poll() or 1)
             cmd = build_block_command(
@@ -1023,12 +1274,6 @@ def main():
             )
             print(f"\nstarting block {block_index}/{block_count}: {block.block_id}")
             started = time.time()
-            session_screen.show_content(
-                title="Préparation du bloc",
-                body=f"Bloc {block_index}/{block_count}\n{_format_block_label(block)}",
-                hint="Veuillez patienter.",
-                button_text=None,
-            )
             result_code = run_block_in_process(
                 args,
                 block,
@@ -1065,15 +1310,7 @@ def main():
             )
             if result_code != 0:
                 reason = "escape_in_block" if result_code == 130 else "block_failed"
-                write_event(
-                    session_log,
-                    {
-                        "type": "session_end",
-                        "reason": reason,
-                        "failed_block_index": block_index,
-                        "returncode": result_code,
-                    },
-                )
+                write_session_end(reason, failed_block_index=block_index, returncode=result_code)
                 raise SystemExit(result_code)
 
             trial_offset += block.trials
@@ -1112,17 +1349,10 @@ def main():
                     },
                 )
                 if break_aborted:
-                    write_event(
-                        session_log,
-                        {
-                            "type": "session_end",
-                            "reason": "escape_on_break",
-                            "after_block_index": block_index,
-                        },
-                    )
+                    write_session_end("escape_on_break", after_block_index=block_index)
                     raise SystemExit(130)
 
-        write_event(session_log, {"type": "session_end", "reason": "completed"})
+        write_session_end("completed")
         print(f"\nsession completed: {session_log}")
     finally:
         try:

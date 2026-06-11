@@ -93,7 +93,7 @@ DEFAULT_RAKE_CALIB_POINTS = 5
 DEFAULT_RAKE_AUTO_CALIBRATE = False
 DEFAULT_RAKE_WITHOUT_TARGETFINDER = True
 DEFAULT_EXPERIMENT_DATA_DIR = str(Path(__file__).resolve().parents[3] / "data" / "web")
-DEFAULT_EXPERIMENT_TRIALS = 12
+DEFAULT_EXPERIMENT_TRIALS = 6
 DEFAULT_EXPERIMENT_DIFFICULTY = "mixed"
 DEFAULT_EXPERIMENT_COUNTDOWN = 3
 DEFAULT_EXPERIMENT_MAX_CLICKS = 1
@@ -223,7 +223,7 @@ UI_TEXTS = {
         "experiment_participant_id_desc": "Identifier written in the session log and used to generate a deterministic counterbalanced block order.",
         "experiment_data_dir": "Dataset folder (default: stage/data/web)",
         "experiment_data_dir_desc": "Folder containing the annotated screenshot .png/.txt pairs used to generate trials.",
-        "experiment_trials": "Trials / trials per block (range: 1-1000, default: 12)",
+        "experiment_trials": "Trials / trials per block (range: 1-1000, default: 6)",
         "experiment_trials_desc": "Single-task mode: total number of trials. Full-session mode: number of trials in each technique × difficulty block.",
         "experiment_difficulty": "Difficulty (choices: easy/medium/hard/mixed, default: mixed)",
         "experiment_difficulty_desc": "Difficulty bin sampled by Fitts ID: easy [0,3), medium [3,5), hard [5,8.5). Mixed samples from all bins.",
@@ -408,7 +408,7 @@ UI_TEXTS = {
         "experiment_participant_id_desc": "Identifiant enregistré dans le journal de session et utilisé pour générer un ordre de blocs contrebalancé déterministe.",
         "experiment_data_dir": "Dossier du jeu de données (défaut : stage/data/web)",
         "experiment_data_dir_desc": "Dossier contenant les paires annotées .png/.txt utilisées pour générer les essais.",
-        "experiment_trials": "Essais / essais par bloc (plage : 1-1000, défaut : 12)",
+        "experiment_trials": "Essais / essais par bloc (plage : 1-1000, défaut : 6)",
         "experiment_trials_desc": "Mode tâche simple : nombre total d’essais. Mode session complète : nombre d’essais dans chaque bloc technique × difficulté.",
         "experiment_difficulty": "Difficulté (choix : easy/medium/hard/mixed, défaut : mixed)",
         "experiment_difficulty_desc": "Niveau échantillonné selon l’ID de Fitts : easy [0,3), medium [3,5), hard [5,8.5). Mixed échantillonne tous les niveaux.",

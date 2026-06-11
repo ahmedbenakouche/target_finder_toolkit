@@ -4,6 +4,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 _test_output/
-logs/*.jsonl
-task_logs/*.jsonl
-target_finder_toolkit/logs/*.jsonl
+test_logs/
+experience_logs/
+logs/
+task_logs/
+target_finder_toolkit/logs/

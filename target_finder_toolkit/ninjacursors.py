@@ -69,6 +69,7 @@ __all__ = ["ninja_cursors", "main"]
 
 _SESSION_STOP_REASON = None
 _CALIB_EVENT_PREFIX = "__NINJA_CALIB__ "
+_NINJA_EVENT_PREFIX = "__NINJA_EVENT__ "
 
 
 _WEIGHT_FILE_CACHE: dict[str, Optional[str]] = {}
@@ -103,6 +104,13 @@ def _download_model_weight(filename: str, dest_dir: pathlib.Path) -> Optional[st
 def _emit_calibration_event(event: str, **payload):
     try:
         print(f"{_CALIB_EVENT_PREFIX}{json.dumps({'event': event, **payload}, ensure_ascii=False)}", flush=True)
+    except Exception:
+        pass
+
+
+def _emit_ninja_event(event: str, **payload):
+    try:
+        print(f"{_NINJA_EVENT_PREFIX}{json.dumps({'event': event, **payload}, ensure_ascii=False)}", flush=True)
     except Exception:
         pass
 
@@ -563,7 +571,25 @@ class NinjaCursors(QtWidgets.QWidget):
         if self._auto_calibrate:
             QtCore.QTimer.singleShot(self._auto_calibrate_delay_ms, self._start_calibration)
 
+    def _should_hide_system_cursor_for_state(self, state: str | None = None) -> bool:
+        if self._experiment_control_file is None:
+            return True
+        if state is None:
+            state = self._read_experiment_control_state()
+        return (
+            state.startswith("ready")
+            or state.startswith("calibrate")
+            or state.startswith("active")
+        )
+
     def _prime_hidden_cursor(self):
+        state = self._read_experiment_control_state()
+        if not self._should_hide_system_cursor_for_state(state):
+            pos = QtGui.QCursor.pos()
+            self._last_observed_mouse = (float(pos.x()), float(pos.y()))
+            self._prev_real = QtCore.QPointF(pos)
+            restore_default_cursors()
+            return
         QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
         self._prev_real = QtCore.QPointF(self._anchor_point)
         hide_cursor_everywhere()
@@ -576,7 +602,7 @@ class NinjaCursors(QtWidgets.QWidget):
 
     def _refresh_real_cursor(self):
         state = self._read_experiment_control_state()
-        if self._experiment_control_file is not None and state.startswith("paused"):
+        if not self._should_hide_system_cursor_for_state(state):
             return
         hide_cursor_everywhere()
         if state.startswith("ready") or state.startswith("calibrate"):
@@ -622,7 +648,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return self._last_observed_mouse[0], self._last_observed_mouse[1], 0.0, 0.0, False
         return self._last_observed_mouse[0], self._last_observed_mouse[1], dx, dy, moved
 
-    def _reset_experiment_layout(self):
+    def _reset_experiment_layout(self, *, lock_real_cursor: bool = True):
         self._raw_offset_x = 0.0
         self._raw_offset_y = 0.0
         self._filtered_offset_x = 0.0
@@ -634,7 +660,12 @@ class NinjaCursors(QtWidgets.QWidget):
         self._pending_click_target = None
         self._pending_click_cursor_id = None
         self._ignore_next_mouse_delta = True
-        self._lock_real_cursor_at_anchor()
+        if lock_real_cursor:
+            self._lock_real_cursor_at_anchor()
+        else:
+            pos = QtGui.QCursor.pos()
+            self._last_observed_mouse = (float(pos.x()), float(pos.y()))
+            self._prev_real = QtCore.QPointF(pos)
 
     def _read_experiment_control_state(self) -> str:
         if self._experiment_control_file is None:
@@ -646,7 +677,7 @@ class NinjaCursors(QtWidgets.QWidget):
         if state != self._last_experiment_control_state:
             self._last_experiment_control_state = state
             if state.startswith("paused"):
-                self._reset_experiment_layout()
+                self._reset_experiment_layout(lock_real_cursor=False)
                 restore_default_cursors()
             elif state.startswith("ready"):
                 self._reset_experiment_layout()
@@ -675,14 +706,30 @@ class NinjaCursors(QtWidgets.QWidget):
             self._filtered_offset_x = self._raw_offset_x
             self._filtered_offset_y = self._raw_offset_y
 
-    def _wrapped_screen_point(self, x: float, y: float) -> tuple[float, float]:
-        left = float(self._screen_rect.left())
-        top = float(self._screen_rect.top())
-        width = float(self._screen_rect.width())
-        height = float(self._screen_rect.height())
-        wrapped_x = left + ((x - left) % width)
-        wrapped_y = top + ((y - top) % height)
-        return wrapped_x, wrapped_y
+    def _display_point_for_experiment(self, x: float, y: float) -> tuple[float, float]:
+        """Return the actual cursor point used for drawing and clicking."""
+        return x, y
+
+    def _point_for_gaze_selection(self, x: float, y: float) -> tuple[float, float]:
+        return self._display_point_for_experiment(x, y)
+
+    def _point_is_visible(self, x: float, y: float, *, margin: float | None = None) -> bool:
+        visible_margin = self.ACTIVE_RADIUS if margin is None else float(margin)
+        left = float(self._screen_rect.left()) - visible_margin
+        top = float(self._screen_rect.top()) - visible_margin
+        right = float(self._screen_rect.right()) + visible_margin
+        bottom = float(self._screen_rect.bottom()) + visible_margin
+        return left <= float(x) <= right and top <= float(y) <= bottom
+
+    def _visible_points(
+        self,
+        points: list[tuple[tuple[int, int], tuple[float, float]]],
+    ) -> list[tuple[tuple[int, int], tuple[float, float]]]:
+        return [
+            (cursor_id, (x, y))
+            for cursor_id, (x, y) in points
+            if self._point_is_visible(x, y)
+        ]
 
     def _base_cursor_points(self) -> list[tuple[tuple[int, int], tuple[float, float]]]:
         left = float(self._screen_rect.left())
@@ -705,28 +752,39 @@ class NinjaCursors(QtWidgets.QWidget):
 
     def _grid_points(self) -> list[tuple[tuple[int, int], tuple[float, float]]]:
         points: list[tuple[tuple[int, int], tuple[float, float]]] = []
-        for cursor_id, (base_x, base_y) in self._base_cursor_points():
+        base_points = self._base_cursor_points()
+        for cursor_id, (base_x, base_y) in base_points:
             x = base_x + self._filtered_offset_x
             y = base_y + self._filtered_offset_y
-            points.append((cursor_id, self._wrapped_screen_point(x, y)))
+            points.append((cursor_id, (x, y)))
         return points
 
     def _active_cursor_from_gaze(
         self,
         points: list[tuple[tuple[int, int], tuple[float, float]]],
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int] | None:
         point_map = {cursor_id: point for cursor_id, point in points}
+        visible_points = self._visible_points(points)
+        visible_point_map = {cursor_id: point for cursor_id, point in visible_points}
         now = time.time()
 
-        if self._cursor_locked and self._locked_cursor_id in point_map:
+        if self._cursor_locked and self._locked_cursor_id in visible_point_map:
             self._active_cursor_id = self._locked_cursor_id
             return self._locked_cursor_id
+
+        candidates = visible_points if visible_points else []
+        if not candidates:
+            self._active_cursor_id = None
+            return None
 
         if self._gaze_is_recent() and self._gaze_point is not None:
             gx, gy = self._gaze_point
             candidate_id, _candidate_point = min(
-                points,
-                key=lambda item: (item[1][0] - gx) ** 2 + (item[1][1] - gy) ** 2,
+                candidates,
+                key=lambda item: (
+                    (self._point_for_gaze_selection(*item[1])[0] - gx) ** 2
+                    + (self._point_for_gaze_selection(*item[1])[1] - gy) ** 2
+                ),
             )
             if candidate_id != self._candidate_cursor_id:
                 self._candidate_cursor_id = candidate_id
@@ -744,19 +802,18 @@ class NinjaCursors(QtWidgets.QWidget):
         self._candidate_cursor_id = None
         self._candidate_since = 0.0
 
-        if self._active_cursor_id is not None and self._active_cursor_id in point_map:
+        if self._active_cursor_id is not None and self._active_cursor_id in visible_point_map:
             return self._active_cursor_id
 
-        if not points:
-            raise RuntimeError("Ninja Cursors(gaze) needs at least one candidate cursor.")
-
-        else:
-            ax = float(self._anchor_point.x())
-            ay = float(self._anchor_point.y())
-            candidate_id, _candidate_point = min(
-                points,
-                key=lambda item: (item[1][0] - ax) ** 2 + (item[1][1] - ay) ** 2,
-            )
+        ax = float(self._anchor_point.x())
+        ay = float(self._anchor_point.y())
+        candidate_id, _candidate_point = min(
+            candidates,
+            key=lambda item: (
+                (self._point_for_gaze_selection(*item[1])[0] - ax) ** 2
+                + (self._point_for_gaze_selection(*item[1])[1] - ay) ** 2
+            ),
+        )
         self._active_cursor_id = candidate_id
         return candidate_id
 
@@ -871,6 +928,10 @@ class NinjaCursors(QtWidgets.QWidget):
             self._set_gaze_status(f"tracking ok gaze=({gx:.0f}, {gy:.0f}) {'[calibrated]' if calibrated else ''}")
         else:
             self._tracking_ok = False
+            if time.time() - self._last_successful_gaze_t > self.GAZE_VALID_TTL_SEC:
+                self._gaze_point = None
+                self._candidate_cursor_id = None
+                self._candidate_since = 0.0
             face_count = 0
             try:
                 face_count = len(getattr(detection_results, "face_landmarks", []) or [])
@@ -1019,15 +1080,28 @@ class NinjaCursors(QtWidgets.QWidget):
         self,
         points: list[tuple[tuple[int, int], tuple[float, float]]],
     ) -> tuple[int, int] | None:
-        if not points:
+        visible_points = self._visible_points(points)
+        if not visible_points:
             return None
         if self._gaze_is_recent() and self._gaze_point is not None:
             gx, gy = self._gaze_point
-            active_id, _ = min(points, key=lambda item: (item[1][0] - gx) ** 2 + (item[1][1] - gy) ** 2)
+            active_id, _ = min(
+                visible_points,
+                key=lambda item: (
+                    (self._point_for_gaze_selection(*item[1])[0] - gx) ** 2
+                    + (self._point_for_gaze_selection(*item[1])[1] - gy) ** 2
+                ),
+            )
             return active_id
         ax = float(self._anchor_point.x())
         ay = float(self._anchor_point.y())
-        active_id, _ = min(points, key=lambda item: (item[1][0] - ax) ** 2 + (item[1][1] - ay) ** 2)
+        active_id, _ = min(
+            visible_points,
+            key=lambda item: (
+                (self._point_for_gaze_selection(*item[1])[0] - ax) ** 2
+                + (self._point_for_gaze_selection(*item[1])[1] - ay) ** 2
+            ),
+        )
         return active_id
 
     def _paint_ready_cursors(self):
@@ -1043,6 +1117,9 @@ class NinjaCursors(QtWidgets.QWidget):
         painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
 
         for cursor_id, (px, py) in points:
+            if not self._point_is_visible(px, py):
+                continue
+            draw_x, draw_y = self._display_point_for_experiment(px, py)
             is_active = cursor_id == active_id
             painter.setPen(
                 QtGui.QPen(
@@ -1054,14 +1131,14 @@ class NinjaCursors(QtWidgets.QWidget):
                 QtGui.QColor(255, 210, 40, 34) if is_active else QtGui.QColor(120, 120, 120, 10)
             )
             radius = self.ACTIVE_RADIUS if is_active else self.CURSOR_RADIUS
-            painter.drawEllipse(QtCore.QPointF(px, py), radius, radius)
+            painter.drawEllipse(QtCore.QPointF(draw_x, draw_y), radius, radius)
             painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 240 if is_active else 150), 2))
             line_len = 4
             gap = radius + 1
-            painter.drawLine(QtCore.QLineF(px, py - gap - line_len, px, py - gap))
-            painter.drawLine(QtCore.QLineF(px, py + gap, px, py + gap + line_len))
-            painter.drawLine(QtCore.QLineF(px + gap, py, px + gap + line_len, py))
-            painter.drawLine(QtCore.QLineF(px - gap - line_len, py, px - gap, py))
+            painter.drawLine(QtCore.QLineF(draw_x, draw_y - gap - line_len, draw_x, draw_y - gap))
+            painter.drawLine(QtCore.QLineF(draw_x, draw_y + gap, draw_x, draw_y + gap + line_len))
+            painter.drawLine(QtCore.QLineF(draw_x + gap, draw_y, draw_x + gap + line_len, draw_y))
+            painter.drawLine(QtCore.QLineF(draw_x - gap - line_len, draw_y, draw_x - gap, draw_y))
 
         if self.show_gaze and self._gaze_point is not None:
             gx, gy = self._gaze_point
@@ -1109,8 +1186,40 @@ class NinjaCursors(QtWidgets.QWidget):
             points = self._grid_points()
             active_id = self._active_cursor_from_gaze(points)
         point_map = {cursor_id: point for cursor_id, point in points}
-        self._active_point = point_map.get(active_id)
+        self._active_point = point_map.get(active_id) if active_id is not None else None
         if self._active_point is None:
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(self.rect(), QtCore.Qt.GlobalColor.transparent)
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
+            for cursor_id, (px, py) in points:
+                if not self._point_is_visible(px, py):
+                    continue
+                draw_x, draw_y = self._display_point_for_experiment(px, py)
+                painter.setPen(QtGui.QPen(QtGui.QColor(160, 160, 160, 150), 2))
+                painter.setBrush(QtGui.QColor(120, 120, 120, 10))
+                painter.drawEllipse(QtCore.QPointF(draw_x, draw_y), self.CURSOR_RADIUS, self.CURSOR_RADIUS)
+                painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 150), 2))
+                line_len = 4
+                gap = self.CURSOR_RADIUS + 1
+                painter.drawLine(QtCore.QLineF(draw_x, draw_y - gap - line_len, draw_x, draw_y - gap))
+                painter.drawLine(QtCore.QLineF(draw_x, draw_y + gap, draw_x, draw_y + gap + line_len))
+                painter.drawLine(QtCore.QLineF(draw_x + gap, draw_y, draw_x + gap + line_len, draw_y))
+                painter.drawLine(QtCore.QLineF(draw_x - gap - line_len, draw_y, draw_x - gap, draw_y))
+            if self.show_gaze and self._gaze_point is not None:
+                gx, gy = self._gaze_point
+                if self._gaze_is_recent():
+                    gaze_color = QtGui.QColor(255, 90, 90, 220)
+                    gaze_fill = QtGui.QColor(255, 90, 90, 24)
+                else:
+                    gaze_color = QtGui.QColor(150, 150, 150, 180)
+                    gaze_fill = QtGui.QColor(150, 150, 150, 18)
+                painter.setPen(QtGui.QPen(gaze_color, 2))
+                painter.setBrush(gaze_fill)
+                painter.drawEllipse(QtCore.QPointF(gx, gy), 12, 12)
+            self._draw_debug_status(painter)
+            painter.end()
             return
 
         ax, ay = self._active_point
@@ -1141,6 +1250,9 @@ class NinjaCursors(QtWidgets.QWidget):
             painter.drawRoundedRect(rect, 10, 10)
 
         for cursor_id, (px, py) in points:
+            if not self._point_is_visible(px, py):
+                continue
+            draw_x, draw_y = self._display_point_for_experiment(px, py)
             is_active = cursor_id == active_id
             is_candidate = is_active and not self._cursor_locked
             is_locked_out = self._cursor_locked and not is_active
@@ -1161,7 +1273,7 @@ class NinjaCursors(QtWidgets.QWidget):
                 else QtGui.QColor(120, 120, 120, 16 if is_locked_out else 10)
             )
             radius = self.ACTIVE_RADIUS if is_active else self.CURSOR_RADIUS
-            painter.drawEllipse(QtCore.QPointF(px, py), radius, radius)
+            painter.drawEllipse(QtCore.QPointF(draw_x, draw_y), radius, radius)
             cross_pen = QtGui.QPen(
                 QtGui.QColor(255, 255, 255, 240 if is_active else (110 if is_locked_out else 150)),
                 2,
@@ -1169,10 +1281,10 @@ class NinjaCursors(QtWidgets.QWidget):
             painter.setPen(cross_pen)
             line_len = 4
             gap = radius + 1
-            painter.drawLine(QtCore.QLineF(px, py - gap - line_len, px, py - gap))
-            painter.drawLine(QtCore.QLineF(px, py + gap, px, py + gap + line_len))
-            painter.drawLine(QtCore.QLineF(px + gap, py, px + gap + line_len, py))
-            painter.drawLine(QtCore.QLineF(px - gap - line_len, py, px - gap, py))
+            painter.drawLine(QtCore.QLineF(draw_x, draw_y - gap - line_len, draw_x, draw_y - gap))
+            painter.drawLine(QtCore.QLineF(draw_x, draw_y + gap, draw_x, draw_y + gap + line_len))
+            painter.drawLine(QtCore.QLineF(draw_x + gap, draw_y, draw_x + gap + line_len, draw_y))
+            painter.drawLine(QtCore.QLineF(draw_x - gap - line_len, draw_y, draw_x - gap, draw_y))
 
         if self.show_gaze and self._gaze_point is not None:
             gx, gy = self._gaze_point
@@ -1296,6 +1408,8 @@ class NinjaCursors(QtWidgets.QWidget):
                     self._calib_status_text = "Calibration cancelled"
                     self._calib_status_until = time.time() + 2.0
                     _emit_calibration_event("cancelled")
+                if self._experiment_control_file is not None:
+                    self._queue_quit()
             if isinstance(key_char, str) and key_char.lower() == "c":
                 has_cmd = keyboard.Key.cmd in self._pressed_keys or keyboard.Key.cmd_r in self._pressed_keys
                 has_shift = keyboard.Key.shift in self._pressed_keys or keyboard.Key.shift_r in self._pressed_keys
@@ -1354,8 +1468,16 @@ class NinjaCursors(QtWidgets.QWidget):
             if correction_values:
                 self.gaze_gain_x = max(0.1, min(float(correction_values["gaze_gain_x"]), 10.0))
                 self.gaze_gain_y = max(0.1, min(float(correction_values["gaze_gain_y"]), 10.0))
-                self.gaze_offset_x = float(correction_values["gaze_offset_x"])
-                self.gaze_offset_y = float(correction_values["gaze_offset_y"])
+                max_offset_x = min(1000.0, max(100.0, float(self._screen_rect.width()) * 0.75))
+                max_offset_y = min(1000.0, max(100.0, float(self._screen_rect.height()) * 0.75))
+                self.gaze_offset_x = max(-max_offset_x, min(float(correction_values["gaze_offset_x"]), max_offset_x))
+                self.gaze_offset_y = max(-max_offset_y, min(float(correction_values["gaze_offset_y"]), max_offset_y))
+                correction_values = {
+                    "gaze_gain_x": self.gaze_gain_x,
+                    "gaze_gain_y": self.gaze_gain_y,
+                    "gaze_offset_x": self.gaze_offset_x,
+                    "gaze_offset_y": self.gaze_offset_y,
+                }
             _emit_calibration_event(
                 "calibrated",
                 mean_error_px=round(float(mean_error_px), 3) if mean_error_px is not None else None,
@@ -1561,7 +1683,17 @@ def ninja_cursors(detector: Optional[TargetFinder], cursor_filter=None, logger=N
     overlay = NinjaCursors(detector, cursor_filter=cursor_filter, logger=logger, **kwargs)
     overlay.show()
     raise_macos_window_above_system_ui(overlay, level_offset=1)
-    hide_cursor_everywhere()
+    if overlay._should_hide_system_cursor_for_state():
+        hide_cursor_everywhere()
+    else:
+        restore_default_cursors()
+    _emit_ninja_event(
+        "ready",
+        screen_width_px=int(overlay._screen_rect.width()),
+        screen_height_px=int(overlay._screen_rect.height()),
+        camera_index=int(overlay.camera_index),
+        calib_points=int(overlay._calib_points),
+    )
     def _handle_signal(sig, frame):
         global _SESSION_STOP_REASON
         _SESSION_STOP_REASON = "stop_button" if sig in {
