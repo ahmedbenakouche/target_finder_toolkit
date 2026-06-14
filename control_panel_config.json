@@ -40,7 +40,7 @@
   "rake_calibration_status": "not_calibrated",
   "experiment_enabled": true,
   "experiment_data_dir": "/Users/tangxinqi/Desktop/stage/data/web",
-  "experiment_trials": 4,
+  "experiment_trials": 1,
   "experiment_difficulty": "mixed",
   "experiment_countdown": 1,
   "experiment_max_clicks": 1,

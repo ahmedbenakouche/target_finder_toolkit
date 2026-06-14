@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
-import random
+import re
 import signal
 import subprocess
 import sys
@@ -86,18 +87,62 @@ def make_blocks(trials_per_block: int) -> list[ExperimentBlock]:
     return blocks
 
 
+def balanced_latin_square_indices(size: int) -> list[list[int]]:
+    """Return a Williams balanced Latin square for an even number of conditions."""
+    if size <= 0:
+        return []
+    if size == 1:
+        return [[0]]
+    if size % 2 != 0:
+        raise ValueError("Balanced Latin Square requires an even number of conditions in this implementation.")
+
+    first_row: list[int] = []
+    low = 0
+    high = size - 1
+    for pos in range(size):
+        if pos == 0:
+            first_row.append(low)
+            low += 1
+        elif pos % 2 == 1:
+            first_row.append(low)
+            low += 1
+        else:
+            first_row.append(high)
+            high -= 1
+
+    rows: list[list[int]] = []
+    for offset in range(size):
+        row = [((value + offset) % size) for value in first_row]
+        if offset % 2 == 1:
+            row = list(reversed(row))
+        rows.append(row)
+    return rows
+
+
+def _participant_row_index(participant_id: str, seed: int | None, row_count: int) -> int:
+    match = re.search(r"(\d+)\s*$", participant_id)
+    if match is not None and seed is None:
+        numeric_id = max(1, int(match.group(1)))
+        return (numeric_id - 1) % row_count
+    token = f"{participant_id}:{seed}" if seed is not None else participant_id
+    digest = hashlib.sha256(token.encode("utf-8")).digest()
+    value = int.from_bytes(digest[:8], byteorder="big", signed=False)
+    return value % row_count
+
+
 def counterbalanced_order(
     blocks: list[ExperimentBlock],
     *,
     participant_id: str,
     seed: int | None = None,
 ) -> list[ExperimentBlock]:
-    """Return a deterministic participant-specific block order."""
-    rng_seed = f"{participant_id}:{seed}" if seed is not None else participant_id
-    rng = random.Random(rng_seed)
-    ordered = list(blocks)
-    rng.shuffle(ordered)
-    return ordered
+    """Return a participant-specific block order using a Balanced Latin Square."""
+    if not blocks:
+        return []
+    square = balanced_latin_square_indices(len(blocks))
+    row_index = _participant_row_index(participant_id, seed, len(square))
+    order_indices = square[row_index]
+    return [blocks[idx] for idx in order_indices]
 
 
 def write_event(log_file: Path, payload: dict):
