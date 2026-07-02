@@ -29,7 +29,7 @@ import pyautogui
 from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import TargetFinder
-from target_finder_toolkit.annotation_detector import AnnotationDetector
+from target_finder_toolkit.annotation_detector import FakeTargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
@@ -247,13 +247,23 @@ class SemanticPointing(QtWidgets.QWidget):
     - The Qt timer is set to 10 ms for smooth cursor rendering;
       this does not increase the detector’s inference frequency.
     """
-    def __init__(self, detector: TargetFinder, display = False, disable_accel = False, cursor_filter=None, logger=None):
+    def __init__(
+        self,
+        detector: TargetFinder,
+        display=False,
+        disable_accel=False,
+        cursor_filter=None,
+        logger=None,
+        *,
+        disable_keyboard_quit=False,
+    ):
         super().__init__()
         self._is_macos = sys.platform == "darwin"
         self.display = display
         self.disable_accel = disable_accel
         self.cursor_filter = cursor_filter
         self.logger = logger
+        self.disable_keyboard_quit = bool(disable_keyboard_quit)
         self.detector = detector
         detector.overlay_window = self
         if self._is_macos and self.display:
@@ -325,7 +335,13 @@ class SemanticPointing(QtWidgets.QWidget):
         if not callable(get_payload):
             return None, None
         payload = get_payload() or {}
-        trial_id = payload.get("trial_id")
+        trial_id = payload.get("trial_key") or payload.get("trial_id")
+        start = payload.get("start_position_global")
+        if isinstance(start, (list, tuple)) and len(start) >= 2:
+            try:
+                return trial_id, QtCore.QPointF(float(start[0]), float(start[1]))
+            except (TypeError, ValueError):
+                pass
         rect = payload.get("image_rect_global")
         if trial_id is None or not isinstance(rect, (list, tuple)) or len(rect) != 4:
             return trial_id, None
@@ -353,9 +369,11 @@ class SemanticPointing(QtWidgets.QWidget):
 
     # === Paint ===
     def paintEvent(self, event):
-        if not self.enabled or not self._detector_active():
+        if not self.enabled:
             return
         self._reset_to_experimental_center_if_needed()
+        if not self._detector_active():
+            return
         detections = self.detector.get_detections()
 
         painter = QtGui.QPainter(self)
@@ -660,7 +678,7 @@ class SemanticPointing(QtWidgets.QWidget):
                 if hasattr(key, "char") and key.char == 'b':
                     QtCore.QMetaObject.invokeMethod(self, "toggle", QtCore.Qt.ConnectionType.QueuedConnection)
                     return
-                if hasattr(key, "char") and key.char == 'q':
+                if hasattr(key, "char") and key.char == 'q' and not self.disable_keyboard_quit:
                     QtCore.QMetaObject.invokeMethod(self, "stop_and_quit", QtCore.Qt.ConnectionType.QueuedConnection)
                     return
                 if hasattr(key, "char") and key.char == 's':
@@ -823,7 +841,15 @@ class SemanticPointing(QtWidgets.QWidget):
                         self.control_panel.raise_()
                 self._start_mouse_listener() # restart the listener
 
-def semantic_pointing(detector: TargetFinder, display = False, disable_accel=False, cursor_filter=None, logger=None):
+def semantic_pointing(
+    detector: TargetFinder,
+    display=False,
+    disable_accel=False,
+    cursor_filter=None,
+    logger=None,
+    *,
+    disable_keyboard_quit=False,
+):
     """Launch the Semantic Pointing overlay with a given detector.
 
     The overlay draws a **fake cursor** whose speed dynamically changes
@@ -847,7 +873,14 @@ def semantic_pointing(detector: TargetFinder, display = False, disable_accel=Fal
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     if disable_accel:
         disable_mouse_acceleration()
-    ov = SemanticPointing(detector, display, disable_accel, cursor_filter=cursor_filter, logger=logger)
+    ov = SemanticPointing(
+        detector,
+        display,
+        disable_accel,
+        cursor_filter=cursor_filter,
+        logger=logger,
+        disable_keyboard_quit=disable_keyboard_quit,
+    )
     ov.show()
     raise_macos_window_above_system_ui(ov, level_offset=1)
     is_active = getattr(detector, "is_active", None)
@@ -916,10 +949,11 @@ def main():
     parser.add_argument('--log-file', default=None, help="Optional JSONL log file path")
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     parser.add_argument('--annotation-control-file', default=None, help="Use controlled-task annotations instead of live YOLO detection")
+    parser.add_argument('--disable-keyboard-quit', action='store_true', help="Disable the overlay-level q quit shortcut; controlled experiments handle quitting")
     args = parser.parse_args()
 
     if args.annotation_control_file:
-        det = AnnotationDetector(args.annotation_control_file)
+        det = FakeTargetFinder(args.annotation_control_file)
     else:
         if args.model_path is None:
             here = os.path.dirname(os.path.abspath(__file__))
@@ -941,9 +975,17 @@ def main():
             disable_accel=args.disable_accel,
             detection_source="annotations" if args.annotation_control_file else "yolo",
             annotation_control_file=args.annotation_control_file,
+            keyboard_quit_enabled=not args.disable_keyboard_quit,
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
-    semantic_pointing(det, args.display, args.disable_accel, cursor_filter=cursor_filter, logger=logger)
+    semantic_pointing(
+        det,
+        args.display,
+        args.disable_accel,
+        cursor_filter=cursor_filter,
+        logger=logger,
+        disable_keyboard_quit=args.disable_keyboard_quit,
+    )
 
 if __name__ == "__main__":
     main()

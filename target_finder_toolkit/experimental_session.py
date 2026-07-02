@@ -10,6 +10,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -42,14 +43,26 @@ from target_finder_toolkit.experimental_task import (
 from target_finder_toolkit.filters import add_filter_arguments
 
 
-TECHNIQUES = ("bubble", "dynaspot", "semantic", "ninja_cursors")
+TECHNIQUES = ("mouse", "bubble", "dynaspot", "semantic", "ninja_cursors")
 DIFFICULTIES = ("easy", "medium", "hard")
 TECHNIQUE_LABELS = {
+    "mouse": "Souris standard",
     "bubble": "Bubble Cursor",
     "dynaspot": "DynaSpot",
     "semantic": "Pointage sémantique",
     "ninja_cursors": "Ninja Cursors",
 }
+TECHNIQUE_LABELS_EN = {
+    "mouse": "Standard Mouse",
+    "bubble": "Bubble Cursor",
+    "dynaspot": "DynaSpot",
+    "semantic": "Semantic Pointing",
+    "ninja_cursors": "Ninja Cursors",
+}
+
+
+def is_english(language: str | None) -> bool:
+    return str(language or "").strip().lower().startswith("en")
 
 
 @dataclass(frozen=True)
@@ -88,13 +101,19 @@ def make_blocks(trials_per_block: int) -> list[ExperimentBlock]:
 
 
 def balanced_latin_square_indices(size: int) -> list[list[int]]:
-    """Return a Williams balanced Latin square for an even number of conditions."""
+    """Return a Williams balanced Latin square order.
+
+    For an odd number of conditions, add one dummy condition, generate the
+    even-condition Williams square, then remove the dummy from each row.
+    """
     if size <= 0:
         return []
     if size == 1:
         return [[0]]
     if size % 2 != 0:
-        raise ValueError("Balanced Latin Square requires an even number of conditions in this implementation.")
+        dummy = size
+        rows = balanced_latin_square_indices(size + 1)
+        return [[value for value in row if value != dummy] for row in rows]
 
     first_row: list[int] = []
     low = 0
@@ -151,6 +170,13 @@ def write_event(log_file: Path, payload: dict):
         fh.write(json.dumps({"timestamp": time.time(), **payload}, ensure_ascii=False) + "\n")
 
 
+def log_group_from_output_dir(output_dir: Path) -> str:
+    try:
+        return output_dir.resolve().relative_to(PROJECT_ROOT.resolve()).parts[0]
+    except Exception:
+        return output_dir.name
+
+
 def write_annotation_control_file(path: Path, *, state: str):
     payload = {
         "version": 1,
@@ -188,6 +214,9 @@ def add_session_technique_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--ninja-selection-hold", type=float, default=DEFAULT_NINJA_SELECTION_HOLD)
     parser.add_argument("--ninja-lock-on-dwell", action="store_true")
     parser.add_argument("--ninja-hide-gaze-point", action="store_true")
+    parser.add_argument("--ninja-hide-debug-status", dest="ninja_hide_debug_status", action="store_true", default=True)
+    parser.add_argument("--ninja-show-debug-status", dest="ninja_hide_debug_status", action="store_false")
+    parser.add_argument("--ninja-snap-system-cursor-to-active", action="store_true")
     parser.add_argument("--ninja-calib-points", type=int, choices=[5, 9, 13], default=5)
     parser.add_argument("--ninja-auto-calibrate", action="store_true")
     parser.add_argument("--ninja-with-targetfinder", dest="ninja_without_targetfinder", action="store_false")
@@ -235,6 +264,12 @@ def task_runtime_args(args) -> list[str]:
         values.append("--ninja-lock-on-dwell")
     if args.ninja_hide_gaze_point:
         values.append("--ninja-hide-gaze-point")
+    if getattr(args, "ninja_hide_debug_status", True):
+        values.append("--ninja-hide-debug-status")
+    else:
+        values.append("--ninja-show-debug-status")
+    if getattr(args, "ninja_snap_system_cursor_to_active", False):
+        values.append("--ninja-snap-system-cursor-to-active")
     if args.ninja_auto_calibrate:
         values.append("--ninja-auto-calibrate")
     if not args.ninja_without_targetfinder:
@@ -242,16 +277,34 @@ def task_runtime_args(args) -> list[str]:
     return values
 
 
-def _format_block_label(block: ExperimentBlock) -> str:
+def _format_block_label(block: ExperimentBlock, *, language: str = "French") -> str:
+    id_value = getattr(block, "id_value", None)
+    density = getattr(block, "density", None)
+    if is_english(language):
+        technique = TECHNIQUE_LABELS_EN.get(block.technique, block.technique)
+        label = f"{technique} · difficulty {block.difficulty}"
+        if id_value is not None and density is not None:
+            label += f" · ID={float(id_value):g} · density={density}"
+        return label
     technique = TECHNIQUE_LABELS.get(block.technique, block.technique)
-    return f"{technique} · difficulté {block.difficulty}"
+    label = f"{technique} · difficulté {block.difficulty}"
+    if id_value is not None and density is not None:
+        label += f" · ID={float(id_value):g} · densité={density}"
+    return label
 
 
-def _technique_instruction(block: ExperimentBlock) -> str:
+def _technique_instruction(block: ExperimentBlock, *, language: str = "French") -> str:
     if block.technique == "ninja_cursors":
+        if is_english(language):
+            return (
+                "Ninja Cursors reminder: eight cursors are displayed and start from the center of the screen. "
+                "During the countdown, keep the mouse still. When the trial starts, look at the cursor you want to use; "
+                "the active cursor is shown in orange. Click to select the target with that cursor."
+            )
         return (
-            "Rappel Ninja Cursors : huit curseurs sont affichés. "
-            "Regardez le curseur que vous voulez utiliser, puis cliquez avec ce curseur pour sélectionner la cible."
+            "Rappel Ninja Cursors : huit curseurs sont affichés et partent du centre de l'écran. "
+            "Pendant le compte à rebours, gardez la souris immobile. Quand l'essai commence, regardez le curseur "
+            "que vous voulez utiliser ; le curseur actif est affiché en orange. Cliquez pour sélectionner la cible avec ce curseur."
         )
     return ""
 
@@ -262,7 +315,7 @@ def _ensure_qapplication():
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
 
-def create_session_screen(*, windowed: bool):
+def create_session_screen(*, windowed: bool, language: str = "French"):
     """Create the fullscreen black screen used between experimental phases."""
 
     from PyQt6 import QtCore, QtGui, QtWidgets
@@ -276,9 +329,22 @@ def create_session_screen(*, windowed: bool):
         def __init__(self):
             super().__init__()
             self._windowed = bool(windowed)
+            self._language = language
             self.aborted = False
+            self._continue_requested = False
+            self._continue_pending = False
+            self._continue_finish_scheduled = False
+            self._continue_pending_feedback = True
+            self._wait_loop = None
+            self._manual_wait_active = False
+            self._continue_enabled_at = 0.0
+            self._input_generation = 0
             self._keyboard_grabbed = False
-            self.setWindowTitle("Expérience")
+            self._global_keyboard_listener = None
+            self._global_keyboard_listener_failed = False
+            self._keyboard_events_enabled = True
+            self._app_filter_installed = False
+            self.setWindowTitle("Experiment" if is_english(self._language) else "Expérience")
             self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
             self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
             if not self._windowed:
@@ -346,9 +412,11 @@ def create_session_screen(*, windowed: bool):
             self.hint_label.setWordWrap(True)
             layout.addWidget(self.hint_label)
 
-            self.continue_button = QtWidgets.QPushButton("Continuer")
+            self.continue_button = QtWidgets.QPushButton(
+                "Continue" if is_english(self._language) else "Continuer"
+            )
             self.continue_button.setObjectName("ContinueButton")
-            self.continue_button.clicked.connect(self._continue)
+            self.continue_button.clicked.connect(self._request_continue)
             button_row = QtWidgets.QHBoxLayout()
             button_row.addStretch(1)
             button_row.addWidget(self.continue_button)
@@ -359,17 +427,21 @@ def create_session_screen(*, windowed: bool):
             self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
             self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
             self._escape_shortcut.activated.connect(self._abort)
-            self._q_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
-            self._q_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
-            self._q_shortcut.activated.connect(self._abort)
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.installEventFilter(self)
+                self._app_filter_installed = True
+            self._start_global_keyboard_listener()
 
         def eventFilter(self, watched, event):
-            if self.isVisible() and event.type() == QtCore.QEvent.Type.KeyPress:
+            if (
+                self.isVisible()
+                and self._keyboard_events_enabled
+            ):
+                if event.type() != QtCore.QEvent.Type.KeyPress:
+                    return super().eventFilter(watched, event)
                 key = event.key()
-                if key in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
+                if key == QtCore.Qt.Key.Key_Escape:
                     self._abort()
                     return True
                 if self.continue_button.isVisible() and key in (
@@ -377,9 +449,22 @@ def create_session_screen(*, windowed: bool):
                     QtCore.Qt.Key.Key_Enter,
                     QtCore.Qt.Key.Key_Space,
                 ):
-                    self._continue()
+                    self._request_continue()
                     return True
             return super().eventFilter(watched, event)
+
+        def _is_continue_button_press(self, watched, event):
+            if event.button() != QtCore.Qt.MouseButton.LeftButton:
+                return False
+            if not isinstance(watched, QtWidgets.QWidget):
+                return False
+            try:
+                local_pos = event.position().toPoint()
+            except AttributeError:
+                local_pos = event.pos()
+            global_pos = watched.mapToGlobal(local_pos)
+            button_pos = self.continue_button.mapFromGlobal(global_pos)
+            return self.continue_button.rect().contains(button_pos)
 
         def show_content(
             self,
@@ -389,43 +474,86 @@ def create_session_screen(*, windowed: bool):
             hint: str = "",
             button_text: str | None = None,
             level_offset: int = 2,
+            grab_keyboard: bool = True,
+            pending_feedback: bool = True,
+            input_delay_ms: int = 0,
         ):
             self.aborted = False
+            self._continue_requested = False
+            self._continue_pending = False
+            self._continue_finish_scheduled = False
+            self._continue_pending_feedback = bool(pending_feedback)
+            self._input_generation += 1
+            input_generation = self._input_generation
+            delay_ms = max(0, int(input_delay_ms or 0))
+            self._continue_enabled_at = time.monotonic() + delay_ms / 1000.0
+            self._keyboard_events_enabled = True
+            if self._windowed:
+                self.resize(980, 640)
+            else:
+                screen = QtWidgets.QApplication.primaryScreen()
+                if screen is not None:
+                    self.setGeometry(screen.geometry())
             self.title_label.setText(title)
             self.body_label.setText(body)
             self.hint_label.setText(hint)
             if button_text:
                 self.continue_button.setText(button_text)
+                self.continue_button.setEnabled(delay_ms <= 0)
                 self.continue_button.show()
                 self.continue_button.setFocus()
+                if delay_ms > 0:
+                    QtCore.QTimer.singleShot(
+                        delay_ms,
+                        lambda gen=input_generation: self._enable_continue_if_current(gen),
+                    )
             else:
                 self.continue_button.hide()
             if self._windowed:
-                self.resize(980, 640)
                 self.show()
             else:
-                screen = QtWidgets.QApplication.primaryScreen()
-                if screen is not None:
-                    self.setGeometry(screen.geometry())
                 self.show()
                 if raise_macos_window_above_system_ui is not None:
                     raise_macos_window_above_system_ui(self, level_offset=level_offset)
             self.raise_()
             self.activateWindow()
-            self._grab_session_keyboard()
+            QtCore.QTimer.singleShot(80, self.raise_)
+            QtCore.QTimer.singleShot(80, self.activateWindow)
+            if raise_macos_window_above_system_ui is not None and not self._windowed:
+                QtCore.QTimer.singleShot(
+                    120,
+                    lambda: raise_macos_window_above_system_ui(self, level_offset=level_offset),
+                )
+            self._start_global_keyboard_listener()
+            if grab_keyboard:
+                self._grab_session_keyboard()
+            else:
+                self._release_session_keyboard()
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.processEvents()
 
         def wait_for_continue(self) -> bool:
-            app = QtWidgets.QApplication.instance()
-            if app is None:
+            if self.aborted:
+                return True
+            if self._continue_requested:
                 return False
-            result = app.exec()
-            return result == 130 or bool(self.aborted)
+            app = QtWidgets.QApplication.instance()
+            self._manual_wait_active = True
+            try:
+                while self.isVisible() and not self.aborted and not self._continue_requested:
+                    if app is not None:
+                        app.processEvents(QtCore.QEventLoop.ProcessEventsFlag.AllEvents, 50)
+                    time.sleep(0.01)
+            finally:
+                self._manual_wait_active = False
+            return bool(self.aborted)
 
         def keyPressEvent(self, event: QtGui.QKeyEvent):
-            if event.key() in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
+            if not self._keyboard_events_enabled:
+                super().keyPressEvent(event)
+                return
+            if event.key() == QtCore.Qt.Key.Key_Escape:
                 self._abort()
                 return
             if self.continue_button.isVisible() and event.key() in (
@@ -433,7 +561,7 @@ def create_session_screen(*, windowed: bool):
                 QtCore.Qt.Key.Key_Enter,
                 QtCore.Qt.Key.Key_Space,
             ):
-                self._continue()
+                self._request_continue()
                 return
             super().keyPressEvent(event)
 
@@ -443,7 +571,87 @@ def create_session_screen(*, windowed: bool):
 
         def closeEvent(self, event):
             self._release_session_keyboard()
+            self._stop_global_keyboard_listener()
+            app = QtWidgets.QApplication.instance()
+            if app is not None and self._app_filter_installed:
+                app.removeEventFilter(self)
+                self._app_filter_installed = False
             super().closeEvent(event)
+
+        def show_background_behind(self, *, level_offset: int = 0, clear_content: bool = True):
+            self._keyboard_events_enabled = False
+            self._continue_requested = False
+            if self._windowed:
+                self.resize(980, 640)
+            else:
+                screen = QtWidgets.QApplication.primaryScreen()
+                if screen is not None:
+                    self.setGeometry(screen.geometry())
+            if clear_content:
+                self.title_label.setText("")
+                self.body_label.setText("")
+                self.hint_label.setText("")
+                self.continue_button.hide()
+            self.show()
+            self._release_session_keyboard()
+            if raise_macos_window_above_system_ui is not None and not self._windowed:
+                raise_macos_window_above_system_ui(self, level_offset=level_offset)
+            self.lower()
+            app = QtWidgets.QApplication.instance()
+            if app is not None:
+                app.processEvents()
+
+        def _start_global_keyboard_listener(self):
+            if sys.platform == "darwin":
+                return
+            if self._global_keyboard_listener is not None or self._global_keyboard_listener_failed:
+                return
+            try:
+                from pynput import keyboard as pynput_keyboard
+            except Exception:
+                self._global_keyboard_listener_failed = True
+                return
+
+            def on_press(key):
+                if not self.isVisible() or not self._keyboard_events_enabled:
+                    return
+                try:
+                    is_escape = key == pynput_keyboard.Key.esc
+                    is_continue = key in {
+                        pynput_keyboard.Key.enter,
+                        pynput_keyboard.Key.space,
+                    }
+                    if is_escape:
+                        QtCore.QMetaObject.invokeMethod(
+                            self,
+                            "_abort",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                        )
+                    elif is_continue and self.continue_button.isVisible():
+                        QtCore.QMetaObject.invokeMethod(
+                            self,
+                            "_request_continue",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                        )
+                except Exception:
+                    return
+
+            try:
+                self._global_keyboard_listener = pynput_keyboard.Listener(on_press=on_press)
+                self._global_keyboard_listener.start()
+            except Exception:
+                self._global_keyboard_listener = None
+                self._global_keyboard_listener_failed = True
+
+        def _stop_global_keyboard_listener(self):
+            listener = self._global_keyboard_listener
+            self._global_keyboard_listener = None
+            if listener is None:
+                return
+            try:
+                listener.stop()
+            except Exception:
+                pass
 
         def _grab_session_keyboard(self):
             if sys.platform == "darwin":
@@ -468,8 +676,37 @@ def create_session_screen(*, windowed: bool):
             self._keyboard_grabbed = False
 
         @QtCore.pyqtSlot()
+        def _request_continue(self):
+            if self._continue_pending or self._continue_requested or self.aborted:
+                return
+            if time.monotonic() < self._continue_enabled_at:
+                return
+            self._continue()
+
+        def _request_mouse_continue(self):
+            if self._continue_pending or self._continue_requested or self.aborted:
+                return
+            self._continue_pending = True
+            self._continue_finish_scheduled = False
+            self.continue_button.setEnabled(False)
+            QtCore.QTimer.singleShot(150, self._finish_pending_continue)
+
+        def _finish_pending_continue(self):
+            if not self._continue_pending or self._continue_finish_scheduled or self._continue_requested or self.aborted:
+                return
+            self._continue_finish_scheduled = True
+            self._continue()
+
         def _continue(self):
+            self._continue_requested = True
+            self._continue_pending = False
+            self._continue_finish_scheduled = False
             self._release_session_keyboard()
+            if self._manual_wait_active:
+                return
+            if self._wait_loop is not None:
+                self._wait_loop.exit(0)
+                return
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.exit(0)
@@ -478,12 +715,28 @@ def create_session_screen(*, windowed: bool):
         def _abort(self):
             self.aborted = True
             self._release_session_keyboard()
+            if self._manual_wait_active:
+                return
+            if self._wait_loop is not None:
+                self._wait_loop.exit(130)
+                return
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.exit(130)
 
-    _ensure_qapplication()
-    return SessionScreen()
+        def _enable_continue_if_current(self, generation: int):
+            if generation != self._input_generation:
+                return
+            if self.continue_button.isVisible() and not self._continue_requested and not self.aborted:
+                self.continue_button.setEnabled(True)
+
+    app = _ensure_qapplication()
+    screen = SessionScreen()
+    # Keep a Python reference to the QApplication for callers that create only
+    # a transition screen. Otherwise PyQt can destroy the temporary app object
+    # before the QWidget is fully constructed, which aborts the process on macOS.
+    screen._qapplication_ref = app
+    return screen
 
 
 def show_break_screen(
@@ -491,27 +744,59 @@ def show_break_screen(
     current_block: ExperimentBlock,
     next_block: ExperimentBlock,
     windowed: bool,
+    language: str = "French",
     screen=None,
+    current_block_index: int | None = None,
+    next_block_index: int | None = None,
+    block_count: int | None = None,
 ):
     """Keep a rest page visible until the participant chooses to continue."""
 
     owned_screen = screen is None
-    screen = screen or create_session_screen(windowed=windowed)
-    next_instruction = _technique_instruction(next_block)
-    body = (
-        f"Bloc terminé : {_format_block_label(current_block)}\n"
-        f"Prochain bloc : {_format_block_label(next_block)}"
-    )
+    screen = screen or create_session_screen(windowed=windowed, language=language)
+    next_instruction = _technique_instruction(next_block, language=language)
+    if current_block_index is not None and next_block_index is not None and block_count is not None:
+        if is_english(language):
+            current_prefix = f"Completed block {current_block_index}/{block_count}: "
+            next_prefix = f"Next block {next_block_index}/{block_count}: "
+        else:
+            current_prefix = f"Bloc terminé {current_block_index}/{block_count} : "
+            next_prefix = f"Bloc prochain {next_block_index}/{block_count} : "
+    elif is_english(language):
+        current_prefix = "Completed block: "
+        next_prefix = "Next block: "
+    else:
+        current_prefix = "Bloc terminé : "
+        next_prefix = "Bloc prochain : "
+    if is_english(language):
+        body = (
+            f"{current_prefix}{_format_block_label(current_block, language=language)}\n"
+            f"{next_prefix}{_format_block_label(next_block, language=language)}"
+        )
+        hint = (
+            "You can take a break for as long as needed.\n"
+            "Click Continue, or press Enter / Space, to resume."
+        )
+        button_text = "Continue"
+    else:
+        body = (
+            f"{current_prefix}{_format_block_label(current_block, language=language)}\n"
+            f"{next_prefix}{_format_block_label(next_block, language=language)}"
+        )
+        hint = (
+            "Vous pouvez faire une pause aussi longtemps que nécessaire.\n"
+            "Cliquez sur Continuer, ou appuyez sur Entrée / Espace, pour reprendre."
+        )
+        button_text = "Continuer"
     if next_instruction:
         body += f"\n\n{next_instruction}"
     screen.show_content(
         title="Pause",
         body=body,
-        hint=(
-            "Vous pouvez faire une pause aussi longtemps que nécessaire.\n"
-            "Cliquez sur Continuer, ou appuyez sur Entrée / Espace, pour reprendre."
-        ),
-        button_text="Continuer",
+        hint=hint,
+        button_text=button_text,
+        pending_feedback=False,
+        input_delay_ms=500,
     )
     aborted = screen.wait_for_continue()
     if owned_screen:
@@ -539,6 +824,8 @@ def build_block_command(
         sys.executable,
         "-m",
         "target_finder_toolkit.experimental_task",
+        "--language",
+        args.language,
         "--data-dir",
         str(args.data_dir),
         "--technique",
@@ -719,6 +1006,8 @@ def start_preloaded_techniques(
 ) -> dict[str, PreloadedTechnique]:
     processes: dict[str, PreloadedTechnique] = {}
     for technique in TECHNIQUES:
+        if technique == "mouse":
+            continue
         annotation_control_file = output_dir / f"{technique}.annotations.json"
         write_annotation_control_file(annotation_control_file, state="inactive")
         technique_log_file = None if args.no_technique_log else output_dir / f"{session_id}_{technique}_runtime.jsonl"
@@ -976,6 +1265,7 @@ def run_block_in_process(
         cursor_log_hz=args.cursor_log_hz,
         fullscreen=not args.windowed,
         emit_session_events=False,
+        language=args.language,
         session_metadata={
             "participant_id": args.participant,
             "session_id": session_id,
@@ -992,23 +1282,17 @@ def run_block_in_process(
         window.show_desktop_fullscreen()
     app.processEvents()
     if transition_screen is not None:
-        # Keep the black transition screen visible briefly while the next task
+        # Keep the transition screen visible briefly while the next task
         # window finishes becoming fullscreen. This avoids exposing the real
         # desktop between two experimental blocks on macOS.
-        QtCore.QTimer.singleShot(150, transition_screen.hide)
+        QtCore.QTimer.singleShot(
+            150,
+            lambda: transition_screen.show_background_behind(clear_content=False),
+        )
         app.processEvents()
 
     qt_exit_code = app.exec()
     exit_code = int(window._exit_code or qt_exit_code or 0)
-
-    if transition_screen is not None and exit_code == 0:
-        transition_screen.show_content(
-            title="",
-            body="",
-            hint="",
-            button_text=None,
-        )
-        app.processEvents()
 
     window.close()
     window.deleteLater()
@@ -1021,9 +1305,10 @@ def main():
         description="Run a counterbalanced experimental session made of technique/difficulty blocks."
     )
     parser.add_argument("--participant", required=True, help="Participant id, e.g. P01")
+    parser.add_argument("--language", choices=["French", "English"], default="French", help="UI language for experimental screens")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Annotated dataset directory")
-    parser.add_argument("--trials-per-block", type=int, default=6, help="Trials per technique/difficulty block")
-    parser.add_argument("--countdown", type=int, default=3, help="Countdown seconds passed to each block")
+    parser.add_argument("--trials-per-block", type=int, default=8, help="Trials per technique/difficulty block")
+    parser.add_argument("--countdown", type=float, default=0.0, help="Countdown seconds passed to each block")
     parser.add_argument("--max-clicks", type=int, default=1, help="Maximum clicks per trial")
     parser.add_argument("--seed", type=int, default=None, help="Optional seed combined with participant id")
     parser.add_argument("--output-dir", default=None, help="Directory for session and block logs")
@@ -1033,6 +1318,7 @@ def main():
     parser.add_argument("--pause-between-blocks", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--show-all-targets", action="store_true", help="Debug: show all annotated targets")
     parser.add_argument("--windowed", action="store_true", help="Run each block in a window")
+    parser.add_argument("--no-log", action="store_true", help="Run without preserving session JSONL logs")
     parser.add_argument("--no-technique-log", action="store_true", help="Disable separate runtime technique logs")
     parser.add_argument("--cursor-log-hz", type=float, default=30.0, help="Experiment-level cursor sampling rate")
     parser.add_argument("--technique-start-delay", type=float, default=None, help="Override technique startup delay")
@@ -1046,10 +1332,15 @@ def main():
 
     session_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     session_id = f"{args.participant}_{session_stamp}"
+    temp_dir_obj = None
+    if args.no_log:
+        temp_dir_obj = tempfile.TemporaryDirectory(prefix="target_finder_realistic_session_")
     output_dir = (
-        Path(args.output_dir).expanduser()
+        Path(temp_dir_obj.name)
+        if temp_dir_obj is not None
+        else Path(args.output_dir).expanduser()
         if args.output_dir
-        else PROJECT_ROOT / "experience_logs" / session_id
+        else PROJECT_ROOT / "patient_logs" / session_id
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1089,6 +1380,10 @@ def main():
         session_log,
         {
             "type": "session_start",
+            "task": "realistic_screenshot_session",
+            "task_label": "patient_or_control_realistic_screenshot_task",
+            "log_group": log_group_from_output_dir(output_dir),
+            "output_dir": str(output_dir),
             "participant_id": args.participant,
             "session_id": session_id,
             "data_dir": str(args.data_dir),
@@ -1107,14 +1402,17 @@ def main():
     app = _ensure_qapplication()
     dataset = load_dataset(Path(args.data_dir))
     dataset_by_image = {str(item.image_path): item for item in dataset}
-    session_screen = create_session_screen(windowed=args.windowed)
+    session_screen = create_session_screen(windowed=args.windowed, language=args.language)
     session_screen.show_content(
-        title="Initialisation de l'expérience",
+        title="Experiment initialization" if is_english(args.language) else "Initialisation de l'expérience",
         body=(
-            "Préparation de la session contrôlée.\n"
+            "Preparing the controlled session.\n"
+            "Loading techniques and experimental parameters..."
+            if is_english(args.language)
+            else "Préparation de la session contrôlée.\n"
             "Chargement des techniques et des paramètres expérimentaux..."
         ),
-        hint="Veuillez patienter.",
+        hint="Please wait." if is_english(args.language) else "Veuillez patienter.",
         button_text=None,
     )
     write_event(session_log, {"type": "initialization_start"})
@@ -1139,7 +1437,7 @@ def main():
             abort_check=lambda: bool(session_screen.aborted),
         )
         if session_screen.aborted:
-            write_session_end("escape_during_initialization")
+            write_session_end("keyboard_escape_during_initialization")
             cleanup_session_resources(
                 preloaded_processes=preloaded_processes,
                 session_log=session_log,
@@ -1150,12 +1448,19 @@ def main():
             raise SystemExit(130)
         if args.ninja_auto_calibrate:
             session_screen.show_content(
-                title="Initialisation de l'expérience",
+                title="Experiment initialization" if is_english(args.language) else "Initialisation de l'expérience",
                 body=(
-                    "Préparation du suivi du regard.\n"
+                    "Preparing eye tracking.\n"
+                    "Please wait while Ninja Cursors finishes initializing before calibration..."
+                    if is_english(args.language)
+                    else "Préparation du suivi du regard.\n"
                     "Veuillez patienter pendant l'initialisation de Ninja Cursors avant la calibration..."
                 ),
-                hint="Cette étape peut prendre quelques secondes selon la machine.",
+                hint=(
+                    "This step may take a few seconds depending on the machine."
+                    if is_english(args.language)
+                    else "Cette étape peut prendre quelques secondes selon la machine."
+                ),
                 button_text=None,
             )
             ninja_ready = wait_for_ninja_ready(
@@ -1165,7 +1470,7 @@ def main():
                 abort_check=lambda: bool(session_screen.aborted),
             )
             if ninja_ready == "aborted":
-                write_session_end("escape_during_initialization")
+                write_session_end("keyboard_escape_during_initialization")
                 cleanup_session_resources(
                     preloaded_processes=preloaded_processes,
                     session_log=session_log,
@@ -1185,19 +1490,24 @@ def main():
                 )
                 raise SystemExit(130)
             session_screen.show_content(
-                title="Calibration du regard",
+                title="Eye-tracking calibration" if is_english(args.language) else "Calibration du regard",
                 body=(
-                    "Avant de commencer l'expérience, une calibration du regard va être effectuée.\n"
+                    "Before the experiment starts, an eye-tracking calibration will be performed.\n"
+                    "Red points will appear one after another on the screen.\n"
+                    "Look at each red point without moving your head until the next point appears.\n"
+                    "After calibration, a screen will tell you that the experiment can begin."
+                    if is_english(args.language)
+                    else "Avant de commencer l'expérience, une calibration du regard va être effectuée.\n"
                     "Des points rouges apparaîtront successivement à l'écran.\n"
                     "Regardez chaque point rouge sans bouger la tête jusqu'au point suivant.\n"
                     "Après la calibration, un écran vous indiquera que l'expérience peut commencer."
                 ),
-                hint="Cliquez sur Commencer quand vous êtes prêt(e).",
-                button_text="Commencer la calibration",
+                hint="Click Start when you are ready." if is_english(args.language) else "Cliquez sur Commencer quand vous êtes prêt(e).",
+                button_text="Start calibration" if is_english(args.language) else "Commencer la calibration",
             )
             write_event(session_log, {"type": "calibration_instructions"})
             if session_screen.wait_for_continue():
-                write_session_end("escape_before_calibration")
+                write_session_end("keyboard_escape_before_calibration")
                 cleanup_session_resources(
                     preloaded_processes=preloaded_processes,
                     session_log=session_log,
@@ -1207,9 +1517,17 @@ def main():
                 )
                 raise SystemExit(130)
             session_screen.show_content(
-                title="Calibration en cours",
-                body="Regardez le point rouge affiché à l'écran jusqu'à la fin de la calibration.",
-                hint="Ne cliquez pas et évitez de bouger la tête pendant cette étape.",
+                title="Calibration in progress" if is_english(args.language) else "Calibration en cours",
+                body=(
+                    "Look at the red point displayed on the screen until calibration is finished."
+                    if is_english(args.language)
+                    else "Regardez le point rouge affiché à l'écran jusqu'à la fin de la calibration."
+                ),
+                hint=(
+                    "Do not click and avoid moving your head during this step."
+                    if is_english(args.language)
+                    else "Ne cliquez pas et évitez de bouger la tête pendant cette étape."
+                ),
                 button_text=None,
                 level_offset=0,
             )
@@ -1224,7 +1542,7 @@ def main():
             ninja_control_file.write_text("paused", encoding="utf-8")
             if calibration_result in {"aborted", "cancelled"}:
                 write_session_end(
-                    "escape_during_calibration"
+                    "keyboard_escape_during_calibration"
                     if calibration_result == "aborted"
                     else "calibration_cancelled"
                 )
@@ -1247,17 +1565,20 @@ def main():
                 )
                 raise SystemExit(130)
             session_screen.show_content(
-                title="Calibration terminée",
+                title="Calibration complete" if is_english(args.language) else "Calibration terminée",
                 body=(
-                    "L'expérience va maintenant commencer.\n"
+                    "The experiment will now begin.\n"
+                    "You will select the highlighted targets on screen using the different techniques."
+                    if is_english(args.language)
+                    else "L'expérience va maintenant commencer.\n"
                     "Vous allez sélectionner les cibles indiquées à l'écran avec les différentes techniques."
                 ),
-                hint="Cliquez sur Commencer quand vous êtes prêt(e).",
-                button_text="Commencer l'expérience",
+                hint="Click Start when you are ready." if is_english(args.language) else "Cliquez sur Commencer quand vous êtes prêt(e).",
+                button_text="Start experiment" if is_english(args.language) else "Commencer l'expérience",
             )
             write_event(session_log, {"type": "experiment_start_instructions"})
             if session_screen.wait_for_continue():
-                write_session_end("escape_before_first_block")
+                write_session_end("keyboard_escape_before_first_block")
                 cleanup_session_resources(
                     preloaded_processes=preloaded_processes,
                     session_log=session_log,
@@ -1267,6 +1588,37 @@ def main():
                 )
                 raise SystemExit(130)
     write_event(session_log, {"type": "initialization_end"})
+
+    if ordered_blocks and ordered_blocks[0].technique == "ninja_cursors":
+        session_screen.show_content(
+            title="Ninja Cursors",
+            body=_technique_instruction(ordered_blocks[0], language=args.language),
+            hint=(
+                "Click Continue when you are ready."
+                if is_english(args.language)
+                else "Cliquez sur Continuer quand vous êtes prêt(e)."
+            ),
+            button_text="Continue" if is_english(args.language) else "Continuer",
+        )
+        write_event(
+            session_log,
+            {
+                "type": "technique_instructions",
+                "technique": "ninja_cursors",
+                "before_block_index": 1,
+                "block_id": ordered_blocks[0].block_id,
+            },
+        )
+        if session_screen.wait_for_continue():
+            write_session_end("keyboard_escape_before_first_block")
+            cleanup_session_resources(
+                preloaded_processes=preloaded_processes,
+                session_log=session_log,
+                ninja_control_file=ninja_control_file,
+                session_screen=session_screen,
+                app=app,
+            )
+            raise SystemExit(130)
 
     try:
         trial_offset = 0
@@ -1354,7 +1706,7 @@ def main():
                 },
             )
             if result_code != 0:
-                reason = "escape_in_block" if result_code == 130 else "block_failed"
+                reason = "keyboard_escape_in_block" if result_code == 130 else "block_failed"
                 write_session_end(reason, failed_block_index=block_index, returncode=result_code)
                 raise SystemExit(result_code)
 
@@ -1378,7 +1730,11 @@ def main():
                     current_block=block,
                     next_block=next_block,
                     windowed=args.windowed,
+                    language=args.language,
                     screen=session_screen,
+                    current_block_index=block_index,
+                    next_block_index=block_index + 1,
+                    block_count=block_count,
                 )
                 pause_duration = time.time() - pause_started
                 _drain_preloaded_outputs(preloaded_processes, session_log)
@@ -1394,7 +1750,7 @@ def main():
                     },
                 )
                 if break_aborted:
-                    write_session_end("escape_on_break", after_block_index=block_index)
+                    write_session_end("keyboard_escape_on_break", after_block_index=block_index)
                     raise SystemExit(130)
 
         write_session_end("completed")

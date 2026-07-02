@@ -34,6 +34,10 @@ def _ensure_mediapipe_python_alias():
 
 
 MODE_OPTIONS = {
+    "mouse_filter": {
+        "English": "Standard Mouse",
+        "French": "Souris standard",
+    },
     "targetfinder": {
         "English": "TargetFinder Overlay",
         "French": "Overlay TargetFinder",
@@ -85,23 +89,42 @@ DEFAULT_RAKE_GAZE_SMOOTHING = 0.35
 DEFAULT_RAKE_GAZE_GAIN_X = 1.0
 DEFAULT_RAKE_GAZE_GAIN_Y = 1.0
 DEFAULT_RAKE_GAZE_OFFSET_X = 0.0
-DEFAULT_RAKE_GAZE_OFFSET_Y = -200.0
+DEFAULT_RAKE_GAZE_OFFSET_Y = 0.0
 DEFAULT_RAKE_SELECTION_HOLD = 2.0
 DEFAULT_RAKE_LOCK_ON_DWELL = False
 DEFAULT_RAKE_USE_CALIBRATION = True
 DEFAULT_RAKE_CALIB_POINTS = 5
 DEFAULT_RAKE_AUTO_CALIBRATE = False
 DEFAULT_RAKE_WITHOUT_TARGETFINDER = True
+DEFAULT_RAKE_SHOW_GAZE = False
+DEFAULT_RAKE_SHOW_DEBUG_STATUS = False
+DEFAULT_RAKE_SNAP_SYSTEM_CURSOR = True
 DEFAULT_EXPERIMENT_DATA_DIR = str(Path(__file__).resolve().parents[3] / "data" / "web")
-DEFAULT_EXPERIMENT_TRIALS = 6
+DEFAULT_EXPERIMENT_TASK_TYPE = "realistic"
+DEFAULT_SYNTHETIC_DENSITY = "medium"
+DEFAULT_SYNTHETIC_BLOCKS = 12
+DEFAULT_PATIENT_EXPERIMENT_TRIALS = 8
+DEFAULT_CONTROL_EXPERIMENT_TRIALS = 12
+DEFAULT_EXPERIMENT_TRIALS = DEFAULT_PATIENT_EXPERIMENT_TRIALS
 DEFAULT_EXPERIMENT_DIFFICULTY = "mixed"
-DEFAULT_EXPERIMENT_COUNTDOWN = 3
+DEFAULT_EXPERIMENT_COUNTDOWN = 0.0
 DEFAULT_EXPERIMENT_MAX_CLICKS = 1
 DEFAULT_EXPERIMENT_FULLSCREEN = True
 DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS = False
 DEFAULT_EXPERIMENT_SESSION_ENABLED = False
 DEFAULT_EXPERIMENT_PARTICIPANT_ID = "P01"
+DEFAULT_BASELINE_TRIALS_PER_TASK = 5
+DEFAULT_COMPARATIVE_TASK_PART = "control_our_task"
+DEFAULT_COMPARATIVE_RUN_MODE = "test"
+EXPERIMENT_LOG_ROOTS = ("patient_logs", "control_comparative", "control_our_task", "control_fitts_synthetic")
 DEFAULT_USAGE_MODE = "test"
+PAGE_USAGE = 0
+PAGE_EXPERIMENT_PROTOCOL = 1
+PAGE_COMPARATIVE_RUN = 2
+PAGE_MODE = 3
+PAGE_ACCESSIBILITY = 4
+PAGE_AUDIO = 5
+PAGE_LANGUAGE = 6
 
 UI_TEXTS = {
     "English": {
@@ -111,15 +134,19 @@ UI_TEXTS = {
         "nav_audio": "Audio",
         "nav_language": "Language",
         "page_usage": "Usage mode",
-        "page_mode": "Mode / Detection",
+        "page_experiment_protocol": "Choose experiment",
+        "page_comparative_run": "Control protocol mode",
+        "page_mode": "Configuration",
         "page_accessibility": "Accessibility",
         "page_audio": "Audio",
         "page_language": "Language",
-        "usage_section": "Mode d’utilisation",
-        "usage_test": "Tester une technique",
+        "usage_section": "Usage mode",
+        "usage_test": "Test a technique",
         "usage_test_desc": "Free test/demo mode. Choose one technique, adjust parameters, then start it.",
-        "usage_experiment": "Lancer une expérience",
-        "usage_experiment_desc": "Controlled experiment mode. Runs the complete Balanced Latin Square session automatically.",
+        "usage_baseline": "Standard mouse tasks",
+        "usage_baseline_desc": "Qualitative baseline with the standard mouse only: cursor stability, long-distance movement, and dense interface tasks.",
+        "usage_experiment": "Run an experiment",
+        "usage_experiment_desc": "Controlled experiment mode. Choose either the patient realistic protocol or the healthy-control comparative protocol.",
         "usage_choose_first": "Choose a usage mode first.",
         "setup_section": "Technique setup",
         "filter_section": "Pointer filter",
@@ -129,7 +156,13 @@ UI_TEXTS = {
         "semantic_section": "Semantic Pointing options",
         "dynaspot_section": "DynaSpot options",
         "rake_section": "Ninja Cursors(gaze) options",
-        "technique": "Technique (5 modes, default: none)",
+        "rake_device_section": "Device / environment parameters",
+        "rake_device_section_note": "These usually do not need frequent changes; just confirm they are correct.",
+        "rake_cursor_section": "Ninja cursor parameters",
+        "rake_calibration_params_section": "Calibration parameters",
+        "rake_selection_section": "Selection / display / detection parameters",
+        "rake_selection_section_note": "These control how the cursor is selected, what is displayed, and whether TargetFinder is used.",
+        "technique": "Technique (6 modes, default: none)",
         "select_technique": "Choose a technique",
         "choose_mode_dialog": "Choose a Technique",
         "filter": "Filter (choices: none/one euro, default: none)",
@@ -151,10 +184,20 @@ UI_TEXTS = {
         "record_data": "Record session data (range: off/on, default: off)",
         "record_data_desc": "Save structured JSONL logs with cursor samples, clicks, and detection changes for later analysis.",
         "mode_targetfinder": "TargetFinder Overlay",
+        "mode_mouse_filter": "Standard Mouse",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Semantic Pointing",
         "mode_dynaspot": "DynaSpot",
         "mode_rake": "Ninja Cursors(gaze)",
+        "baseline_participant_id": "Baseline participant ID (default: P01)",
+        "baseline_participant_id_desc": "Identifier written in the qualitative normal-mouse baseline log.",
+        "baseline_trials_per_task": "Baseline trials per task (range: 1-20, default: 5)",
+        "baseline_trials_per_task_desc": "Number of repetitions for each qualitative baseline task: cursor stability, long-distance movement, and dense interface.",
+        "browser_compatible_fullscreen": "Compatible browser fullscreen",
+        "browser_compatible_fullscreen_desc": "macOS native fullscreen creates a separate Space and can block tester overlays. This resizes an open browser to fill the current desktop without entering native fullscreen.",
+        "browser_fullscreen_applied": "Browser resized in the current desktop Space. Do not press the green fullscreen button after this.",
+        "browser_fullscreen_unsupported": "Compatible browser fullscreen is only available on macOS.",
+        "browser_fullscreen_failed": "Could not resize a supported browser window. Open Chrome, Safari, Edge, Firefox, Arc, Brave, Chromium, or Opera first; Accessibility permission may be required.",
         "dynaspot_params": "DynaSpot tuning",
         "dynaspot_min_speed": "DynaSpot min speed (range: 0.0-5000.0, default: 100.0)",
         "dynaspot_min_speed_desc": "Pointer speed threshold where the spot starts growing. Lower values make the spot expand earlier.",
@@ -202,37 +245,64 @@ UI_TEXTS = {
         "rake_gaze_gain_x_desc": "Scales horizontal gaze movement around the screen center before offset is applied. Higher values increase left-right travel.",
         "rake_gaze_gain_y": "Gaze gain Y (range: 0.1-10.0, default: 1.0)",
         "rake_gaze_gain_y_desc": "Scales vertical gaze movement around the screen center before offset is applied. Higher values increase up-down travel.",
-        "rake_gaze_offset_x": "Gaze offset X (px) (range: -1000.0-1000.0, default: 10.0)",
+        "rake_gaze_offset_x": "Gaze offset X (px) (range: -1000.0-1000.0, default: 0.0)",
         "rake_gaze_offset_x_desc": "Shifts the gaze estimate horizontally before selecting the active cursor. Positive = move right, negative = move left.",
-        "rake_gaze_offset_y": "Gaze offset Y (px) (range: -1000.0-1000.0, default: -200.0)",
+        "rake_gaze_offset_y": "Gaze offset Y (px) (range: -1000.0-1000.0, default: 0.0)",
         "rake_gaze_offset_y_desc": "Shifts the gaze estimate vertically before selecting the active cursor. Positive = move down, negative = move up.",
         "rake_lock_on_dwell": "Lock cursor by gaze dwell (range: off/on, default: off)",
-        "rake_lock_on_dwell_desc": "When enabled, gaze must stay on the same cursor before it locks. When disabled, the current yellow cursor can be clicked immediately.",
+        "rake_lock_on_dwell_desc": "When enabled, gaze must stay on the same cursor before it locks. When disabled, the current orange cursor can be clicked immediately.",
         "rake_selection_hold": "Gaze dwell lock time (range: 0.0-5.0, default: 2.0)",
         "rake_selection_hold_desc": "Seconds the gaze must stay on the same cursor before it locks automatically. Used only when dwell locking is enabled.",
-        "rake_show_gaze": "Show gaze point (Ninja only, range: off/on, default: on)",
-        "rake_show_gaze_desc": "Shows a red gaze marker estimated from the webcam.",
+        "rake_show_gaze": "Show gaze point (Ninja only, range: off/on, default: off)",
+        "rake_show_gaze_desc": "Shows the red real-time gaze marker estimated from the webcam. Keep it off during tests unless you need calibration feedback.",
+        "rake_show_debug_status": "Show gaze tracking status bar (range: off/on, default: off)",
+        "rake_show_debug_status_desc": "Shows the black real-time Ninja tracking status bar in the upper-left corner. Keep it off during tests unless debugging gaze tracking.",
+        "rake_snap_system_cursor": "Move system cursor to active Ninja cursor (range: off/on, default: on)",
+        "rake_snap_system_cursor_desc": "Moves the native macOS cursor to the active orange Ninja cursor, reducing the mismatch caused when macOS reveals the real cursor after clicks.",
         "rake_without_targetfinder": "Without TargetFinder (range: off/on, default: on)",
         "rake_without_targetfinder_desc": "Runs Ninja Cursors(gaze) without detection, target highlighting, or model inference. Only gaze-based cursor selection and redirected clicks remain active.",
         "experiment_section": "Experimental task",
         "experiment_enabled": "Run experimental task (range: off/on, default: off)",
-        "experiment_enabled_desc": "When enabled, Start / Apply launches the controlled screenshot target-selection task instead of a free demo.",
+        "experiment_enabled_desc": "When enabled, Start / Apply launches a controlled experimental task instead of a free demo.",
+        "experiment_protocol": "Experimental protocol",
+        "experiment_protocol_desc": "Choose the protocol to run after pressing Start / Apply.",
+        "experiment_protocol_realistic": "Patient protocol - realistic task",
+        "experiment_protocol_realistic_desc": "For patients: runs only the complete realistic screenshot target-selection task.",
+        "experiment_protocol_comparative": "Control protocol - realistic task + synthetic Fitts",
+        "experiment_protocol_comparative_desc": "For healthy controls: includes the realistic screenshot task and the synthetic Fitts-with-distractors task, with the order balanced by participant ID.",
+        "comparative_run_mode_desc": "Choose how to run the healthy-control protocol.",
+        "comparative_run_test": "Test the two control tasks separately",
+        "comparative_run_test_desc": "Testing mode: launch either the control realistic task or the control synthetic Fitts task, with separate logs.",
+        "comparative_run_full": "Run the full control protocol",
+        "comparative_run_full_desc": "Full mode: enter the participant ID, then the software runs both control tasks in the counterbalanced order with a pause between them.",
+        "comparative_task_part": "Control task to run (default: control realistic task)",
+        "comparative_task_part_desc": "Run one task at a time: control realistic task or control synthetic Fitts task. Use participant ID to balance which task is run first.",
+        "experiment_task_type": "Experimental task type (default: realistic screenshots)",
+        "experiment_task_type_desc": "Choose realistic screenshots, synthetic Fitts-with-distractors, or the healthy-participant comparative protocol that runs both tasks.",
         "experiment_session_enabled": "Run full experimental session (range: off/on, default: off)",
-        "experiment_session_enabled_desc": "If enabled, Start / Apply runs all 12 Balanced Latin Square blocks: Bubble, DynaSpot, Semantic Pointing, and Ninja Cursors over easy/medium/hard difficulties.",
+        "experiment_session_enabled_desc": "If enabled, Start / Apply runs the full task blocks: Standard Mouse, Bubble, DynaSpot, Semantic Pointing, and Ninja Cursors over easy/medium/hard difficulties.",
         "experiment_participant_id": "Participant ID (default: P01)",
         "experiment_participant_id_desc": "Identifier written in the session log and used to select one Balanced Latin Square block order.",
         "experiment_data_dir": "Dataset folder (default: stage/data/web)",
         "experiment_data_dir_desc": "Folder containing the annotated screenshot .png/.txt pairs used to generate trials.",
-        "experiment_trials": "Trials / trials per block (range: 1-1000, default: 6)",
-        "experiment_trials_desc": "Single-task mode: total number of trials. Full-session mode: number of trials in each technique × difficulty block.",
+        "experiment_trials": "Trials / trials per block (range: 1-1000, default: 8)",
+        "experiment_trials_desc": "Number of trials in each technique × difficulty block.",
+        "experiment_trials_patient": "Trials / trials per block (range: 1-1000, default: 8)",
+        "experiment_trials_patient_desc": "Number of trials in each technique × difficulty block.",
+        "experiment_trials_control": "Trials / trials per block (range: 1-1000, default: 12)",
+        "experiment_trials_control_desc": "Number of trials per block for the realistic and synthetic tasks.",
         "experiment_difficulty": "Difficulty (choices: easy/medium/hard/mixed, default: mixed)",
         "experiment_difficulty_desc": "Difficulty bin sampled by Fitts ID: easy [0,3), medium [3,5), hard [5,8.5). Mixed samples from all bins.",
-        "experiment_countdown": "Countdown (seconds, range: 0-30, default: 3)",
-        "experiment_countdown_desc": "Seconds before each trial starts while the cursor is held at the image center.",
+        "synthetic_density": "Synthetic distractor density (choices: low/medium/high, default: medium)",
+        "synthetic_density_desc": "Distractor density rho for the synthetic Fitts task: low = 0.1, medium = 0.3, high = 0.6.",
+        "synthetic_blocks": "Fitts synthetic only: synthetic blocks per participant (range: 1-18, default: 12)",
+        "synthetic_blocks_desc": "Fitts synthetic task only: number of blocks sampled from the 18 ID × density combinations for this participant. The other complete-experiment parameters apply to both tasks.",
+        "experiment_countdown": "Countdown (seconds, range: 0-30, step: 0.5, default: 0)",
+        "experiment_countdown_desc": "Seconds before each trial starts while the cursor is held at the task start position.",
         "experiment_max_clicks": "Max clicks per trial (range: 1-20, default: 1)",
         "experiment_max_clicks_desc": "Maximum attempts allowed before a trial is marked failed.",
         "experiment_fullscreen": "Fullscreen experiment (range: off/on, default: on)",
-        "experiment_fullscreen_desc": "Show the screenshot task fullscreen. Disable only for debugging.",
+        "experiment_fullscreen_desc": "Show the experimental task fullscreen. Disable only for debugging.",
         "experiment_show_all_targets": "Show all annotated targets (debug, default: off)",
         "experiment_show_all_targets_desc": "Draw all dataset annotation boxes in green. Use only for debugging, not participant runs.",
         "experiment_note": "For the TargetFinder condition, the controlled task uses the annotated dataset as ground truth and runs the mouse baseline internally.",
@@ -248,14 +318,14 @@ UI_TEXTS = {
         "confidence": "Confidence (range: 0.0-1.0, default: 0.28)",
         "confidence_desc": "Lower = keeps more detections. Higher = keeps only more certain detections.",
         "iou": "IoU (range: 0.0-1.0, default: 0.3)",
-        "iou_desc": "Lower = keeps more overlapping boxes. Higher = merges overlaps more aggressively.",
+        "iou_desc": "Lower = removes overlapping boxes more aggressively. Higher = keeps more nearby or overlapping boxes.",
         "display": "Display visual feedback (semantic only, range: off/on, default: off)",
         "display_short": "Display visual feedback",
         "display_desc": "Shows semantic-pointing visual guides on screen when enabled.",
         "disable_accel": "Disable system mouse acceleration (semantic only, range: off/on, default: off)",
         "disable_accel_short": "Disable system mouse acceleration",
         "disable_accel_desc": "Makes semantic pointing feel more stable, but changes mouse behavior while running.",
-        "mode_note": "TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: keeps the normal system cursor as the center and grows a circular activation area with speed while preserving empty-space clicks. Ninja Cursors(gaze): gaze first activates the nearest cursor among 8 distributed cursors; if the gaze stays there long enough, that cursor locks automatically for local refinement until the click finishes.",
+        "mode_note": "Standard Mouse: uses the normal system cursor without target-aware assistance; the optional pointer filter is controlled by the filter selector. TargetFinder Overlay: shows detected boxes for testing. Bubble Cursor: expands selection around the nearest target. Semantic Pointing: slows pointer movement near targets for easier aiming. DynaSpot: keeps the normal system cursor as the center and grows a circular activation area with speed while preserving empty-space clicks. Ninja Cursors(gaze): gaze first activates the nearest cursor among 8 distributed cursors; if the gaze stays there long enough, that cursor locks automatically for local refinement until the click finishes.",
         "contrast": "Contrast",
         "enable_tts": "Enable TTS",
         "language": "Language",
@@ -272,6 +342,8 @@ UI_TEXTS = {
         "running_bubble": "Bubble Cursor is running.",
         "running_semantic": "Semantic Pointing is running.",
         "running_targetfinder": "TargetFinder Overlay is running.",
+        "running_baseline": "Normal Mouse Baseline is running.",
+        "running_mouse_filter": "Standard Mouse is running.",
         "running_dynaspot": "DynaSpot is running.",
         "running_rake": "Ninja Cursors(gaze) is running.",
         "running_experiment": "Experimental task is running.",
@@ -287,7 +359,7 @@ UI_TEXTS = {
         "tts_disabled": "Text-to-speech disabled.",
         "tts_unavailable": "Text-to-speech is not available on this system.",
         "language_updated": "Interface language updated.",
-        "q_hint": "You can also press q to quit the running mode.",
+        "q_hint": "Use the stop button to quit a running tester mode. In experimental screens, press Esc to stop the session.",
     },
     "French": {
         "nav_usage": "Mode d’utilisation",
@@ -296,15 +368,19 @@ UI_TEXTS = {
         "nav_audio": "Audio",
         "nav_language": "Langue",
         "page_usage": "Mode d’utilisation",
-        "page_mode": "Mode / Detection",
+        "page_experiment_protocol": "Choisir l’expérience",
+        "page_comparative_run": "Mode du protocole contrôle",
+        "page_mode": "Configuration",
         "page_accessibility": "Accessibilité",
         "page_audio": "Audio",
         "page_language": "Langue",
         "usage_section": "Mode d’utilisation",
         "usage_test": "Tester une technique",
         "usage_test_desc": "Mode test/démo libre. Choisissez une technique, ajustez les paramètres, puis lancez-la.",
+        "usage_baseline": "Tâches souris standard",
+        "usage_baseline_desc": "Baseline qualitative avec la souris standard uniquement : stabilité du curseur, mouvement longue distance et interface dense.",
         "usage_experiment": "Lancer une expérience",
-        "usage_experiment_desc": "Mode expérimental contrôlé. Lance automatiquement la session complète avec carré latin équilibré.",
+        "usage_experiment_desc": "Mode expérimental contrôlé. Choisissez soit le protocole patient réaliste, soit le protocole contrôle comparatif.",
         "usage_choose_first": "Choisissez d’abord un mode d’utilisation.",
         "setup_section": "Configuration de la technique",
         "filter_section": "Filtre du pointeur",
@@ -314,7 +390,13 @@ UI_TEXTS = {
         "semantic_section": "Options du pointage sémantique",
         "dynaspot_section": "Options de DynaSpot",
         "rake_section": "Options de Ninja Cursors(gaze)",
-        "technique": "Technique (5 modes, défaut : aucun)",
+        "rake_device_section": "Paramètres appareil / environnement",
+        "rake_device_section_note": "Ces paramètres n’ont généralement pas besoin d’être modifiés souvent ; il faut surtout vérifier qu’ils sont corrects.",
+        "rake_cursor_section": "Paramètres des curseurs Ninja",
+        "rake_calibration_params_section": "Paramètres de calibration",
+        "rake_selection_section": "Paramètres de sélection / affichage / détection",
+        "rake_selection_section_note": "Ces paramètres contrôlent comment le curseur est sélectionné, ce qui est affiché, et si TargetFinder est utilisé.",
+        "technique": "Technique (6 modes, défaut : aucun)",
         "select_technique": "Choisir une technique",
         "choose_mode_dialog": "Choisir une technique",
         "filter": "Filtre (choix : none/one euro, défaut : none)",
@@ -336,10 +418,20 @@ UI_TEXTS = {
         "record_data": "Enregistrer les données (plage : off/on, défaut : off)",
         "record_data_desc": "Enregistrer des journaux JSONL structurés avec la trajectoire du pointeur, les clics et les changements de détection.",
         "mode_targetfinder": "Overlay TargetFinder",
+        "mode_mouse_filter": "Souris standard",
         "mode_bubble": "Bubble Cursor",
         "mode_semantic": "Pointage sémantique",
         "mode_dynaspot": "DynaSpot",
         "mode_rake": "Ninja Cursors(gaze)",
+        "baseline_participant_id": "Identifiant participant baseline (défaut : P01)",
+        "baseline_participant_id_desc": "Identifiant enregistré dans le journal qualitatif de la baseline souris standard.",
+        "baseline_trials_per_task": "Essais baseline par tâche (plage : 1-20, défaut : 5)",
+        "baseline_trials_per_task_desc": "Nombre de répétitions pour chaque tâche qualitative : stabilité du curseur, mouvement longue distance et interface dense.",
+        "browser_compatible_fullscreen": "Plein écran navigateur compatible",
+        "browser_compatible_fullscreen_desc": "Le plein écran natif macOS crée un Space séparé et peut bloquer les overlays de test. Ce bouton agrandit un navigateur ouvert dans le bureau courant, sans entrer en plein écran natif.",
+        "browser_fullscreen_applied": "Le navigateur a été agrandi dans le Space courant. N'appuyez pas ensuite sur le bouton vert de plein écran.",
+        "browser_fullscreen_unsupported": "Le plein écran navigateur compatible est disponible seulement sur macOS.",
+        "browser_fullscreen_failed": "Impossible d'agrandir une fenêtre de navigateur compatible. Ouvrez Chrome, Safari, Edge, Firefox, Arc, Brave, Chromium ou Opera ; l'autorisation Accessibilité peut être requise.",
         "dynaspot_params": "Réglages DynaSpot",
         "dynaspot_min_speed": "Vitesse min DynaSpot (plage : 0.0-5000.0, défaut : 100.0)",
         "dynaspot_min_speed_desc": "Seuil de vitesse à partir duquel le spot commence à grandir. Plus bas = expansion plus précoce.",
@@ -387,37 +479,64 @@ UI_TEXTS = {
         "rake_gaze_gain_x_desc": "Agrandit ou réduit l’amplitude horizontale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement gauche-droite.",
         "rake_gaze_gain_y": "Gain du regard Y (plage : 0.1-10.0, défaut : 1.0)",
         "rake_gaze_gain_y_desc": "Agrandit ou réduit l’amplitude verticale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement haut-bas.",
-        "rake_gaze_offset_x": "Décalage regard X (px) (plage : -1000.0-1000.0, défaut : 10.0)",
+        "rake_gaze_offset_x": "Décalage regard X (px) (plage : -1000.0-1000.0, défaut : 0.0)",
         "rake_gaze_offset_x_desc": "Décale l’estimation du regard horizontalement avant de choisir le curseur actif. Positif = vers la droite, négatif = vers la gauche.",
-        "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -1000.0-1000.0, défaut : -200.0)",
+        "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -1000.0-1000.0, défaut : 0.0)",
         "rake_gaze_offset_y_desc": "Décale l’estimation du regard verticalement avant de choisir le curseur actif. Positif = vers le bas, négatif = vers le haut.",
         "rake_lock_on_dwell": "Verrouiller par fixation du regard (plage : off/on, défaut : off)",
-        "rake_lock_on_dwell_desc": "Si activé, le regard doit rester sur le même curseur avant verrouillage. Sinon, le curseur jaune courant peut être cliqué immédiatement.",
+        "rake_lock_on_dwell_desc": "Si activé, le regard doit rester sur le même curseur avant verrouillage. Sinon, le curseur orange courant peut être cliqué immédiatement.",
         "rake_selection_hold": "Temps de verrouillage par fixation du regard (plage : 0.0-5.0, défaut : 2.0)",
         "rake_selection_hold_desc": "Durée pendant laquelle le regard doit rester sur le même curseur avant qu’il se verrouille automatiquement. Utilisé seulement si le verrouillage est activé.",
-        "rake_show_gaze": "Afficher le point de regard (Ninja uniquement, plage : off/on, défaut : on)",
-        "rake_show_gaze_desc": "Affiche un marqueur rouge correspondant au regard estimé par la webcam.",
+        "rake_show_gaze": "Afficher le point de regard (Ninja uniquement, plage : off/on, défaut : off)",
+        "rake_show_gaze_desc": "Affiche le marqueur rouge du regard estimé en temps réel par la webcam. À laisser désactivé pendant les tests sauf pour vérifier la calibration.",
+        "rake_show_debug_status": "Afficher la barre de suivi du regard (plage : off/on, défaut : off)",
+        "rake_show_debug_status_desc": "Affiche la barre noire de statut Ninja en temps réel en haut à gauche. À laisser désactivé pendant les tests sauf pour déboguer le suivi du regard.",
+        "rake_snap_system_cursor": "Déplacer le curseur système vers le curseur Ninja actif (plage : off/on, défaut : on)",
+        "rake_snap_system_cursor_desc": "Déplace le curseur macOS natif vers le curseur Ninja orange actif, afin de réduire le décalage visuel lorsque macOS réaffiche le vrai curseur après un clic.",
         "rake_without_targetfinder": "Sans TargetFinder (plage : off/on, défaut : on)",
         "rake_without_targetfinder_desc": "Lance Ninja Cursors(gaze) sans détection, sans surbrillance de cible et sans inférence du modèle. Seuls la sélection du curseur par le regard et les clics redirigés restent actifs.",
         "experiment_section": "Tâche expérimentale",
         "experiment_enabled": "Lancer la tâche expérimentale (plage : off/on, défaut : off)",
-        "experiment_enabled_desc": "Si activé, Démarrer / Appliquer lance la tâche contrôlée de sélection de cibles sur captures d’écran au lieu d’une démo libre.",
+        "experiment_enabled_desc": "Si activé, Démarrer / Appliquer lance une tâche expérimentale contrôlée au lieu d’une démo libre.",
+        "experiment_protocol": "Protocole expérimental",
+        "experiment_protocol_desc": "Choisissez le protocole à lancer après Démarrer / Appliquer.",
+        "experiment_protocol_realistic": "Protocole patient - tâche réaliste",
+        "experiment_protocol_realistic_desc": "Pour les patients : lance uniquement la tâche complète de sélection de cibles sur captures réalistes.",
+        "experiment_protocol_comparative": "Protocole contrôle - tâche réaliste + Fitts synthétique",
+        "experiment_protocol_comparative_desc": "Pour les participants sans troubles moteurs : inclut la tâche réaliste sur captures d’écran et la tâche synthétique de Fitts avec distracteurs, avec un ordre équilibré par identifiant participant.",
+        "comparative_run_mode_desc": "Choisissez comment lancer le protocole contrôle.",
+        "comparative_run_test": "Tester les deux tâches contrôle séparément",
+        "comparative_run_test_desc": "Mode test : lancer soit la tâche réaliste contrôle, soit la tâche Fitts synthétique contrôle, avec des logs séparés.",
+        "comparative_run_full": "Exécuter le protocole contrôle complet",
+        "comparative_run_full_desc": "Mode complet : saisissez l’identifiant participant, puis le logiciel lance les deux tâches contrôle dans l’ordre contrebalancé, avec une pause entre les deux.",
+        "comparative_task_part": "Tâche contrôle à lancer (défaut : tâche réaliste contrôle)",
+        "comparative_task_part_desc": "Lancez une tâche à la fois : tâche réaliste contrôle ou tâche Fitts synthétique contrôle. Utilisez l’identifiant participant pour équilibrer la tâche lancée en premier.",
+        "experiment_task_type": "Type de tâche expérimentale (défaut : captures réalistes)",
+        "experiment_task_type_desc": "Choisir les captures réalistes, la tâche synthétique de Fitts avec distracteurs, ou le protocole comparatif pour participants sans troubles moteurs qui lance les deux tâches.",
         "experiment_session_enabled": "Lancer une session expérimentale complète (plage : off/on, défaut : off)",
-        "experiment_session_enabled_desc": "Si activé, Démarrer / Appliquer lance automatiquement les 12 blocs d'un carré latin équilibré : Bubble, DynaSpot, Pointage sémantique et Ninja Cursors en easy/medium/hard.",
+        "experiment_session_enabled_desc": "Si activé, Démarrer / Appliquer lance automatiquement les blocs de la tâche complète : souris standard, Bubble, DynaSpot, Pointage sémantique et Ninja Cursors en easy/medium/hard.",
         "experiment_participant_id": "Identifiant participant (défaut : P01)",
         "experiment_participant_id_desc": "Identifiant enregistré dans le journal de session et utilisé pour sélectionner un ordre de blocs dans le carré latin équilibré.",
         "experiment_data_dir": "Dossier du jeu de données (défaut : stage/data/web)",
         "experiment_data_dir_desc": "Dossier contenant les paires annotées .png/.txt utilisées pour générer les essais.",
-        "experiment_trials": "Essais / essais par bloc (plage : 1-1000, défaut : 6)",
-        "experiment_trials_desc": "Mode tâche simple : nombre total d’essais. Mode session complète : nombre d’essais dans chaque bloc technique × difficulté.",
+        "experiment_trials": "Essais / essais par bloc (plage : 1-1000, défaut : 8)",
+        "experiment_trials_desc": "Nombre d’essais dans chaque bloc technique × difficulté.",
+        "experiment_trials_patient": "Essais / essais par bloc (plage : 1-1000, défaut : 8)",
+        "experiment_trials_patient_desc": "Nombre d’essais dans chaque bloc technique × difficulté.",
+        "experiment_trials_control": "Essais / essais par bloc (plage : 1-1000, défaut : 12)",
+        "experiment_trials_control_desc": "Nombre d’essais par bloc pour les tâches réaliste et synthétique.",
         "experiment_difficulty": "Difficulté (choix : easy/medium/hard/mixed, défaut : mixed)",
         "experiment_difficulty_desc": "Niveau échantillonné selon l’ID de Fitts : easy [0,3), medium [3,5), hard [5,8.5). Mixed échantillonne tous les niveaux.",
-        "experiment_countdown": "Compte à rebours (secondes, plage : 0-30, défaut : 3)",
-        "experiment_countdown_desc": "Secondes avant le début de chaque essai pendant que le curseur reste au centre de l’image.",
+        "synthetic_density": "Densité des distracteurs synthétiques (choix : low/medium/high, défaut : medium)",
+        "synthetic_density_desc": "Densité rho des distracteurs pour la tâche synthétique de Fitts : low = 0.1, medium = 0.3, high = 0.6.",
+        "synthetic_blocks": "Fitts synthétique uniquement : blocs synthétiques par participant (plage : 1-18, défaut : 12)",
+        "synthetic_blocks_desc": "Tâche Fitts synthétique uniquement : nombre de blocs tirés parmi les 18 combinaisons ID × densité pour ce participant. Les autres paramètres de l’expérience complète s’appliquent aux deux tâches.",
+        "experiment_countdown": "Compte à rebours (secondes, plage : 0-30, pas : 0.5, défaut : 0)",
+        "experiment_countdown_desc": "Secondes avant le début de chaque essai pendant que le curseur reste à la position de départ de la tâche.",
         "experiment_max_clicks": "Clics max par essai (plage : 1-20, défaut : 1)",
         "experiment_max_clicks_desc": "Nombre maximal de tentatives avant qu’un essai soit marqué comme échoué.",
         "experiment_fullscreen": "Expérience en plein écran (plage : off/on, défaut : on)",
-        "experiment_fullscreen_desc": "Affiche la tâche sur capture d’écran en plein écran. À désactiver seulement pour le débogage.",
+        "experiment_fullscreen_desc": "Affiche la tâche expérimentale en plein écran. À désactiver seulement pour le débogage.",
         "experiment_show_all_targets": "Afficher toutes les cibles annotées (debug, défaut : off)",
         "experiment_show_all_targets_desc": "Dessine toutes les boîtes d’annotation en vert. À utiliser seulement pour le débogage, pas pendant les passations.",
         "experiment_note": "Pour la condition TargetFinder, la tâche contrôlée utilise le jeu de données annoté comme vérité terrain et lance en interne le baseline souris.",
@@ -433,14 +552,14 @@ UI_TEXTS = {
         "confidence": "Confiance (plage : 0.0-1.0, défaut : 0.28)",
         "confidence_desc": "Plus bas = garde plus de détections. Plus haut = garde seulement les détections plus sûres.",
         "iou": "IoU (plage : 0.0-1.0, défaut : 0.3)",
-        "iou_desc": "Plus bas = garde plus de boîtes qui se chevauchent. Plus haut = fusionne davantage les chevauchements.",
+        "iou_desc": "Plus bas = supprime plus agressivement les boîtes qui se chevauchent. Plus haut = conserve davantage de boîtes proches ou chevauchantes.",
         "display": "Afficher le retour visuel (sémantique uniquement, plage : off/on, défaut : off)",
         "display_short": "Afficher le retour visuel",
         "display_desc": "Affiche les guides visuels du pointage sémantique quand c'est activé.",
         "disable_accel": "Désactiver l'accélération de la souris (sémantique uniquement, plage : off/on, défaut : off)",
         "disable_accel_short": "Désactiver l'accélération de la souris",
         "disable_accel_desc": "Rend le pointage sémantique plus stable, mais change la sensation de la souris pendant l'exécution.",
-        "mode_note": "Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : garde le curseur système normal comme centre et agrandit une zone d’activation circulaire avec la vitesse tout en préservant les clics dans l’espace vide. Ninja Cursors(gaze) : le regard active d’abord le curseur le plus proche parmi 8 curseurs répartis ; si le regard y reste assez longtemps, ce curseur se verrouille automatiquement pour le micro-ajustement jusqu’au clic.",
+        "mode_note": "Souris standard : utilise le curseur système normal sans assistance dépendante des cibles ; le filtre optionnel est contrôlé par le sélecteur de filtre. Overlay TargetFinder : affiche les boîtes détectées pour les tests. Bubble Cursor : agrandit la sélection autour de la cible la plus proche. Pointage sémantique : ralentit le pointeur près des cibles pour mieux viser. DynaSpot : garde le curseur système normal comme centre et agrandit une zone d’activation circulaire avec la vitesse tout en préservant les clics dans l’espace vide. Ninja Cursors(gaze) : le regard active d’abord le curseur le plus proche parmi 8 curseurs répartis ; si le regard y reste assez longtemps, ce curseur se verrouille automatiquement pour le micro-ajustement jusqu’au clic.",
         "contrast": "Contrast",
         "enable_tts": "Activer la synthèse vocale",
         "language": "Langue",
@@ -456,7 +575,9 @@ UI_TEXTS = {
         "select_mode_first": "Choisissez d'abord une technique puis appuyez sur Démarrer / Appliquer.",
         "running_bubble": "Bubble Cursor est en cours.",
         "running_semantic": "Le pointage sémantique est en cours.",
-        "running_targetfinder": "L'overlay TargetFinder est en cours.",
+        "running_targetfinder": "L’overlay TargetFinder est en cours.",
+        "running_baseline": "La baseline souris standard est en cours.",
+        "running_mouse_filter": "Souris standard est en cours.",
         "running_dynaspot": "DynaSpot est en cours.",
         "running_rake": "Ninja Cursors(gaze) est en cours.",
         "running_experiment": "La tâche expérimentale est en cours.",
@@ -472,7 +593,7 @@ UI_TEXTS = {
         "tts_disabled": "La synthèse vocale est désactivée.",
         "tts_unavailable": "La synthèse vocale n'est pas disponible sur ce système.",
         "language_updated": "La langue de l'interface a été mise à jour.",
-        "q_hint": "Vous pouvez aussi appuyer sur q pour quitter le mode actif.",
+        "q_hint": "Utilisez le bouton d’arrêt pour quitter un mode test actif. Dans les écrans expérimentaux, appuyez sur Échap pour arrêter la session.",
     },
 }
 
@@ -513,22 +634,31 @@ class PanelConfig:
     rake_gaze_offset_y: float = DEFAULT_RAKE_GAZE_OFFSET_Y
     rake_selection_hold: float = DEFAULT_RAKE_SELECTION_HOLD
     rake_lock_on_dwell: bool = DEFAULT_RAKE_LOCK_ON_DWELL
-    rake_show_gaze: bool = True
+    rake_show_gaze: bool = DEFAULT_RAKE_SHOW_GAZE
+    rake_show_debug_status: bool = DEFAULT_RAKE_SHOW_DEBUG_STATUS
+    rake_snap_system_cursor: bool = DEFAULT_RAKE_SNAP_SYSTEM_CURSOR
     rake_without_targetfinder: bool = DEFAULT_RAKE_WITHOUT_TARGETFINDER
     rake_use_calibration: bool = DEFAULT_RAKE_USE_CALIBRATION
     rake_calib_points: int = DEFAULT_RAKE_CALIB_POINTS
     rake_auto_calibrate: bool = DEFAULT_RAKE_AUTO_CALIBRATE
     rake_calibration_status: str = "not_calibrated"
     experiment_enabled: bool = False
+    experiment_task_type: str = DEFAULT_EXPERIMENT_TASK_TYPE
+    comparative_task_part: str = DEFAULT_COMPARATIVE_TASK_PART
+    comparative_run_mode: str = DEFAULT_COMPARATIVE_RUN_MODE
     experiment_data_dir: str = DEFAULT_EXPERIMENT_DATA_DIR
     experiment_trials: int = DEFAULT_EXPERIMENT_TRIALS
     experiment_difficulty: str = DEFAULT_EXPERIMENT_DIFFICULTY
-    experiment_countdown: int = DEFAULT_EXPERIMENT_COUNTDOWN
+    synthetic_density: str = DEFAULT_SYNTHETIC_DENSITY
+    synthetic_blocks: int = DEFAULT_SYNTHETIC_BLOCKS
+    experiment_countdown: float = DEFAULT_EXPERIMENT_COUNTDOWN
     experiment_max_clicks: int = DEFAULT_EXPERIMENT_MAX_CLICKS
     experiment_fullscreen: bool = DEFAULT_EXPERIMENT_FULLSCREEN
     experiment_show_all_targets: bool = DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS
     experiment_session_enabled: bool = DEFAULT_EXPERIMENT_SESSION_ENABLED
     experiment_participant_id: str = DEFAULT_EXPERIMENT_PARTICIPANT_ID
+    baseline_participant_id: str = DEFAULT_EXPERIMENT_PARTICIPANT_ID
+    baseline_trials_per_task: int = DEFAULT_BASELINE_TRIALS_PER_TASK
 
     enable_bubble_cursor: bool = False
     enable_semantic_pointing: bool = False
@@ -569,10 +699,12 @@ class ControlPanel(QtWidgets.QWidget):
         self._selected_mode = None
         self._selected_filter = "none"
         self._selected_language = "French"
+        self._comparative_run_mode = DEFAULT_COMPARATIVE_RUN_MODE
         self._rake_calibration_status = "not_calibrated"
         self._rake_calibration_status_detail = None
         self.project_root = Path(__file__).resolve().parent.parent
         self.config_path = self.project_root / "control_panel_config.json"
+        self._ensure_experiment_log_roots()
         self._process_watch_timer = QtCore.QTimer(self)
         self._process_watch_timer.setInterval(300)
         self._process_watch_timer.timeout.connect(self._poll_process_state)
@@ -586,8 +718,16 @@ class ControlPanel(QtWidgets.QWidget):
         self._suspend_updates = False
         self._apply_language()
         self._update_mode_dependent_fields()
+        self._set_page(PAGE_USAGE)
         self._update_history_buttons()
         self._set_status("ready")
+
+    def _ensure_experiment_log_roots(self):
+        for name in EXPERIMENT_LOG_ROOTS:
+            try:
+                (self.project_root / name).mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
 
     # -------------------------------
     # Translation helpers
@@ -642,6 +782,12 @@ class ControlPanel(QtWidgets.QWidget):
             self.model_path_edit.setPlaceholderText(self._text("use_default_model"))
         if hasattr(self, "rake_calibration_status_value"):
             self._update_rake_calibration_ui()
+        if hasattr(self, "experiment_trials_row"):
+            self._update_experiment_trials_text()
+        if hasattr(self, "experiment_realistic_button"):
+            self._refresh_experiment_protocol_buttons()
+        if hasattr(self, "comparative_test_button"):
+            self._refresh_comparative_run_buttons()
 
     def _set_status(self, key: str, *, speak: bool = False):
         message = self._text(key)
@@ -677,6 +823,8 @@ class ControlPanel(QtWidgets.QWidget):
     def _mode_label(self, code: str | None):
         if not code:
             return self._text("select_technique")
+        if code == "baseline":
+            return self._text("usage_baseline")
         return MODE_OPTIONS[code][self._language_code()]
 
     def _filter_label(self, code: str | None):
@@ -824,6 +972,58 @@ class ControlPanel(QtWidgets.QWidget):
             layout.addWidget(row)
         return group
 
+    def _create_calibration_params_group(self):
+        group = QtWidgets.QFrame()
+        group.setObjectName("CalibrationParamsGroup")
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(0)
+
+        note = QtWidgets.QLabel()
+        note.setObjectName("CalibrationParamsNotice")
+        note.setWordWrap(True)
+        self._bind_text(note, "rake_calibration_manual_disabled")
+        layout.addWidget(note)
+        layout.addWidget(self._create_separator())
+
+        rows = [
+            self._create_field_row("rake_gaze_gain_x", self.rake_gaze_gain_x_spin, "rake_gaze_gain_x_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_gaze_gain_y", self.rake_gaze_gain_y_spin, "rake_gaze_gain_y_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_gaze_offset_x", self.rake_gaze_offset_x_spin, "rake_gaze_offset_x_desc"),
+            self._create_separator(),
+            self._create_field_row("rake_gaze_offset_y", self.rake_gaze_offset_y_spin, "rake_gaze_offset_y_desc"),
+        ]
+        for row in rows:
+            layout.addWidget(row)
+        return group
+
+    def _create_ninja_option_group(self, title_key: str, rows, note_key: str | None = None):
+        group = QtWidgets.QFrame()
+        group.setObjectName("NinjaOptionGroup")
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(0)
+
+        title = QtWidgets.QLabel()
+        title.setObjectName("NinjaOptionGroupTitle")
+        title.setWordWrap(True)
+        self._bind_text(title, title_key)
+        layout.addWidget(title)
+
+        if note_key is not None:
+            note = QtWidgets.QLabel()
+            note.setObjectName("NinjaOptionGroupNote")
+            note.setWordWrap(True)
+            self._bind_text(note, note_key)
+            layout.addWidget(note)
+
+        layout.addWidget(self._create_separator())
+        for row in rows:
+            layout.addWidget(row)
+        return group
+
     def _create_switch(self):
         checkbox = QtWidgets.QCheckBox()
         checkbox.setText("")
@@ -860,11 +1060,11 @@ class ControlPanel(QtWidgets.QWidget):
 
         layout.addWidget(label_column, 1)
         layout.addWidget(widget, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self._register_help_targets(
-            [row, label_column, label] + ([description] if description is not None else []),
-            text_key,
-            description_key,
-        )
+        help_widgets = [row, label_column, label] + ([description] if description is not None else [])
+        row.setting_label = label
+        row.setting_description = description
+        row.help_widgets = help_widgets
+        self._register_help_targets(help_widgets, text_key, description_key)
         return row
 
     def _create_field_row(self, text_key: str, widget, description_key: str | None = None):
@@ -904,6 +1104,9 @@ class ControlPanel(QtWidgets.QWidget):
         elif widget.objectName() == "CalibrationActions":
             widget.setMinimumWidth(320)
             widget.setMaximumWidth(420)
+        elif widget.objectName() == "ProtocolSelector":
+            widget.setMinimumWidth(360)
+            widget.setMaximumWidth(520)
         else:
             widget.setMinimumWidth(150)
             widget.setMaximumWidth(170)
@@ -986,14 +1189,14 @@ class ControlPanel(QtWidgets.QWidget):
         sidebar_layout.setSpacing(0)
 
         nav_specs = [
-            ("nav_usage", "top"),
-            ("nav_mode", "middle"),
-            ("nav_accessibility", "middle"),
-            ("nav_audio", "middle"),
-            ("nav_language", "bottom"),
+            ("nav_usage", "top", PAGE_USAGE),
+            ("nav_accessibility", "middle", PAGE_ACCESSIBILITY),
+            ("nav_audio", "middle", PAGE_AUDIO),
+            ("nav_language", "bottom", PAGE_LANGUAGE),
         ]
         self.nav_buttons = []
-        for index, (text_key, role) in enumerate(nav_specs):
+        self._nav_button_by_page = {}
+        for _index, (text_key, role, page_index) in enumerate(nav_specs):
             button = QtWidgets.QPushButton()
             button.setCheckable(True)
             button.setObjectName("NavButton")
@@ -1003,9 +1206,10 @@ class ControlPanel(QtWidgets.QWidget):
                 QtWidgets.QSizePolicy.Policy.Expanding,
                 QtWidgets.QSizePolicy.Policy.Expanding,
             )
-            button.clicked.connect(lambda checked, i=index: self._navigate_to_page(i))
+            button.clicked.connect(lambda checked, i=page_index: self._navigate_to_page(i))
             self._bind_text(button, text_key)
             self.nav_buttons.append(button)
+            self._nav_button_by_page[page_index] = button
             sidebar_layout.addWidget(button, 1)
 
         self.nav_buttons[0].setChecked(True)
@@ -1021,6 +1225,8 @@ class ControlPanel(QtWidgets.QWidget):
         right_layout.addWidget(self.pages, 1)
 
         self.pages.addWidget(self._build_usage_page())
+        self.pages.addWidget(self._build_experiment_protocol_page())
+        self.pages.addWidget(self._build_comparative_run_page())
         self.pages.addWidget(self._build_mode_page())
         self.pages.addWidget(self._build_accessibility_page())
         self.pages.addWidget(self._build_audio_page())
@@ -1067,12 +1273,72 @@ class ControlPanel(QtWidgets.QWidget):
         card_layout.addWidget(self._create_note("usage_test_desc"))
         card_layout.addWidget(self._create_separator())
 
+        self.usage_baseline_button = QtWidgets.QPushButton()
+        self.usage_baseline_button.setObjectName("ActionButton")
+        self.usage_baseline_button.setCheckable(True)
+        self._bind_text(self.usage_baseline_button, "usage_baseline")
+        card_layout.addWidget(self.usage_baseline_button)
+        card_layout.addWidget(self._create_note("usage_baseline_desc"))
+        card_layout.addWidget(self._create_separator())
+
         self.usage_experiment_button = QtWidgets.QPushButton()
         self.usage_experiment_button.setObjectName("ActionButton")
         self.usage_experiment_button.setCheckable(True)
         self._bind_text(self.usage_experiment_button, "usage_experiment")
         card_layout.addWidget(self.usage_experiment_button)
         card_layout.addWidget(self._create_note("usage_experiment_desc"))
+
+        page_layout.addWidget(card)
+        page_layout.addStretch()
+        return page
+
+    def _build_experiment_protocol_page(self):
+        page, page_layout = self._create_scroll_page()
+        page_layout.addWidget(self._create_page_header("page_experiment_protocol"))
+
+        card, card_layout = self._create_card()
+        card_layout.addWidget(self._create_note("experiment_protocol_desc"))
+
+        self.comparative_test_button = QtWidgets.QPushButton()
+        self.comparative_test_button.setObjectName("ActionButton")
+        self.comparative_test_button.setCheckable(True)
+        self._bind_text(self.comparative_test_button, "comparative_run_test")
+        card_layout.addWidget(self.comparative_test_button)
+        card_layout.addWidget(self._create_note("comparative_run_test_desc"))
+        card_layout.addWidget(self._create_separator())
+
+        self.experiment_realistic_button = QtWidgets.QPushButton()
+        self.experiment_realistic_button.setObjectName("ActionButton")
+        self.experiment_realistic_button.setCheckable(True)
+        self._bind_text(self.experiment_realistic_button, "experiment_protocol_realistic")
+        card_layout.addWidget(self.experiment_realistic_button)
+        card_layout.addWidget(self._create_note("experiment_protocol_realistic_desc"))
+        card_layout.addWidget(self._create_separator())
+
+        self.experiment_comparative_button = QtWidgets.QPushButton()
+        self.experiment_comparative_button.setObjectName("ActionButton")
+        self.experiment_comparative_button.setCheckable(True)
+        self._bind_text(self.experiment_comparative_button, "experiment_protocol_comparative")
+        card_layout.addWidget(self.experiment_comparative_button)
+        card_layout.addWidget(self._create_note("experiment_protocol_comparative_desc"))
+
+        page_layout.addWidget(card)
+        page_layout.addStretch()
+        return page
+
+    def _build_comparative_run_page(self):
+        page, page_layout = self._create_scroll_page()
+        page_layout.addWidget(self._create_page_header("page_comparative_run"))
+
+        card, card_layout = self._create_card()
+        card_layout.addWidget(self._create_note("comparative_run_mode_desc"))
+
+        self.comparative_full_button = QtWidgets.QPushButton()
+        self.comparative_full_button.setObjectName("ActionButton")
+        self.comparative_full_button.setCheckable(True)
+        self._bind_text(self.comparative_full_button, "comparative_run_full")
+        card_layout.addWidget(self.comparative_full_button)
+        card_layout.addWidget(self._create_note("comparative_run_full_desc"))
 
         page_layout.addWidget(card)
         page_layout.addStretch()
@@ -1264,6 +1530,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.log_data_cb = self._create_switch()
         self.rake_lock_on_dwell_cb = self._create_switch()
         self.rake_show_gaze_cb = self._create_switch()
+        self.rake_show_debug_status_cb = self._create_switch()
+        self.rake_snap_system_cursor_cb = self._create_switch()
         self.rake_without_targetfinder_cb = self._create_switch()
         self.rake_use_calibration_cb = self._create_switch()
         self.rake_calib_points_combo = QtWidgets.QComboBox()
@@ -1313,6 +1581,14 @@ class ControlPanel(QtWidgets.QWidget):
         experiment_data_layout.addWidget(self.experiment_data_path_edit, 1)
         experiment_data_layout.addWidget(self.experiment_browse_button)
 
+        self.experiment_task_type_combo = QtWidgets.QComboBox()
+        self.experiment_task_type_combo.addItems(["realistic", "synthetic_fitts", "comparative"])
+        self.experiment_task_type_combo.setCurrentText(DEFAULT_EXPERIMENT_TASK_TYPE)
+
+        self.comparative_task_part_combo = QtWidgets.QComboBox()
+        self.comparative_task_part_combo.addItems(["control_our_task", "control_fitts_synthetic"])
+        self.comparative_task_part_combo.setCurrentText(DEFAULT_COMPARATIVE_TASK_PART)
+
         self.experiment_trials_spin = QtWidgets.QSpinBox()
         self.experiment_trials_spin.setKeyboardTracking(False)
         self.experiment_trials_spin.setRange(1, 1000)
@@ -1322,15 +1598,35 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_difficulty_combo.addItems(["mixed", "easy", "medium", "hard"])
         self.experiment_difficulty_combo.setCurrentText(DEFAULT_EXPERIMENT_DIFFICULTY)
 
-        self.experiment_countdown_spin = QtWidgets.QSpinBox()
+        self.synthetic_density_combo = QtWidgets.QComboBox()
+        self.synthetic_density_combo.addItems(["low", "medium", "high"])
+        self.synthetic_density_combo.setCurrentText(DEFAULT_SYNTHETIC_DENSITY)
+
+        self.synthetic_blocks_spin = QtWidgets.QSpinBox()
+        self.synthetic_blocks_spin.setKeyboardTracking(False)
+        self.synthetic_blocks_spin.setRange(1, 18)
+        self.synthetic_blocks_spin.setValue(DEFAULT_SYNTHETIC_BLOCKS)
+
+        self.experiment_countdown_spin = QtWidgets.QDoubleSpinBox()
         self.experiment_countdown_spin.setKeyboardTracking(False)
-        self.experiment_countdown_spin.setRange(0, 30)
+        self.experiment_countdown_spin.setDecimals(1)
+        self.experiment_countdown_spin.setSingleStep(0.5)
+        self.experiment_countdown_spin.setRange(0.0, 30.0)
         self.experiment_countdown_spin.setValue(DEFAULT_EXPERIMENT_COUNTDOWN)
 
         self.experiment_max_clicks_spin = QtWidgets.QSpinBox()
         self.experiment_max_clicks_spin.setKeyboardTracking(False)
         self.experiment_max_clicks_spin.setRange(1, 20)
         self.experiment_max_clicks_spin.setValue(DEFAULT_EXPERIMENT_MAX_CLICKS)
+
+        self.baseline_trials_spin = QtWidgets.QSpinBox()
+        self.baseline_trials_spin.setKeyboardTracking(False)
+        self.baseline_trials_spin.setRange(1, 20)
+        self.baseline_trials_spin.setValue(DEFAULT_BASELINE_TRIALS_PER_TASK)
+
+        self.baseline_participant_id_edit = QtWidgets.QLineEdit()
+        self.baseline_participant_id_edit.setText(DEFAULT_EXPERIMENT_PARTICIPANT_ID)
+        self.baseline_participant_id_edit.setMinimumWidth(160)
 
         self.experiment_fullscreen_cb = self._create_switch()
         self.experiment_fullscreen_cb.setChecked(DEFAULT_EXPERIMENT_FULLSCREEN)
@@ -1340,6 +1636,11 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_participant_id_edit = QtWidgets.QLineEdit()
         self.experiment_participant_id_edit.setText(DEFAULT_EXPERIMENT_PARTICIPANT_ID)
         self.experiment_participant_id_edit.setMinimumWidth(160)
+
+        self.browser_compatible_fullscreen_button = QtWidgets.QPushButton()
+        self.browser_compatible_fullscreen_button.setObjectName("SmallActionButton")
+        self._bind_text(self.browser_compatible_fullscreen_button, "browser_compatible_fullscreen")
+        self.browser_compatible_fullscreen_note = self._create_note("browser_compatible_fullscreen_desc")
 
         self._semantic_rows = [
             self._create_separator(),
@@ -1370,18 +1671,19 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_field_row("filter_d_cutoff", self.filter_d_cutoff_spin, "filter_d_cutoff_desc"),
         ]
 
-        self._rake_rows = [
-            self._create_separator(),
+        rake_device_rows = [
             self._create_field_row("rake_camera_index", self.rake_camera_index_spin, "rake_camera_index_desc"),
             self._create_separator(),
             self._create_field_row("rake_screen_width_cm", self.rake_screen_width_cm_spin, "rake_screen_width_cm_desc"),
             self._create_separator(),
             self._create_field_row("rake_screen_height_cm", self.rake_screen_height_cm_spin, "rake_screen_height_cm_desc"),
-            self._create_separator(),
+        ]
+        rake_cursor_rows = [
             self._create_field_row("rake_spacing", self.rake_spacing_spin, "rake_spacing_desc"),
             self._create_separator(),
             self._create_field_row("rake_gaze_smoothing", self.rake_gaze_smoothing_spin, "rake_gaze_smoothing_desc"),
-            self._create_separator(),
+        ]
+        rake_calibration_rows = [
             self._create_switch_row("rake_use_calibration", self.rake_use_calibration_cb, "rake_use_calibration_desc"),
             self._create_separator(),
             self._create_field_row("rake_calibration_points", self.rake_calib_points_combo, "rake_calibration_points_desc"),
@@ -1392,36 +1694,50 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_separator(),
             self._create_label_value_row("rake_calibration_mode", self.rake_calibration_mode_value, "rake_calibration_mode_desc"),
             self._create_separator(),
-            self.rake_calibration_note,
-            self._create_separator(),
-            self._create_field_row("rake_gaze_gain_x", self.rake_gaze_gain_x_spin, "rake_gaze_gain_x_desc"),
-            self._create_separator(),
-            self._create_field_row("rake_gaze_gain_y", self.rake_gaze_gain_y_spin, "rake_gaze_gain_y_desc"),
-            self._create_separator(),
-            self._create_field_row("rake_gaze_offset_x", self.rake_gaze_offset_x_spin, "rake_gaze_offset_x_desc"),
-            self._create_separator(),
-            self._create_field_row("rake_gaze_offset_y", self.rake_gaze_offset_y_spin, "rake_gaze_offset_y_desc"),
-            self._create_separator(),
+            self._create_calibration_params_group(),
+        ]
+        rake_selection_rows = [
             self._create_switch_row("rake_lock_on_dwell", self.rake_lock_on_dwell_cb, "rake_lock_on_dwell_desc"),
             self._create_separator(),
             self._create_field_row("rake_selection_hold", self.rake_selection_hold_spin, "rake_selection_hold_desc"),
             self._create_separator(),
             self._create_switch_row("rake_show_gaze", self.rake_show_gaze_cb, "rake_show_gaze_desc"),
             self._create_separator(),
+            self._create_switch_row("rake_show_debug_status", self.rake_show_debug_status_cb, "rake_show_debug_status_desc"),
+            self._create_separator(),
+            self._create_switch_row("rake_snap_system_cursor", self.rake_snap_system_cursor_cb, "rake_snap_system_cursor_desc"),
+            self._create_separator(),
             self._create_switch_row("rake_without_targetfinder", self.rake_without_targetfinder_cb, "rake_without_targetfinder_desc"),
         ]
 
+        self._rake_rows = [
+            self._create_separator(),
+            self._create_ninja_option_group("rake_device_section", rake_device_rows, "rake_device_section_note"),
+            self._create_separator(),
+            self._create_ninja_option_group("rake_cursor_section", rake_cursor_rows),
+            self._create_separator(),
+            self._create_ninja_option_group("rake_calibration_params_section", rake_calibration_rows),
+            self._create_separator(),
+            self._create_ninja_option_group("rake_selection_section", rake_selection_rows, "rake_selection_section_note"),
+        ]
+
+        self.experiment_task_type_row = self._create_field_row("experiment_task_type", self.experiment_task_type_combo, "experiment_task_type_desc")
+        self.comparative_task_part_row = self._create_field_row("comparative_task_part", self.comparative_task_part_combo, "comparative_task_part_desc")
         self.experiment_data_dir_row = self._create_field_row("experiment_data_dir", self.experiment_data_picker, "experiment_data_dir_desc")
         self.experiment_session_enabled_row = self._create_switch_row("experiment_session_enabled", self.experiment_session_enabled_cb, "experiment_session_enabled_desc")
         self.experiment_participant_id_row = self._create_field_row("experiment_participant_id", self.experiment_participant_id_edit, "experiment_participant_id_desc")
         self.experiment_trials_row = self._create_field_row("experiment_trials", self.experiment_trials_spin, "experiment_trials_desc")
         self.experiment_difficulty_row = self._create_field_row("experiment_difficulty", self.experiment_difficulty_combo, "experiment_difficulty_desc")
+        self.synthetic_density_row = self._create_field_row("synthetic_density", self.synthetic_density_combo, "synthetic_density_desc")
+        self.synthetic_blocks_row = self._create_field_row("synthetic_blocks", self.synthetic_blocks_spin, "synthetic_blocks_desc")
         self.experiment_countdown_row = self._create_field_row("experiment_countdown", self.experiment_countdown_spin, "experiment_countdown_desc")
         self.experiment_max_clicks_row = self._create_field_row("experiment_max_clicks", self.experiment_max_clicks_spin, "experiment_max_clicks_desc")
         self.experiment_fullscreen_row = self._create_switch_row("experiment_fullscreen", self.experiment_fullscreen_cb, "experiment_fullscreen_desc")
         self.experiment_show_all_targets_row = self._create_switch_row("experiment_show_all_targets", self.experiment_show_all_targets_cb, "experiment_show_all_targets_desc")
         self.experiment_note_row = self._create_note("experiment_note")
         self._experiment_param_rows = [
+            self._create_separator(),
+            self.comparative_task_part_row,
             self._create_separator(),
             self.experiment_data_dir_row,
             self._create_separator(),
@@ -1432,6 +1748,10 @@ class ControlPanel(QtWidgets.QWidget):
             self.experiment_trials_row,
             self._create_separator(),
             self.experiment_difficulty_row,
+            self._create_separator(),
+            self.synthetic_density_row,
+            self._create_separator(),
+            self.synthetic_blocks_row,
             self._create_separator(),
             self.experiment_countdown_row,
             self._create_separator(),
@@ -1444,11 +1764,21 @@ class ControlPanel(QtWidgets.QWidget):
             self.experiment_note_row,
         ]
 
+        self.model_path_row = self._create_field_row("model_path", self.model_picker, "model_path_desc")
         self.technique_row = self._create_field_row("technique", self.mode_selector_button, "mode_note")
+        self.baseline_participant_id_row = self._create_field_row("baseline_participant_id", self.baseline_participant_id_edit, "baseline_participant_id_desc")
+        self.baseline_trials_row = self._create_field_row("baseline_trials_per_task", self.baseline_trials_spin, "baseline_trials_per_task_desc")
         setup_rows = [
-            self._create_field_row("model_path", self.model_picker, "model_path_desc"),
+            self.model_path_row,
             self._create_separator(),
             self.technique_row,
+            self._create_separator(),
+            self.browser_compatible_fullscreen_button,
+            self.browser_compatible_fullscreen_note,
+            self._create_separator(),
+            self.baseline_participant_id_row,
+            self._create_separator(),
+            self.baseline_trials_row,
         ]
         self.experiment_enabled_row = self._create_switch_row("experiment_enabled", self.experiment_enabled_cb, "experiment_enabled_desc")
         experiment_toggle_rows = [
@@ -1538,12 +1868,18 @@ class ControlPanel(QtWidgets.QWidget):
     # --------------------------------
     def _connect_signals(self):
         self.usage_test_button.clicked.connect(lambda: self._set_usage_mode("test", navigate=True))
+        self.usage_baseline_button.clicked.connect(lambda: self._set_baseline_usage_mode(navigate=True))
         self.usage_experiment_button.clicked.connect(lambda: self._set_usage_mode("experiment", navigate=True))
+        self.experiment_realistic_button.clicked.connect(lambda: self._set_experiment_protocol("realistic"))
+        self.experiment_comparative_button.clicked.connect(lambda: self._set_experiment_protocol("comparative"))
+        self.comparative_test_button.clicked.connect(lambda: self._set_comparative_run_mode("test"))
+        self.comparative_full_button.clicked.connect(lambda: self._set_comparative_run_mode("full"))
         self.mode_selector_button.clicked.connect(self._handle_mode_selection)
         self.filter_selector_button.clicked.connect(self._handle_filter_selection)
         self.language_selector_button.clicked.connect(self._handle_language_selection)
         self.model_browse_button.clicked.connect(self._handle_model_browse)
         self.experiment_browse_button.clicked.connect(self._handle_experiment_data_browse)
+        self.browser_compatible_fullscreen_button.clicked.connect(self._handle_browser_compatible_fullscreen)
         self.start_button.clicked.connect(self._handle_apply_clicked)
         self.stop_button.clicked.connect(self._stop_demo)
         self.change_thresh_spin.valueChanged.connect(self._handle_runtime_option_change)
@@ -1573,17 +1909,25 @@ class ControlPanel(QtWidgets.QWidget):
         self.log_data_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_lock_on_dwell_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_show_gaze_cb.toggled.connect(self._handle_runtime_option_change)
+        self.rake_show_debug_status_cb.toggled.connect(self._handle_runtime_option_change)
+        self.rake_snap_system_cursor_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_without_targetfinder_cb.toggled.connect(self._handle_runtime_option_change)
         self.rake_use_calibration_cb.toggled.connect(self._handle_rake_calibration_toggle)
         self.rake_calib_points_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
         self.rake_reset_calibration_button.clicked.connect(self._handle_rake_reset_calibration)
         self.experiment_enabled_cb.toggled.connect(self._handle_runtime_option_change)
+        self.experiment_task_type_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
+        self.comparative_task_part_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
         self.experiment_session_enabled_cb.toggled.connect(self._handle_runtime_option_change)
         self.experiment_participant_id_edit.textChanged.connect(self._handle_runtime_option_change)
+        self.baseline_participant_id_edit.textChanged.connect(self._handle_runtime_option_change)
         self.experiment_trials_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.experiment_difficulty_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
+        self.synthetic_density_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
+        self.synthetic_blocks_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.experiment_countdown_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.experiment_max_clicks_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.baseline_trials_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.experiment_fullscreen_cb.toggled.connect(self._handle_runtime_option_change)
         self.experiment_show_all_targets_cb.toggled.connect(self._handle_runtime_option_change)
 
@@ -1615,6 +1959,8 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.experiment_trials_spin, "experiment_trials")
         self._register_numeric_field(self.experiment_countdown_spin, "experiment_countdown")
         self._register_numeric_field(self.experiment_max_clicks_spin, "experiment_max_clicks")
+        self._register_numeric_field(self.synthetic_blocks_spin, "synthetic_blocks")
+        self._register_numeric_field(self.baseline_trials_spin, "baseline_trials_per_task")
         self._register_help_targets(
             [self.model_picker, self.model_path_edit, self.model_browse_button],
             "model_path",
@@ -1625,7 +1971,12 @@ class ControlPanel(QtWidgets.QWidget):
             "experiment_data_dir",
             "experiment_data_dir_desc",
         )
+        self._register_help_targets([self.experiment_task_type_combo], "experiment_task_type", "experiment_task_type_desc")
+        self._register_help_targets([self.comparative_task_part_combo], "comparative_task_part", "comparative_task_part_desc")
+        self._register_help_targets([self.synthetic_density_combo], "synthetic_density", "synthetic_density_desc")
+        self._register_help_targets([self.synthetic_blocks_spin], "synthetic_blocks", "synthetic_blocks_desc")
         self._register_help_targets([self.experiment_participant_id_edit], "experiment_participant_id", "experiment_participant_id_desc")
+        self._register_help_targets([self.baseline_participant_id_edit], "baseline_participant_id", "baseline_participant_id_desc")
         self._register_help_targets([self.filter_selector_button], "filter", "filter_desc")
         self._register_help_targets([self.filter_freq_spin], "filter_freq", "filter_freq_desc")
         self._register_help_targets([self.filter_min_cutoff_spin], "filter_min_cutoff", "filter_min_cutoff_desc")
@@ -1635,14 +1986,31 @@ class ControlPanel(QtWidgets.QWidget):
     # ---------------------------------
     # Navigation
     # ---------------------------------
+    def _page_speech_text(self, index: int) -> str:
+        button = getattr(self, "_nav_button_by_page", {}).get(index)
+        if button is not None:
+            return button.text()
+        page_keys = {
+            PAGE_EXPERIMENT_PROTOCOL: "page_experiment_protocol",
+            PAGE_COMPARATIVE_RUN: "page_comparative_run",
+            PAGE_MODE: "page_mode",
+        }
+        key = page_keys.get(index)
+        if key is None:
+            return ""
+        return self._text(key)
+
     def _set_page(self, index: int):
         self.pages.setCurrentIndex(index)
-        for i, button in enumerate(self.nav_buttons):
-            button.setChecked(i == index)
-        is_mode_page = index == 1
+        highlighted_page = PAGE_USAGE if index in {PAGE_EXPERIMENT_PROTOCOL, PAGE_COMPARATIVE_RUN, PAGE_MODE} else index
+        for page_index, button in getattr(self, "_nav_button_by_page", {}).items():
+            button.setChecked(page_index == highlighted_page)
+        is_mode_page = index == PAGE_MODE
         self.start_button.setVisible(is_mode_page)
         self.stop_button.setVisible(is_mode_page)
         self.q_hint_label.setVisible(is_mode_page and (self._usage_mode == "experiment" or self._mode_code() is not None))
+        if is_mode_page and hasattr(self, "experiment_trials_row"):
+            self._update_experiment_trials_text()
 
     def _navigate_to_page(self, index: int):
         current = self.pages.currentIndex()
@@ -1652,7 +2020,7 @@ class ControlPanel(QtWidgets.QWidget):
         self._forward_history.clear()
         self._set_page(index)
         self._update_history_buttons()
-        self._speak_control_name(self.nav_buttons[index].text())
+        self._speak_control_name(self._page_speech_text(index))
 
     def _update_history_buttons(self):
         for button in self._prev_buttons:
@@ -1668,7 +2036,7 @@ class ControlPanel(QtWidgets.QWidget):
         self._forward_history.append(current)
         self._set_page(index)
         self._update_history_buttons()
-        self._speak_control_name(self.nav_buttons[index].text())
+        self._speak_control_name(self._page_speech_text(index))
 
     def _go_next_page(self):
         if not self._forward_history:
@@ -1678,23 +2046,32 @@ class ControlPanel(QtWidgets.QWidget):
         self._back_history.append(current)
         self._set_page(index)
         self._update_history_buttons()
-        self._speak_control_name(self.nav_buttons[index].text())
+        self._speak_control_name(self._page_speech_text(index))
 
     # -----------------------------------
     # Logic
     # -----------------------------------
     def _set_usage_mode(self, mode: str, *, navigate: bool = False):
         self._usage_mode = mode if mode in {"test", "experiment"} else DEFAULT_USAGE_MODE
+        if self._selected_mode == "baseline":
+            self._selected_mode = None
+        self._selected_filter = "none"
         if hasattr(self, "usage_test_button"):
             self.usage_test_button.setChecked(self._usage_mode == "test")
+        if hasattr(self, "usage_baseline_button"):
+            self.usage_baseline_button.setChecked(False)
         if hasattr(self, "usage_experiment_button"):
             self.usage_experiment_button.setChecked(self._usage_mode == "experiment")
         if self._usage_mode == "experiment":
+            if self.experiment_task_type_combo.currentText() not in {"realistic", "comparative"}:
+                self._set_experiment_task_type("realistic")
             self.experiment_enabled_cb.setChecked(True)
             self.experiment_session_enabled_cb.setChecked(True)
         else:
             self.experiment_enabled_cb.setChecked(False)
             self.experiment_session_enabled_cb.setChecked(False)
+        self._refresh_experiment_protocol_buttons()
+        self._refresh_filter_selector_text()
         self._update_mode_dependent_fields()
         if not self._suspend_updates:
             self._save_config()
@@ -1702,7 +2079,156 @@ class ControlPanel(QtWidgets.QWidget):
         if navigate:
             self._back_history.append(self.pages.currentIndex())
             self._forward_history.clear()
-            self._set_page(1)
+            next_page = PAGE_EXPERIMENT_PROTOCOL if self._usage_mode == "experiment" else PAGE_MODE
+            self._set_page(next_page)
+            self._update_history_buttons()
+
+    def _set_experiment_task_type(self, task_type: str):
+        task_type = task_type if task_type in {"realistic", "synthetic_fitts", "comparative"} else DEFAULT_EXPERIMENT_TASK_TYPE
+        previous = self.experiment_task_type_combo.blockSignals(True)
+        self.experiment_task_type_combo.setCurrentText(task_type)
+        self.experiment_task_type_combo.blockSignals(previous)
+
+    def _refresh_experiment_protocol_buttons(self):
+        if not hasattr(self, "experiment_realistic_button"):
+            return
+        task_type = self.experiment_task_type_combo.currentText()
+        self.experiment_realistic_button.setChecked(task_type == "realistic")
+        self.experiment_comparative_button.setChecked(task_type == "comparative")
+
+    def _refresh_comparative_run_buttons(self):
+        if not hasattr(self, "comparative_test_button"):
+            return
+        self.comparative_test_button.setChecked(self._comparative_run_mode == "test")
+        self.comparative_full_button.setChecked(self._comparative_run_mode == "full")
+
+    def _recommended_comparative_task_part(self) -> str:
+        participant_id = (
+            self.experiment_participant_id_edit.text().strip()
+            if hasattr(self, "experiment_participant_id_edit")
+            else DEFAULT_EXPERIMENT_PARTICIPANT_ID
+        )
+        digits = ""
+        for char in reversed(participant_id):
+            if char.isdigit():
+                digits = char + digits
+            elif digits:
+                break
+        if digits and int(digits) % 2 == 1:
+            return "control_fitts_synthetic"
+        return "control_our_task"
+
+    def _update_experiment_trials_text(self, task_type: str | None = None):
+        if not hasattr(self, "experiment_trials_row"):
+            return
+        if task_type is None:
+            task_type = self.experiment_task_type_combo.currentText()
+        comparative_part = (
+            self.comparative_task_part_combo.currentText()
+            if hasattr(self, "comparative_task_part_combo")
+            else DEFAULT_COMPARATIVE_TASK_PART
+        )
+        is_control_protocol = (
+            task_type == "comparative"
+            or (
+                self._usage_mode == "experiment"
+                and comparative_part in {"control_our_task", "control_fitts_synthetic"}
+                and self._comparative_run_mode in {"test", "full"}
+            )
+            or (
+                self._usage_mode == "experiment"
+                and hasattr(self, "experiment_trials_spin")
+                and self.experiment_trials_spin.value() == DEFAULT_CONTROL_EXPERIMENT_TRIALS
+            )
+        )
+        if is_control_protocol:
+            text_key = "experiment_trials_control"
+            description_key = "experiment_trials_control_desc"
+        else:
+            text_key = "experiment_trials_patient"
+            description_key = "experiment_trials_patient_desc"
+
+        label = getattr(self.experiment_trials_row, "setting_label", None)
+        description = getattr(self.experiment_trials_row, "setting_description", None)
+        dynamic_widgets = {widget for widget in (label, description) if widget is not None}
+        if dynamic_widgets:
+            self._text_bindings = [
+                binding
+                for binding in self._text_bindings
+                if binding[0] not in dynamic_widgets
+            ]
+        if label is not None:
+            label.setText(self._text(text_key))
+        if description is not None:
+            description.setText(self._text(description_key))
+
+        for widget in getattr(self.experiment_trials_row, "help_widgets", []):
+            self._help_prompt_keys[widget] = (text_key, description_key)
+        self._focus_prompt_keys[self.experiment_trials_spin] = text_key
+
+    def _set_experiment_protocol(self, task_type: str):
+        task_type = task_type if task_type in {"realistic", "comparative"} else "realistic"
+        self._set_experiment_task_type(task_type)
+        if task_type == "comparative":
+            self.comparative_task_part_combo.setCurrentText(self._recommended_comparative_task_part())
+            self._refresh_comparative_run_buttons()
+        self.experiment_trials_spin.setValue(
+            DEFAULT_CONTROL_EXPERIMENT_TRIALS
+            if task_type == "comparative"
+            else DEFAULT_PATIENT_EXPERIMENT_TRIALS
+        )
+        self._refresh_experiment_protocol_buttons()
+        self._update_experiment_trials_text(task_type)
+        self._update_mode_dependent_fields()
+        if not self._suspend_updates:
+            self._save_config()
+            self._set_status("pending_apply")
+        current = self.pages.currentIndex()
+        if current == PAGE_EXPERIMENT_PROTOCOL:
+            self._back_history.append(current)
+            self._forward_history.clear()
+            self._set_page(PAGE_COMPARATIVE_RUN if task_type == "comparative" else PAGE_MODE)
+            self._update_history_buttons()
+
+    def _set_comparative_run_mode(self, mode: str):
+        self._comparative_run_mode = mode if mode in {"test", "full"} else DEFAULT_COMPARATIVE_RUN_MODE
+        self._set_experiment_task_type("comparative")
+        self.experiment_trials_spin.setValue(DEFAULT_CONTROL_EXPERIMENT_TRIALS)
+        if self._comparative_run_mode == "test":
+            self.comparative_task_part_combo.setCurrentText(self._recommended_comparative_task_part())
+        self._refresh_experiment_protocol_buttons()
+        self._refresh_comparative_run_buttons()
+        self._update_experiment_trials_text("comparative")
+        self._update_mode_dependent_fields()
+        if not self._suspend_updates:
+            self._save_config()
+            self._set_status("pending_apply")
+        current = self.pages.currentIndex()
+        if current in {PAGE_COMPARATIVE_RUN, PAGE_EXPERIMENT_PROTOCOL}:
+            self._back_history.append(current)
+            self._forward_history.clear()
+            self._set_page(PAGE_MODE)
+            self._update_history_buttons()
+
+    def _set_baseline_usage_mode(self, *, navigate: bool = False):
+        self._usage_mode = "test"
+        self._selected_mode = "baseline"
+        if hasattr(self, "usage_test_button"):
+            self.usage_test_button.setChecked(False)
+        if hasattr(self, "usage_baseline_button"):
+            self.usage_baseline_button.setChecked(True)
+        if hasattr(self, "usage_experiment_button"):
+            self.usage_experiment_button.setChecked(False)
+        self.experiment_enabled_cb.setChecked(False)
+        self.experiment_session_enabled_cb.setChecked(False)
+        self._update_mode_dependent_fields()
+        if not self._suspend_updates:
+            self._save_config()
+            self._set_status("pending_apply")
+        if navigate:
+            self._back_history.append(self.pages.currentIndex())
+            self._forward_history.clear()
+            self._set_page(PAGE_MODE)
             self._update_history_buttons()
 
     def _mode_code(self):
@@ -1714,24 +2240,73 @@ class ControlPanel(QtWidgets.QWidget):
 
     def _update_mode_dependent_fields(self):
         usage_experiment = self._usage_mode == "experiment"
+        baseline_enabled = self._mode_code() == "baseline" and not usage_experiment
+        mouse_filter_enabled = self._mode_code() == "mouse_filter" and not usage_experiment
         semantic_enabled = self._mode_code() == "semantic"
         dynaspot_enabled = self._mode_code() == "dynaspot"
         rake_enabled = self._mode_code() == "rake"
         filter_params_visible = self._selected_filter == "one_euro"
         experiment_enabled = usage_experiment or self.experiment_enabled_cb.isChecked()
-        experiment_session_enabled = usage_experiment or (experiment_enabled and self.experiment_session_enabled_cb.isChecked())
+        experiment_task_type = (
+            self.experiment_task_type_combo.currentText()
+            if getattr(self, "experiment_task_type_combo", None) is not None
+            else DEFAULT_EXPERIMENT_TASK_TYPE
+        )
+        if usage_experiment and experiment_task_type not in {"realistic", "comparative"}:
+            self._set_experiment_task_type("realistic")
+            experiment_task_type = "realistic"
+        self._refresh_experiment_protocol_buttons()
+        self._update_experiment_trials_text(experiment_task_type)
+        synthetic_task = experiment_task_type == "synthetic_fitts"
+        comparative_task = experiment_task_type == "comparative"
+        comparative_full_mode = comparative_task and self._comparative_run_mode == "full"
+        comparative_test_mode = comparative_task and self._comparative_run_mode == "test"
+        comparative_part = (
+            self.comparative_task_part_combo.currentText()
+            if getattr(self, "comparative_task_part_combo", None) is not None
+            else DEFAULT_COMPARATIVE_TASK_PART
+        )
+        comparative_synthetic_task = comparative_test_mode and comparative_part == "control_fitts_synthetic"
+        synthetic_full_session = usage_experiment and synthetic_task
+        comparative_full_session = usage_experiment and comparative_task
+        managed_full_session = synthetic_full_session or comparative_full_session
+        technique_options_visible = not usage_experiment and not baseline_enabled
+        experiment_session_enabled = (
+            usage_experiment or (experiment_enabled and self.experiment_session_enabled_cb.isChecked())
+        ) and not synthetic_task and not comparative_task
+        participant_id_visible = experiment_session_enabled or managed_full_session or (experiment_enabled and synthetic_task)
         self.display_cb.setEnabled(semantic_enabled)
         self.disable_accel_cb.setEnabled(semantic_enabled)
         if hasattr(self, "usage_test_button"):
-            self.usage_test_button.setChecked(self._usage_mode == "test")
+            self.usage_test_button.setChecked(self._usage_mode == "test" and not baseline_enabled)
+        if hasattr(self, "usage_baseline_button"):
+            self.usage_baseline_button.setChecked(baseline_enabled)
         if hasattr(self, "usage_experiment_button"):
             self.usage_experiment_button.setChecked(self._usage_mode == "experiment")
+        if getattr(self, "_setup_group", None) is not None:
+            self._setup_group.setVisible(not usage_experiment)
+        if getattr(self, "model_path_row", None) is not None:
+            self.model_path_row.setVisible(not usage_experiment and not baseline_enabled and not mouse_filter_enabled)
         if getattr(self, "technique_row", None) is not None:
-            self.technique_row.setVisible(not usage_experiment)
+            self.technique_row.setVisible(technique_options_visible)
+        browser_fullscreen_visible = not usage_experiment and not baseline_enabled and not mouse_filter_enabled
+        for widget in (
+            getattr(self, "browser_compatible_fullscreen_button", None),
+            getattr(self, "browser_compatible_fullscreen_note", None),
+        ):
+            if widget is not None:
+                widget.setVisible(browser_fullscreen_visible)
+                widget.setEnabled(browser_fullscreen_visible and sys.platform == "darwin")
+        if getattr(self, "baseline_trials_row", None) is not None:
+            self.baseline_trials_row.setVisible(baseline_enabled)
+        if getattr(self, "baseline_participant_id_row", None) is not None:
+            self.baseline_participant_id_row.setVisible(baseline_enabled)
+        if hasattr(self, "baseline_trials_spin"):
+            self.baseline_trials_spin.setEnabled(baseline_enabled)
+        if hasattr(self, "baseline_participant_id_edit"):
+            self.baseline_participant_id_edit.setEnabled(baseline_enabled)
         if getattr(self, "experiment_enabled_row", None) is not None:
             self.experiment_enabled_row.setVisible(not usage_experiment)
-        if getattr(self, "experiment_session_enabled_row", None) is not None:
-            self.experiment_session_enabled_row.setVisible(not usage_experiment)
         if usage_experiment:
             self.experiment_enabled_cb.setChecked(True)
             self.experiment_session_enabled_cb.setChecked(True)
@@ -1740,36 +2315,73 @@ class ControlPanel(QtWidgets.QWidget):
         if getattr(self, "_experiment_group", None) is not None:
             self._experiment_group.setVisible(usage_experiment)
         if hasattr(self, "_semantic_group"):
-            self._semantic_group.setVisible(semantic_enabled)
+            self._semantic_group.setVisible(technique_options_visible and semantic_enabled)
         if hasattr(self, "_dynaspot_group"):
-            self._dynaspot_group.setVisible(dynaspot_enabled)
+            self._dynaspot_group.setVisible(technique_options_visible and dynaspot_enabled)
         if hasattr(self, "_rake_group"):
-            self._rake_group.setVisible(rake_enabled)
+            self._rake_group.setVisible(technique_options_visible and rake_enabled)
         for row in getattr(self, "_experiment_param_rows", []):
             row.setVisible(experiment_enabled)
+        if getattr(self, "experiment_session_enabled_row", None) is not None:
+            self.experiment_session_enabled_row.setVisible(False)
+        if getattr(self, "experiment_data_dir_row", None) is not None:
+            self.experiment_data_dir_row.setVisible(
+                experiment_enabled and not synthetic_task and not comparative_synthetic_task
+            )
+        if getattr(self, "comparative_task_part_row", None) is not None:
+            self.comparative_task_part_row.setVisible(experiment_enabled and comparative_test_mode)
+        if getattr(self, "synthetic_density_row", None) is not None:
+            self.synthetic_density_row.setVisible(experiment_enabled and synthetic_task and not synthetic_full_session)
+        if getattr(self, "synthetic_blocks_row", None) is not None:
+            self.synthetic_blocks_row.setVisible(
+                experiment_enabled and (synthetic_full_session or comparative_synthetic_task or comparative_full_mode)
+            )
+        if getattr(self, "experiment_show_all_targets_row", None) is not None:
+            self.experiment_show_all_targets_row.setVisible(
+                experiment_enabled and not synthetic_task and not comparative_synthetic_task
+            )
+        if getattr(self, "experiment_note_row", None) is not None:
+            self.experiment_note_row.setVisible(
+                experiment_enabled and not synthetic_task and not comparative_synthetic_task
+            )
         for row in (
             getattr(self, "experiment_participant_id_row", None),
         ):
             if row is not None:
-                row.setVisible(experiment_session_enabled)
+                row.setVisible(participant_id_visible)
         if getattr(self, "experiment_difficulty_row", None) is not None:
-            self.experiment_difficulty_row.setVisible(experiment_enabled and not experiment_session_enabled)
+            self.experiment_difficulty_row.setVisible(
+                experiment_enabled and not experiment_session_enabled and not managed_full_session
+            )
         for widget in (
             self.experiment_data_picker,
             self.experiment_data_path_edit,
             self.experiment_browse_button,
+            self.comparative_task_part_combo,
             self.experiment_session_enabled_cb,
             self.experiment_participant_id_edit,
+            self.experiment_task_type_combo,
             self.experiment_trials_spin,
             self.experiment_difficulty_combo,
+            self.synthetic_density_combo,
+            self.synthetic_blocks_spin,
             self.experiment_countdown_spin,
             self.experiment_max_clicks_spin,
             self.experiment_fullscreen_cb,
             self.experiment_show_all_targets_cb,
         ):
             widget.setEnabled(experiment_enabled)
-        self.experiment_participant_id_edit.setEnabled(experiment_session_enabled)
-        self.experiment_difficulty_combo.setEnabled(experiment_enabled and not experiment_session_enabled)
+        self.experiment_data_picker.setEnabled(experiment_enabled and not synthetic_task and not comparative_synthetic_task)
+        self.experiment_data_path_edit.setEnabled(experiment_enabled and not synthetic_task and not comparative_synthetic_task)
+        self.experiment_browse_button.setEnabled(experiment_enabled and not synthetic_task and not comparative_synthetic_task)
+        self.comparative_task_part_combo.setEnabled(experiment_enabled and comparative_test_mode)
+        self.experiment_session_enabled_cb.setEnabled(experiment_enabled and not synthetic_task and not comparative_task)
+        self.experiment_participant_id_edit.setEnabled(participant_id_visible)
+        self.experiment_difficulty_combo.setEnabled(
+            experiment_enabled and not managed_full_session and (synthetic_task or not experiment_session_enabled)
+        )
+        self.synthetic_density_combo.setEnabled(experiment_enabled and synthetic_task and not synthetic_full_session)
+        self.synthetic_blocks_spin.setEnabled(experiment_enabled and (synthetic_full_session or comparative_synthetic_task or comparative_full_mode))
         for row in getattr(self, "_filter_param_rows", []):
             row.setVisible(filter_params_visible)
         for widget in (
@@ -1787,7 +2399,7 @@ class ControlPanel(QtWidgets.QWidget):
             row.setVisible(rake_enabled)
         self._update_rake_calibration_ui(rake_enabled=rake_enabled)
         self._update_action_buttons()
-        self.q_hint_label.setVisible(self.pages.currentIndex() == 1 and (usage_experiment or self._mode_code() is not None))
+        self.q_hint_label.setVisible(self.pages.currentIndex() == PAGE_MODE and (usage_experiment or self._mode_code() is not None))
 
     def _calibration_status_text_key(self) -> str:
         return {
@@ -1810,6 +2422,10 @@ class ControlPanel(QtWidgets.QWidget):
         ):
             widget.setEnabled(rake_enabled)
         self.rake_lock_on_dwell_cb.setEnabled(rake_enabled)
+        self.rake_show_gaze_cb.setEnabled(rake_enabled)
+        self.rake_show_debug_status_cb.setEnabled(rake_enabled)
+        self.rake_snap_system_cursor_cb.setEnabled(rake_enabled)
+        self.rake_without_targetfinder_cb.setEnabled(rake_enabled)
         self.rake_selection_hold_spin.setEnabled(rake_enabled and self.rake_lock_on_dwell_cb.isChecked())
         self.rake_calib_points_combo.setEnabled(rake_enabled and use_calibration)
         self.rake_reset_calibration_button.setEnabled(rake_enabled)
@@ -1869,6 +2485,7 @@ class ControlPanel(QtWidgets.QWidget):
     def _handle_mode_selection(self):
         self._speak_auto_text(self._text("select_technique"))
         options = [
+            ("mouse_filter", self._mode_label("mouse_filter")),
             ("targetfinder", self._mode_label("targetfinder")),
             ("bubble", self._mode_label("bubble")),
             ("semantic", self._mode_label("semantic")),
@@ -1883,7 +2500,10 @@ class ControlPanel(QtWidgets.QWidget):
         if selected is None:
             return
         self._selected_mode = selected
+        if selected == "mouse_filter":
+            self._selected_filter = "none"
         self._refresh_mode_selector_text()
+        self._refresh_filter_selector_text()
         self._update_mode_dependent_fields()
         self._save_config()
         self._set_status("pending_apply")
@@ -1908,7 +2528,12 @@ class ControlPanel(QtWidgets.QWidget):
         if self._suspend_updates:
             return
         self._save_config()
-        if self.sender() in {self.experiment_enabled_cb, self.experiment_session_enabled_cb}:
+        if self.sender() in {
+            self.experiment_enabled_cb,
+            self.experiment_session_enabled_cb,
+            self.experiment_task_type_combo,
+            self.comparative_task_part_combo,
+        }:
             self._update_mode_dependent_fields()
         self._update_rake_calibration_ui()
         self._set_status("pending_apply")
@@ -1974,6 +2599,12 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.rake_show_gaze_cb:
             key = "turn_on" if self.rake_show_gaze_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("rake_show_gaze")))
+        elif sender is self.rake_show_debug_status_cb:
+            key = "turn_on" if self.rake_show_debug_status_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("rake_show_debug_status")))
+        elif sender is self.rake_snap_system_cursor_cb:
+            key = "turn_on" if self.rake_snap_system_cursor_cb.isChecked() else "turn_off"
+            self._speak_control_name(self._format_text(key, name=self._text("rake_snap_system_cursor")))
         elif sender is self.rake_without_targetfinder_cb:
             key = "turn_on" if self.rake_without_targetfinder_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("rake_without_targetfinder")))
@@ -1986,6 +2617,75 @@ class ControlPanel(QtWidgets.QWidget):
         elif sender is self.experiment_show_all_targets_cb:
             key = "turn_on" if self.experiment_show_all_targets_cb.isChecked() else "turn_off"
             self._speak_control_name(self._format_text(key, name=self._text("experiment_show_all_targets")))
+
+    def _handle_browser_compatible_fullscreen(self):
+        if sys.platform != "darwin":
+            self._set_status("browser_fullscreen_unsupported")
+            return
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            self._set_status("browser_fullscreen_failed")
+            return
+        geom = screen.availableGeometry()
+        browser_names = [
+            "Google Chrome",
+            "Safari",
+            "Microsoft Edge",
+            "Firefox",
+            "Arc",
+            "Brave Browser",
+            "Chromium",
+            "Opera",
+        ]
+        names_list = ", ".join(f'"{name}"' for name in browser_names)
+        script = f"""
+set browserNames to {{{names_list}}}
+set targetX to {int(geom.x())}
+set targetY to {int(geom.y())}
+set targetW to {int(geom.width())}
+set targetH to {int(geom.height())}
+tell application "System Events"
+    repeat with browserName in browserNames
+        if exists application process browserName then
+            tell application process browserName
+                if (count of windows) > 0 then
+                    try
+                        if exists attribute "AXFullScreen" of window 1 then
+                            set value of attribute "AXFullScreen" of window 1 to false
+                            delay 0.35
+                        end if
+                    end try
+                    set position of window 1 to {{targetX, targetY}}
+                    set size of window 1 to {{targetW, targetH}}
+                    set frontmost to true
+                    return browserName as text
+                end if
+            end tell
+        end if
+    end repeat
+end tell
+error "No supported browser window found"
+"""
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except Exception:
+            self._set_status("browser_fullscreen_failed")
+            return
+        if result.returncode == 0:
+            self._set_status("browser_fullscreen_applied")
+            return
+        detail = (result.stderr or result.stdout or "").strip()
+        message = self._text("browser_fullscreen_failed")
+        if detail:
+            message = f"{message}\n{detail}"
+        self.info_label.setText(message)
 
     def _handle_rake_calibration_toggle(self, checked: bool):
         if self._suspend_updates:
@@ -2264,6 +2964,45 @@ class ControlPanel(QtWidgets.QWidget):
                 border-radius: 22px;
             }}
 
+            QFrame#CalibrationParamsGroup {{
+                background: {bg_card};
+                border: 2px solid {border_card};
+                border-radius: 18px;
+                margin-top: 10px;
+                margin-bottom: 10px;
+            }}
+
+            QFrame#NinjaOptionGroup {{
+                background: {bg_card};
+                border: 2px solid {border_card};
+                border-radius: 18px;
+                margin-top: 10px;
+                margin-bottom: 10px;
+            }}
+
+            QLabel#NinjaOptionGroupTitle {{
+                background: transparent;
+                color: {text_main};
+                font-size: 16px;
+                font-weight: 800;
+                padding: 4px 2px 4px 2px;
+            }}
+
+            QLabel#NinjaOptionGroupNote {{
+                background: transparent;
+                color: {text_muted};
+                font-size: 13px;
+                padding: 0 2px 12px 2px;
+            }}
+
+            QLabel#CalibrationParamsNotice {{
+                background: transparent;
+                color: {text_muted};
+                font-size: 16px;
+                font-weight: 800;
+                padding: 4px 2px 14px 2px;
+            }}
+
             QWidget#SettingRow {{
                 background: transparent;
             }}
@@ -2466,8 +3205,10 @@ class ControlPanel(QtWidgets.QWidget):
             self.rake_gaze_offset_y_spin,
             self.rake_selection_hold_spin,
             self.experiment_trials_spin,
+            self.synthetic_blocks_spin,
             self.experiment_countdown_spin,
             self.experiment_max_clicks_spin,
+            self.baseline_trials_spin,
         ):
             widget.interpretText()
 
@@ -2510,21 +3251,30 @@ class ControlPanel(QtWidgets.QWidget):
             rake_selection_hold=self.rake_selection_hold_spin.value(),
             rake_lock_on_dwell=self.rake_lock_on_dwell_cb.isChecked(),
             rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
+            rake_show_debug_status=self.rake_show_debug_status_cb.isChecked(),
+            rake_snap_system_cursor=self.rake_snap_system_cursor_cb.isChecked(),
             rake_without_targetfinder=self.rake_without_targetfinder_cb.isChecked(),
             rake_use_calibration=self.rake_use_calibration_cb.isChecked(),
             rake_calib_points=int(self.rake_calib_points_combo.currentText()),
             rake_auto_calibrate=False,
             rake_calibration_status=self._rake_calibration_status,
             experiment_enabled=usage_experiment or self.experiment_enabled_cb.isChecked(),
+            experiment_task_type=self.experiment_task_type_combo.currentText(),
+            comparative_task_part=self.comparative_task_part_combo.currentText(),
+            comparative_run_mode=self._comparative_run_mode,
             experiment_data_dir=self.experiment_data_path_edit.text().strip() or DEFAULT_EXPERIMENT_DATA_DIR,
             experiment_trials=self.experiment_trials_spin.value(),
             experiment_difficulty=self.experiment_difficulty_combo.currentText(),
+            synthetic_density=self.synthetic_density_combo.currentText(),
+            synthetic_blocks=self.synthetic_blocks_spin.value(),
             experiment_countdown=self.experiment_countdown_spin.value(),
             experiment_max_clicks=self.experiment_max_clicks_spin.value(),
             experiment_fullscreen=self.experiment_fullscreen_cb.isChecked(),
             experiment_show_all_targets=self.experiment_show_all_targets_cb.isChecked(),
             experiment_session_enabled=usage_experiment or self.experiment_session_enabled_cb.isChecked(),
             experiment_participant_id=self.experiment_participant_id_edit.text().strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
+            baseline_participant_id=self.baseline_participant_id_edit.text().strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
+            baseline_trials_per_task=self.baseline_trials_spin.value(),
             enable_bubble_cursor=mode == "bubble",
             enable_semantic_pointing=mode == "semantic",
             enable_dynaspot=mode == "dynaspot",
@@ -2532,7 +3282,7 @@ class ControlPanel(QtWidgets.QWidget):
             high_contrast_mode=self.high_contrast_cb.isChecked(),
             stronger_visual_cue=self._hidden_config.stronger_visual_cue,
             single_click_as_double_click=self._hidden_config.single_click_as_double_click,
-            preset="TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "DynaSpot" if mode == "dynaspot" else "Ninja Cursors(gaze)" if mode == "rake" else "",
+            preset="Normal Mouse Baseline" if mode == "baseline" else "Standard Mouse" if mode == "mouse_filter" else "TargetFinder" if mode == "targetfinder" else "Bubble Only" if mode == "bubble" else "Semantic Only" if mode == "semantic" else "DynaSpot" if mode == "dynaspot" else "Ninja Cursors(gaze)" if mode == "rake" else "",
             enable_tts=self.enable_tts_cb.isChecked(),
             language=self._language_code(),
         )
@@ -2569,27 +3319,56 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_selection_hold_spin.setValue(cfg.rake_selection_hold)
         self.rake_lock_on_dwell_cb.setChecked(cfg.rake_lock_on_dwell)
         self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
+        self.rake_show_debug_status_cb.setChecked(cfg.rake_show_debug_status)
+        self.rake_snap_system_cursor_cb.setChecked(cfg.rake_snap_system_cursor)
         self.rake_without_targetfinder_cb.setChecked(cfg.rake_without_targetfinder)
         self.rake_use_calibration_cb.setChecked(cfg.rake_use_calibration)
         self.rake_calib_points_combo.setCurrentText(str(cfg.rake_calib_points))
         self._rake_calibration_status = cfg.rake_calibration_status or "not_calibrated"
         self._rake_calibration_status_detail = None
         self.experiment_enabled_cb.setChecked(cfg.experiment_enabled)
+        self.experiment_task_type_combo.setCurrentText(
+            cfg.experiment_task_type
+            if cfg.experiment_task_type in {"realistic", "synthetic_fitts", "comparative"}
+            else DEFAULT_EXPERIMENT_TASK_TYPE
+        )
+        self.comparative_task_part_combo.setCurrentText(
+            cfg.comparative_task_part
+            if cfg.comparative_task_part in {"control_our_task", "control_fitts_synthetic"}
+            else DEFAULT_COMPARATIVE_TASK_PART
+        )
+        self._comparative_run_mode = (
+            cfg.comparative_run_mode
+            if cfg.comparative_run_mode in {"test", "full"}
+            else DEFAULT_COMPARATIVE_RUN_MODE
+        )
         self.experiment_data_path_edit.setText(cfg.experiment_data_dir or DEFAULT_EXPERIMENT_DATA_DIR)
         self.experiment_trials_spin.setValue(cfg.experiment_trials)
         self.experiment_difficulty_combo.setCurrentText(
             cfg.experiment_difficulty if cfg.experiment_difficulty in {"easy", "medium", "hard", "mixed"} else DEFAULT_EXPERIMENT_DIFFICULTY
         )
+        self.synthetic_density_combo.setCurrentText(
+            cfg.synthetic_density
+            if cfg.synthetic_density in {"low", "medium", "high"}
+            else DEFAULT_SYNTHETIC_DENSITY
+        )
+        self.synthetic_blocks_spin.setValue(getattr(cfg, "synthetic_blocks", DEFAULT_SYNTHETIC_BLOCKS))
         self.experiment_countdown_spin.setValue(cfg.experiment_countdown)
         self.experiment_max_clicks_spin.setValue(cfg.experiment_max_clicks)
         self.experiment_fullscreen_cb.setChecked(cfg.experiment_fullscreen)
         self.experiment_show_all_targets_cb.setChecked(cfg.experiment_show_all_targets)
         self.experiment_session_enabled_cb.setChecked(cfg.experiment_session_enabled)
         self.experiment_participant_id_edit.setText(cfg.experiment_participant_id or DEFAULT_EXPERIMENT_PARTICIPANT_ID)
+        self.baseline_participant_id_edit.setText(cfg.baseline_participant_id or DEFAULT_EXPERIMENT_PARTICIPANT_ID)
+        self.baseline_trials_spin.setValue(cfg.baseline_trials_per_task)
         self.high_contrast_cb.setChecked(cfg.high_contrast_mode)
         self.enable_tts_cb.setChecked(cfg.enable_tts)
 
-        if cfg.preset == "TargetFinder":
+        if cfg.preset == "Normal Mouse Baseline":
+            self._selected_mode = "baseline"
+        elif cfg.preset in {"Standard Mouse", "Standard Mouse + Filter"}:
+            self._selected_mode = "mouse_filter"
+        elif cfg.preset == "TargetFinder":
             self._selected_mode = "targetfinder"
         elif cfg.enable_bubble_cursor or cfg.preset == "Bubble Only":
             self._selected_mode = "bubble"
@@ -2601,9 +3380,11 @@ class ControlPanel(QtWidgets.QWidget):
             self._selected_mode = "rake"
         else:
             self._selected_mode = None
-
         self._selected_language = cfg.language if cfg.language in {"English", "French"} else "French"
-        self._set_usage_mode(self._usage_mode, navigate=False)
+        if self._selected_mode == "baseline":
+            self._set_baseline_usage_mode(navigate=False)
+        else:
+            self._set_usage_mode(self._usage_mode, navigate=False)
 
         self._apply_language()
         self._apply_panel_style()
@@ -2657,7 +3438,9 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.rake_gaze_offset_y = DEFAULT_RAKE_GAZE_OFFSET_Y
         cfg.rake_selection_hold = DEFAULT_RAKE_SELECTION_HOLD
         cfg.rake_lock_on_dwell = DEFAULT_RAKE_LOCK_ON_DWELL
-        cfg.rake_show_gaze = True
+        cfg.rake_show_gaze = DEFAULT_RAKE_SHOW_GAZE
+        cfg.rake_show_debug_status = DEFAULT_RAKE_SHOW_DEBUG_STATUS
+        cfg.rake_snap_system_cursor = DEFAULT_RAKE_SNAP_SYSTEM_CURSOR
         cfg.rake_without_targetfinder = DEFAULT_RAKE_WITHOUT_TARGETFINDER
         cfg.rake_use_calibration = DEFAULT_RAKE_USE_CALIBRATION
         cfg.rake_calib_points = DEFAULT_RAKE_CALIB_POINTS
@@ -2665,15 +3448,22 @@ class ControlPanel(QtWidgets.QWidget):
         cfg.rake_calibration_status = "not_calibrated"
         cfg.usage_mode = DEFAULT_USAGE_MODE
         cfg.experiment_enabled = False
+        cfg.experiment_task_type = DEFAULT_EXPERIMENT_TASK_TYPE
+        cfg.comparative_task_part = DEFAULT_COMPARATIVE_TASK_PART
+        cfg.comparative_run_mode = DEFAULT_COMPARATIVE_RUN_MODE
         cfg.experiment_data_dir = DEFAULT_EXPERIMENT_DATA_DIR
         cfg.experiment_trials = DEFAULT_EXPERIMENT_TRIALS
         cfg.experiment_difficulty = DEFAULT_EXPERIMENT_DIFFICULTY
+        cfg.synthetic_density = DEFAULT_SYNTHETIC_DENSITY
+        cfg.synthetic_blocks = DEFAULT_SYNTHETIC_BLOCKS
         cfg.experiment_countdown = DEFAULT_EXPERIMENT_COUNTDOWN
         cfg.experiment_max_clicks = DEFAULT_EXPERIMENT_MAX_CLICKS
         cfg.experiment_fullscreen = DEFAULT_EXPERIMENT_FULLSCREEN
         cfg.experiment_show_all_targets = DEFAULT_EXPERIMENT_SHOW_ALL_TARGETS
         cfg.experiment_session_enabled = DEFAULT_EXPERIMENT_SESSION_ENABLED
         cfg.experiment_participant_id = DEFAULT_EXPERIMENT_PARTICIPANT_ID
+        cfg.baseline_participant_id = DEFAULT_EXPERIMENT_PARTICIPANT_ID
+        cfg.baseline_trials_per_task = DEFAULT_BASELINE_TRIALS_PER_TASK
         cfg.high_contrast_mode = False
         cfg.enable_tts = False
         cfg.language = "French"
@@ -2686,6 +3476,51 @@ class ControlPanel(QtWidgets.QWidget):
     def _build_command(self, cfg: PanelConfig):
         if cfg.experiment_enabled:
             return self._build_experiment_command(cfg)
+        if cfg.preset == "Normal Mouse Baseline" or self._mode_code() == "baseline":
+            cmd = [
+                sys.executable,
+                "-m",
+                "target_finder_toolkit.qualitative_baseline",
+                "--participant",
+                cfg.baseline_participant_id.strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
+                "--trials-per-task",
+                str(cfg.baseline_trials_per_task),
+                "--language",
+                cfg.language,
+            ]
+            if not cfg.enable_logging:
+                cmd.append("--no-log")
+            return cmd
+        if cfg.preset in {"Standard Mouse", "Standard Mouse + Filter"} or self._mode_code() == "mouse_filter":
+            cmd = [
+                sys.executable,
+                "-m",
+                "target_finder_toolkit.standard_mouse",
+                "--change-thresh",
+                str(cfg.change_thresh),
+                "--capture-interval",
+                str(cfg.capture_interval),
+                "--confidence",
+                str(cfg.confidence),
+                "--iou",
+                str(cfg.iou),
+                "--filter",
+                cfg.filter_name,
+                "--filter-freq",
+                str(cfg.filter_freq),
+                "--filter-min-cutoff",
+                str(cfg.filter_min_cutoff),
+                "--filter-beta",
+                str(cfg.filter_beta),
+                "--filter-d-cutoff",
+                str(cfg.filter_d_cutoff),
+            ]
+            if cfg.model_path:
+                cmd += ["--model-path", cfg.model_path]
+            if cfg.enable_logging:
+                log_path = make_default_log_path(self.project_root, "standard_mouse")
+                cmd += ["--log-file", str(log_path), "--log-cursor-hz", "30"]
+            return cmd
         if cfg.preset == "TargetFinder":
             module_name = "target_finder_toolkit.targetfinder"
         elif cfg.enable_bubble_cursor:
@@ -2747,6 +3582,10 @@ class ControlPanel(QtWidgets.QWidget):
                     cmd.append("--auto-calibrate")
             if not cfg.rake_show_gaze:
                 cmd.append("--hide-gaze-point")
+            if not cfg.rake_show_debug_status:
+                cmd.append("--hide-debug-status")
+            if cfg.rake_snap_system_cursor:
+                cmd.append("--snap-system-cursor-to-active")
             if cfg.rake_without_targetfinder:
                 cmd.append("--without-targetfinder")
         return cmd
@@ -2762,7 +3601,46 @@ class ControlPanel(QtWidgets.QWidget):
             return "ninja_cursors"
         return "semantic"
 
+    def _safe_participant_id(self, participant_id: str) -> str:
+        safe = "".join(
+            ch if ch.isalnum() or ch in {"-", "_"} else "_"
+            for ch in participant_id.strip()
+        ).strip("_")
+        return safe or DEFAULT_EXPERIMENT_PARTICIPANT_ID
+
+    def _control_output_dir(self, cfg: PanelConfig, log_group: str, task_name: str) -> Path:
+        participant = self._safe_participant_id(
+            cfg.experiment_participant_id.strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID
+        )
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        return self.project_root / log_group / f"{participant}_{stamp}_{task_name}"
+
     def _build_experiment_command(self, cfg: PanelConfig):
+        if cfg.experiment_task_type == "comparative":
+            if cfg.comparative_run_mode == "full":
+                return self._build_comparative_session_command(cfg)
+            if cfg.comparative_task_part == "control_fitts_synthetic":
+                return self._build_synthetic_fitts_session_command(
+                    cfg,
+                    output_dir=self._control_output_dir(
+                        cfg,
+                        "control_fitts_synthetic",
+                        "synthetic_fitts",
+                    ),
+                )
+            return self._build_experiment_session_command(
+                cfg,
+                output_dir=self._control_output_dir(
+                    cfg,
+                    "control_our_task",
+                    "our_task",
+                ),
+            )
+        if cfg.experiment_task_type == "synthetic_fitts":
+            if cfg.usage_mode == "experiment":
+                return self._build_synthetic_fitts_session_command(cfg)
+            return self._build_synthetic_fitts_command(cfg)
+
         if cfg.experiment_session_enabled:
             return self._build_experiment_session_command(cfg)
 
@@ -2771,6 +3649,8 @@ class ControlPanel(QtWidgets.QWidget):
             sys.executable,
             "-m",
             "target_finder_toolkit.experimental_task",
+            "--language",
+            cfg.language,
             "--technique",
             technique,
             "--data-dir",
@@ -2839,17 +3719,300 @@ class ControlPanel(QtWidgets.QWidget):
                 cmd.append("--ninja-lock-on-dwell")
             if not cfg.rake_show_gaze:
                 cmd.append("--ninja-hide-gaze-point")
+            if not cfg.rake_show_debug_status:
+                cmd.append("--ninja-hide-debug-status")
+            if cfg.rake_snap_system_cursor:
+                cmd.append("--ninja-snap-system-cursor-to-active")
             if cfg.rake_use_calibration:
                 cmd.append("--ninja-auto-calibrate")
             if not cfg.rake_without_targetfinder:
                 cmd.append("--ninja-with-targetfinder")
         return cmd
 
-    def _build_experiment_session_command(self, cfg: PanelConfig):
+    def _build_synthetic_fitts_command(self, cfg: PanelConfig):
+        technique = self._experiment_technique_for_config(cfg)
+        difficulty = cfg.experiment_difficulty
+        if difficulty == "mixed":
+            difficulty = "medium"
+        cmd = [
+            sys.executable,
+            "-m",
+            "target_finder_toolkit.fitts_distractors_task",
+            "--language",
+            cfg.language,
+            "--participant",
+            cfg.experiment_participant_id.strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
+            "--technique",
+            technique,
+            "--trials",
+            str(cfg.experiment_trials),
+            "--difficulty",
+            difficulty,
+            "--density",
+            cfg.synthetic_density,
+            "--countdown",
+            str(cfg.experiment_countdown),
+            "--max-clicks",
+            str(cfg.experiment_max_clicks),
+            "--change-thresh",
+            str(cfg.change_thresh),
+            "--capture-interval",
+            str(cfg.capture_interval),
+            "--confidence",
+            str(cfg.confidence),
+            "--iou",
+            str(cfg.iou),
+            "--filter",
+            cfg.filter_name,
+            "--filter-freq",
+            str(cfg.filter_freq),
+            "--filter-min-cutoff",
+            str(cfg.filter_min_cutoff),
+            "--filter-beta",
+            str(cfg.filter_beta),
+            "--filter-d-cutoff",
+            str(cfg.filter_d_cutoff),
+        ]
+        if not cfg.experiment_fullscreen:
+            cmd.append("--windowed")
+        if not cfg.enable_logging:
+            cmd.append("--no-technique-log")
+            cmd.append("--no-log")
+        if technique == "semantic":
+            if cfg.display:
+                cmd.append("--semantic-display")
+            if cfg.disable_accel:
+                cmd.append("--semantic-disable-accel")
+        if technique == "dynaspot":
+            cmd += [
+                "--dynaspot-min-speed", str(cfg.dynaspot_min_speed),
+                "--dynaspot-spot-width", str(cfg.dynaspot_spot_width),
+                "--dynaspot-lag", str(cfg.dynaspot_lag),
+                "--dynaspot-reduce-time", str(cfg.dynaspot_reduce_time),
+            ]
+        if technique == "ninja_cursors":
+            cmd += [
+                "--ninja-camera-index", str(cfg.rake_camera_index),
+                "--ninja-screen-width-cm", str(cfg.rake_screen_width_cm),
+                "--ninja-screen-height-cm", str(cfg.rake_screen_height_cm),
+                "--ninja-spacing", str(cfg.rake_spacing),
+                "--ninja-gaze-smoothing", str(cfg.rake_gaze_smoothing),
+                "--ninja-gaze-gain-x", str(cfg.rake_gaze_gain_x),
+                "--ninja-gaze-gain-y", str(cfg.rake_gaze_gain_y),
+                "--ninja-gaze-offset-x", str(cfg.rake_gaze_offset_x),
+                "--ninja-gaze-offset-y", str(cfg.rake_gaze_offset_y),
+                "--ninja-selection-hold", str(cfg.rake_selection_hold),
+                "--ninja-calib-points", str(cfg.rake_calib_points),
+            ]
+            if cfg.rake_lock_on_dwell:
+                cmd.append("--ninja-lock-on-dwell")
+            if not cfg.rake_show_gaze:
+                cmd.append("--ninja-hide-gaze-point")
+            if not cfg.rake_show_debug_status:
+                cmd.append("--ninja-hide-debug-status")
+            if cfg.rake_snap_system_cursor:
+                cmd.append("--ninja-snap-system-cursor-to-active")
+            if cfg.rake_use_calibration:
+                cmd.append("--ninja-auto-calibrate")
+            if not cfg.rake_without_targetfinder:
+                cmd.append("--ninja-with-targetfinder")
+        return cmd
+
+    def _build_synthetic_fitts_session_command(self, cfg: PanelConfig, output_dir: Path | None = None):
+        cmd = [
+            sys.executable,
+            "-m",
+            "target_finder_toolkit.synthetic_fitts_session",
+            "--language",
+            cfg.language,
+            "--participant",
+            cfg.experiment_participant_id.strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
+            "--trials-per-block",
+            str(cfg.experiment_trials),
+            "--synthetic-blocks",
+            str(cfg.synthetic_blocks),
+            "--countdown",
+            str(cfg.experiment_countdown),
+            "--max-clicks",
+            str(cfg.experiment_max_clicks),
+            "--change-thresh",
+            str(cfg.change_thresh),
+            "--capture-interval",
+            str(cfg.capture_interval),
+            "--confidence",
+            str(cfg.confidence),
+            "--iou",
+            str(cfg.iou),
+            "--filter",
+            cfg.filter_name,
+            "--filter-freq",
+            str(cfg.filter_freq),
+            "--filter-min-cutoff",
+            str(cfg.filter_min_cutoff),
+            "--filter-beta",
+            str(cfg.filter_beta),
+            "--filter-d-cutoff",
+            str(cfg.filter_d_cutoff),
+            "--dynaspot-min-speed",
+            str(cfg.dynaspot_min_speed),
+            "--dynaspot-spot-width",
+            str(cfg.dynaspot_spot_width),
+            "--dynaspot-lag",
+            str(cfg.dynaspot_lag),
+            "--dynaspot-reduce-time",
+            str(cfg.dynaspot_reduce_time),
+            "--ninja-camera-index",
+            str(cfg.rake_camera_index),
+            "--ninja-screen-width-cm",
+            str(cfg.rake_screen_width_cm),
+            "--ninja-screen-height-cm",
+            str(cfg.rake_screen_height_cm),
+            "--ninja-spacing",
+            str(cfg.rake_spacing),
+            "--ninja-gaze-smoothing",
+            str(cfg.rake_gaze_smoothing),
+            "--ninja-gaze-gain-x",
+            str(cfg.rake_gaze_gain_x),
+            "--ninja-gaze-gain-y",
+            str(cfg.rake_gaze_gain_y),
+            "--ninja-gaze-offset-x",
+            str(cfg.rake_gaze_offset_x),
+            "--ninja-gaze-offset-y",
+            str(cfg.rake_gaze_offset_y),
+            "--ninja-selection-hold",
+            str(cfg.rake_selection_hold),
+            "--ninja-calib-points",
+            str(cfg.rake_calib_points),
+        ]
+        if output_dir is not None:
+            cmd += ["--output-dir", str(output_dir)]
+        if not cfg.experiment_fullscreen:
+            cmd.append("--windowed")
+        if not cfg.enable_logging:
+            cmd.append("--no-technique-log")
+            cmd.append("--no-log")
+        if cfg.display:
+            cmd.append("--semantic-display")
+        if cfg.disable_accel:
+            cmd.append("--semantic-disable-accel")
+        if cfg.rake_lock_on_dwell:
+            cmd.append("--ninja-lock-on-dwell")
+        if not cfg.rake_show_gaze:
+            cmd.append("--ninja-hide-gaze-point")
+        if cfg.rake_show_debug_status:
+            cmd.append("--ninja-show-debug-status")
+        else:
+            cmd.append("--ninja-hide-debug-status")
+        if cfg.rake_snap_system_cursor:
+            cmd.append("--ninja-snap-system-cursor-to-active")
+        if cfg.rake_use_calibration:
+            cmd.append("--ninja-auto-calibrate")
+        if not cfg.rake_without_targetfinder:
+            cmd.append("--ninja-with-targetfinder")
+        return cmd
+
+    def _build_comparative_session_command(self, cfg: PanelConfig):
+        cmd = [
+            sys.executable,
+            "-m",
+            "target_finder_toolkit.comparative_session",
+            "--language",
+            cfg.language,
+            "--participant",
+            cfg.experiment_participant_id.strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
+            "--data-dir",
+            cfg.experiment_data_dir,
+            "--trials-per-block",
+            str(cfg.experiment_trials),
+            "--synthetic-blocks",
+            str(cfg.synthetic_blocks),
+            "--countdown",
+            str(cfg.experiment_countdown),
+            "--max-clicks",
+            str(cfg.experiment_max_clicks),
+            "--change-thresh",
+            str(cfg.change_thresh),
+            "--capture-interval",
+            str(cfg.capture_interval),
+            "--confidence",
+            str(cfg.confidence),
+            "--iou",
+            str(cfg.iou),
+            "--filter",
+            cfg.filter_name,
+            "--filter-freq",
+            str(cfg.filter_freq),
+            "--filter-min-cutoff",
+            str(cfg.filter_min_cutoff),
+            "--filter-beta",
+            str(cfg.filter_beta),
+            "--filter-d-cutoff",
+            str(cfg.filter_d_cutoff),
+            "--dynaspot-min-speed",
+            str(cfg.dynaspot_min_speed),
+            "--dynaspot-spot-width",
+            str(cfg.dynaspot_spot_width),
+            "--dynaspot-lag",
+            str(cfg.dynaspot_lag),
+            "--dynaspot-reduce-time",
+            str(cfg.dynaspot_reduce_time),
+            "--ninja-camera-index",
+            str(cfg.rake_camera_index),
+            "--ninja-screen-width-cm",
+            str(cfg.rake_screen_width_cm),
+            "--ninja-screen-height-cm",
+            str(cfg.rake_screen_height_cm),
+            "--ninja-spacing",
+            str(cfg.rake_spacing),
+            "--ninja-gaze-smoothing",
+            str(cfg.rake_gaze_smoothing),
+            "--ninja-gaze-gain-x",
+            str(cfg.rake_gaze_gain_x),
+            "--ninja-gaze-gain-y",
+            str(cfg.rake_gaze_gain_y),
+            "--ninja-gaze-offset-x",
+            str(cfg.rake_gaze_offset_x),
+            "--ninja-gaze-offset-y",
+            str(cfg.rake_gaze_offset_y),
+            "--ninja-selection-hold",
+            str(cfg.rake_selection_hold),
+            "--ninja-calib-points",
+            str(cfg.rake_calib_points),
+        ]
+        if not cfg.experiment_fullscreen:
+            cmd.append("--windowed")
+        if not cfg.enable_logging:
+            cmd.append("--no-technique-log")
+            cmd.append("--no-log")
+        if cfg.experiment_show_all_targets:
+            cmd.append("--show-all-targets")
+        if cfg.display:
+            cmd.append("--semantic-display")
+        if cfg.disable_accel:
+            cmd.append("--semantic-disable-accel")
+        if cfg.rake_lock_on_dwell:
+            cmd.append("--ninja-lock-on-dwell")
+        if not cfg.rake_show_gaze:
+            cmd.append("--ninja-hide-gaze-point")
+        if cfg.rake_show_debug_status:
+            cmd.append("--ninja-show-debug-status")
+        else:
+            cmd.append("--ninja-hide-debug-status")
+        if cfg.rake_snap_system_cursor:
+            cmd.append("--ninja-snap-system-cursor-to-active")
+        if cfg.rake_use_calibration:
+            cmd.append("--ninja-auto-calibrate")
+        if not cfg.rake_without_targetfinder:
+            cmd.append("--ninja-with-targetfinder")
+        return cmd
+
+    def _build_experiment_session_command(self, cfg: PanelConfig, output_dir: Path | None = None):
         cmd = [
             sys.executable,
             "-m",
             "target_finder_toolkit.experimental_session",
+            "--language",
+            cfg.language,
             "--participant",
             cfg.experiment_participant_id.strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
             "--data-dir",
@@ -2879,6 +4042,8 @@ class ControlPanel(QtWidgets.QWidget):
             "--filter-d-cutoff",
             str(cfg.filter_d_cutoff),
         ]
+        if output_dir is not None:
+            cmd += ["--output-dir", str(output_dir)]
         if cfg.model_path:
             cmd += ["--model-path", cfg.model_path]
         if not cfg.experiment_fullscreen:
@@ -2887,6 +4052,7 @@ class ControlPanel(QtWidgets.QWidget):
             cmd.append("--show-all-targets")
         if not cfg.enable_logging:
             cmd.append("--no-technique-log")
+            cmd.append("--no-log")
         if cfg.display:
             cmd.append("--semantic-display")
         if cfg.disable_accel:
@@ -2912,6 +4078,12 @@ class ControlPanel(QtWidgets.QWidget):
             cmd.append("--ninja-lock-on-dwell")
         if not cfg.rake_show_gaze:
             cmd.append("--ninja-hide-gaze-point")
+        if cfg.rake_show_debug_status:
+            cmd.append("--ninja-show-debug-status")
+        else:
+            cmd.append("--ninja-hide-debug-status")
+        if cfg.rake_snap_system_cursor:
+            cmd.append("--ninja-snap-system-cursor-to-active")
         if cfg.rake_use_calibration:
             cmd.append("--ninja-auto-calibrate")
         if not cfg.rake_without_targetfinder:
@@ -3041,8 +4213,10 @@ class ControlPanel(QtWidgets.QWidget):
         if cfg.experiment_enabled and not Path(cfg.experiment_data_dir).is_dir():
             self._set_status("invalid_experiment_data_dir", speak=speak)
             return
+        baseline_enabled = cfg.preset == "Normal Mouse Baseline" or self._mode_code() == "baseline"
+        mouse_filter_enabled = cfg.preset in {"Standard Mouse", "Standard Mouse + Filter"} or self._mode_code() == "mouse_filter"
         uses_model = (
-            not cfg.experiment_enabled
+            (not cfg.experiment_enabled and not baseline_enabled and not mouse_filter_enabled)
             or cfg.enable_semantic_pointing
             or cfg.enable_dynaspot
             or (cfg.enable_rake_cursor and not cfg.rake_without_targetfinder)
@@ -3050,13 +4224,13 @@ class ControlPanel(QtWidgets.QWidget):
         if uses_model and cfg.model_path and not Path(cfg.model_path).is_file():
             self._set_status("invalid_model_path", speak=speak)
             return
-        if cfg.filter_name == "one_euro":
+        if cfg.filter_name == "one_euro" and not baseline_enabled:
             try:
                 importlib.import_module("OneEuroFilter")
             except Exception as exc:
                 self.info_label.setText(f"{self._text('missing_one_euro')} ({exc})")
                 return
-        if cfg.enable_rake_cursor:
+        if cfg.enable_rake_cursor and not baseline_enabled:
             try:
                 _ensure_mediapipe_python_alias()
                 importlib.import_module("webeyetrack")
@@ -3087,6 +4261,10 @@ class ControlPanel(QtWidgets.QWidget):
             self._set_status("running_experiment_session", speak=speak)
         elif cfg.experiment_enabled:
             self._set_status("running_experiment", speak=speak)
+        elif cfg.preset == "Normal Mouse Baseline" or self._mode_code() == "baseline":
+            self._set_status("running_baseline", speak=speak)
+        elif cfg.preset in {"Standard Mouse", "Standard Mouse + Filter"} or self._mode_code() == "mouse_filter":
+            self._set_status("running_mouse_filter", speak=speak)
         elif cfg.preset == "TargetFinder":
             self._set_status("running_targetfinder", speak=speak)
         elif cfg.enable_bubble_cursor:

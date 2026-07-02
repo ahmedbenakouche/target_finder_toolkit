@@ -29,7 +29,7 @@ import pyautogui
 from pynput import keyboard, mouse
 import argparse
 from target_finder_toolkit.targetfinder import CLASS_NAMES, TargetFinder
-from target_finder_toolkit.annotation_detector import AnnotationDetector
+from target_finder_toolkit.annotation_detector import FakeTargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
@@ -64,7 +64,15 @@ class BubbleCursor(QtWidgets.QWidget):
       to the nearest detected target.
     - The real cursor is hidden and replaced by a drawn "fake" cursor.
     """
-    def __init__(self, detector: TargetFinder, cursor_filter=None, logger=None, *, include_text_targets=False):
+    def __init__(
+        self,
+        detector: TargetFinder,
+        cursor_filter=None,
+        logger=None,
+        *,
+        include_text_targets=False,
+        disable_keyboard_quit=False,
+    ):
         super().__init__()
         self.detector = detector
         detector.overlay_window = self
@@ -73,6 +81,7 @@ class BubbleCursor(QtWidgets.QWidget):
         self.cursor_filter = cursor_filter
         self.logger = logger
         self.include_text_targets = bool(include_text_targets)
+        self.disable_keyboard_quit = bool(disable_keyboard_quit)
         self._last_target = None  # to store the active target
         self._last_target_click = None
         self._last_target_info = None
@@ -204,6 +213,10 @@ class BubbleCursor(QtWidgets.QWidget):
         detections = self.detector.get_detections()
         if not self.bubble_enabled or not detections:
             return
+        bubble_candidates = [
+            det for det in detections
+            if self.include_text_targets or int(det[5]) != 3
+        ]
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -218,7 +231,7 @@ class BubbleCursor(QtWidgets.QWidget):
 
         text_margin = 20
         cursor_on_non_text = False
-        for x, y, w, h, score, cls_id in detections:
+        for x, y, w, h, score, cls_id in bubble_candidates:
             if cls_id != 3 and x <= cx <= x + w and y <= cy <= y + h:
                 cursor_on_non_text = True
                 break
@@ -242,7 +255,7 @@ class BubbleCursor(QtWidgets.QWidget):
 
         # Compute distances from pointer to each box edge
         distances = []
-        for x, y, w, h, score, cls_id in detections:
+        for x, y, w, h, score, cls_id in bubble_candidates:
             cx_box = x + w/2
             cy_box = y + h/2
 
@@ -424,7 +437,7 @@ class BubbleCursor(QtWidgets.QWidget):
             try:
                 if key.char == 'b':
                     QtCore.QMetaObject.invokeMethod(self, "toggle_bubble", QtCore.Qt.ConnectionType.QueuedConnection)
-                elif key.char == 'q':
+                elif key.char == 'q' and not self.disable_keyboard_quit:
                     QtCore.QMetaObject.invokeMethod(self, "stop_and_quit", QtCore.Qt.ConnectionType.QueuedConnection)
             except AttributeError:
                 pass
@@ -531,14 +544,21 @@ class BubbleCursor(QtWidgets.QWidget):
             return event
 
         tx, ty, w, h = logical_target
+        if self._pending_click_target is not None:
+            click_x, click_y = self._pending_click_target
+        elif self._last_target_click is not None:
+            click_x, click_y = self._last_target_click
+        else:
+            click_x = float(tx)
+            click_y = float(ty)
         redirected = not (tx - w / 2 <= px <= tx + w / 2 and ty - h / 2 <= py <= ty + h / 2)
         if redirected:
-            Quartz.CGEventSetLocation(event, Quartz.CGPointMake(float(tx), float(ty)))
+            Quartz.CGEventSetLocation(event, Quartz.CGPointMake(float(click_x), float(click_y)))
 
         if event_type == Quartz.kCGEventLeftMouseUp:
             if self.logger is not None:
-                effective_x = float(tx) if redirected else float(px)
-                effective_y = float(ty) if redirected else float(py)
+                effective_x = float(click_x) if redirected else float(px)
+                effective_y = float(click_y) if redirected else float(py)
                 self.logger.log_click(
                     technique="bubble",
                     raw=[round(float(px), 3), round(float(py), 3)],
@@ -698,7 +718,14 @@ class BubbleCursor(QtWidgets.QWidget):
         post_mouse_event(Quartz.kCGEventMouseMoved, orig_x, orig_y)
 
 
-def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None, *, include_text_targets=False):
+def bubble_cursor(
+    detector: TargetFinder,
+    cursor_filter=None,
+    logger=None,
+    *,
+    include_text_targets=False,
+    disable_keyboard_quit=False,
+):
     """Launch the Bubble Cursor overlay.
 
     This replaces the system cursor with a dynamic "bubble" that
@@ -721,6 +748,7 @@ def bubble_cursor(detector: TargetFinder, cursor_filter=None, logger=None, *, in
         cursor_filter=cursor_filter,
         logger=logger,
         include_text_targets=include_text_targets,
+        disable_keyboard_quit=disable_keyboard_quit,
     )
     ov.show()
     raise_macos_window_above_system_ui(ov, level_offset=1)
@@ -787,10 +815,11 @@ def main():
     parser.add_argument('--log-cursor-hz', type=float, default=30.0, help="Cursor sampling rate for logging")
     parser.add_argument('--annotation-control-file', default=None, help="Use controlled-task annotations instead of live YOLO detection")
     parser.add_argument('--include-text-targets', action='store_true', help="Allow Text annotations to be acquired by the bubble")
+    parser.add_argument('--disable-keyboard-quit', action='store_true', help="Disable the overlay-level q quit shortcut; controlled experiments handle quitting")
     args = parser.parse_args()
 
     if args.annotation_control_file:
-        det = AnnotationDetector(args.annotation_control_file)
+        det = FakeTargetFinder(args.annotation_control_file)
     else:
         if args.model_path is None:
             here = os.path.dirname(os.path.abspath(__file__))
@@ -815,6 +844,7 @@ def main():
             detection_source="annotations" if args.annotation_control_file else "yolo",
             annotation_control_file=args.annotation_control_file,
             include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
+            keyboard_quit_enabled=not args.disable_keyboard_quit,
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
     bubble_cursor(
@@ -822,6 +852,7 @@ def main():
         cursor_filter=cursor_filter,
         logger=logger,
         include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
+        disable_keyboard_quit=args.disable_keyboard_quit,
     )
 
 if __name__ == "__main__":

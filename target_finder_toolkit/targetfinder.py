@@ -160,6 +160,7 @@ class TargetFinder:
 
         # Control flags for the background loop
         self._stop = False
+        self._capture_suspended = False
         self.hide_overlay_during_capture = True
         self.overlay_window = None  # will be set by OverlayWindow
 
@@ -229,6 +230,10 @@ class TargetFinder:
     def stop(self):
         """Stop the detection loop."""
         self._stop = True
+
+    def set_capture_suspended(self, suspended: bool):
+        """Temporarily pause screen capture without stopping the detector thread."""
+        self._capture_suspended = bool(suspended)
 
     def get_detections(self):
         """Return current detections as tuples. Coordinates are in **logical screen space**, i.e. they already include DPI-aware scaling to match the primary screen geometry.
@@ -452,6 +457,11 @@ class TargetFinder:
         prev_small = None     # last low-res grayscale for change detection
 
         while not self._stop:
+            if self._capture_suspended:
+                prev_small = None
+                time.sleep(max(self.interval, 0.05))
+                continue
+
             current_signature = (self.conf, self.iou)
             params_changed = current_signature != self._last_inference_signature
 
@@ -465,19 +475,38 @@ class TargetFinder:
                 prev_small = small.copy()
                 self._last_inference_signature = current_signature
 
-                # Hide the overlay before full-resolution capture when needed.
+                # Hide overlay visuals before full-resolution capture when needed.
+                visuals_suspended = False
                 if self.overlay_window and self.hide_overlay_during_capture:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "hide",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
+                    suspend_visuals = getattr(self.overlay_window, "set_capture_visuals_suspended", None)
+                    if callable(suspend_visuals):
+                        QtCore.QMetaObject.invokeMethod(
+                            self.overlay_window,
+                            "set_capture_visuals_suspended",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                            QtCore.Q_ARG(bool, True),
+                        )
+                        visuals_suspended = True
+                    else:
+                        QtCore.QMetaObject.invokeMethod(self.overlay_window, "hide",
+                            QtCore.Qt.ConnectionType.QueuedConnection)
                     time.sleep(0.03)  # allow time for the overlay to disappear
 
                 # Full-resolution capture without overlay
                 full = np.array(sct.grab(monitor))[..., :3]
 
-                # Re-show the overlay
+                # Re-show the overlay visuals
                 if self.overlay_window and self.hide_overlay_during_capture:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "show",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
+                    if visuals_suspended:
+                        QtCore.QMetaObject.invokeMethod(
+                            self.overlay_window,
+                            "set_capture_visuals_suspended",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                            QtCore.Q_ARG(bool, False),
+                        )
+                    else:
+                        QtCore.QMetaObject.invokeMethod(self.overlay_window, "show",
+                            QtCore.Qt.ConnectionType.QueuedConnection)
 
                 # YOLO inference
                 results = self.model(full, conf=self.conf, iou=self.iou, verbose = False)[0]

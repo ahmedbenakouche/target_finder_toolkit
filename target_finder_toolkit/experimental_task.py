@@ -53,6 +53,13 @@ TECHNIQUES = [
     "dynaspot",
     "ninja_cursors",
 ]
+EXPERIMENT_TECHNIQUES = [
+    "mouse",
+    "bubble",
+    "dynaspot",
+    "semantic",
+    "ninja_cursors",
+]
 TECHNIQUE_MODULES = {
     "targetfinder": "target_finder_toolkit.targetfinder",
     "bubble": "target_finder_toolkit.bubblecursor",
@@ -75,8 +82,13 @@ DEFAULT_NINJA_GAZE_SMOOTHING = 0.35
 DEFAULT_NINJA_GAZE_GAIN_X = 1.0
 DEFAULT_NINJA_GAZE_GAIN_Y = 1.0
 DEFAULT_NINJA_GAZE_OFFSET_X = 0.0
-DEFAULT_NINJA_GAZE_OFFSET_Y = -200.0
+DEFAULT_NINJA_GAZE_OFFSET_Y = 0.0
 DEFAULT_NINJA_SELECTION_HOLD = 2.0
+COUNTDOWN_STEP_SEC = 0.5
+
+
+def is_english(language: str | None) -> bool:
+    return str(language or "").strip().lower().startswith("en")
 
 
 @dataclass(frozen=True)
@@ -129,6 +141,27 @@ def class_name_for_id(class_id: int) -> str:
         return str(CLASS_NAMES[class_id])
     except Exception:
         return str(class_id)
+
+
+def normalize_countdown_seconds(value: float) -> float:
+    normalized = round(float(value) / COUNTDOWN_STEP_SEC) * COUNTDOWN_STEP_SEC
+    return max(0.0, normalized)
+
+
+def format_countdown_seconds(value: float) -> str:
+    rounded = round(float(value), 1)
+    if math.isclose(rounded, round(rounded), abs_tol=1e-9):
+        return str(int(round(rounded)))
+    return f"{rounded:.1f}"
+
+
+def is_countdown_message(text: str) -> bool:
+    if not text:
+        return False
+    try:
+        return float(text.strip()) >= 0.0
+    except ValueError:
+        return False
 
 
 def yolo_to_bbox(
@@ -290,7 +323,7 @@ def safe_log_name(value: str) -> str:
 
 
 def default_log_path(*, technique: str, difficulty: str) -> Path:
-    logs_dir = PROJECT_ROOT / "experience_logs"
+    logs_dir = PROJECT_ROOT / "patient_logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     technique_name = safe_log_name(technique)
@@ -299,7 +332,7 @@ def default_log_path(*, technique: str, difficulty: str) -> Path:
 
 
 def default_technique_log_path(technique: str) -> Path:
-    logs_dir = PROJECT_ROOT / "experience_logs"
+    logs_dir = PROJECT_ROOT / "patient_logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return logs_dir / f"{stamp}_{safe_log_name(technique)}_during_task.jsonl"
@@ -337,6 +370,8 @@ def build_technique_command(
         "--filter-d-cutoff",
         str(args.filter_d_cutoff),
     ]
+    if args.technique != "targetfinder":
+        cmd.append("--disable-keyboard-quit")
     if args.model_path:
         cmd += ["--model-path", args.model_path]
     if technique_log_file is not None:
@@ -392,6 +427,10 @@ def build_technique_command(
             cmd.append("--lock-on-dwell")
         if args.ninja_hide_gaze_point:
             cmd.append("--hide-gaze-point")
+        if getattr(args, "ninja_hide_debug_status", False):
+            cmd.append("--hide-debug-status")
+        if getattr(args, "ninja_snap_system_cursor_to_active", False):
+            cmd.append("--snap-system-cursor-to-active")
         if args.ninja_auto_calibrate:
             cmd.append("--auto-calibrate")
         if args.ninja_without_targetfinder:
@@ -435,6 +474,7 @@ class TrialCanvas(QtWidgets.QWidget):
 
     def __init__(self):
         super().__init__()
+        self._language = "French"
         self._image = QtGui.QImage()
         self._target_bbox: tuple[float, float, float, float] | None = None
         self._show_all_targets = False
@@ -453,6 +493,10 @@ class TrialCanvas(QtWidgets.QWidget):
         self._attention_timer.timeout.connect(self._tick_attention_cue)
         self.setMouseTracking(True)
         self.setMinimumSize(640, 420)
+
+    def set_language(self, language: str):
+        self._language = language
+        self.update()
 
     def set_trial(
         self,
@@ -659,7 +703,11 @@ class TrialCanvas(QtWidgets.QWidget):
 
         if self._image.isNull():
             painter.setPen(QtGui.QColor(80, 80, 80))
-            painter.drawText(image_area, QtCore.Qt.AlignmentFlag.AlignCenter, "Aucune image")
+            painter.drawText(
+                image_area,
+                QtCore.Qt.AlignmentFlag.AlignCenter,
+                "No image" if is_english(self._language) else "Aucune image",
+            )
             self._draw_bar_text(painter, top_bar, image_area)
             painter.end()
             return
@@ -769,7 +817,7 @@ class TrialCanvas(QtWidgets.QWidget):
 
         if self._message_text:
             font = painter.font()
-            is_countdown = self._message_text.strip().isdigit()
+            is_countdown = is_countdown_message(self._message_text)
             is_centered = self._message_style == "center"
             if is_countdown:
                 font.setPointSize(72)
@@ -852,7 +900,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         dataset_by_image: dict[str, DatasetImage],
         *,
         log_file: Path,
-        countdown_sec: int = 3,
+        countdown_sec: float = 0.0,
         max_clicks: int = 1,
         show_all_targets: bool = False,
         technique_command: list[str] | None = None,
@@ -866,13 +914,14 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         fullscreen: bool = True,
         emit_session_events: bool = True,
         session_metadata: dict | None = None,
+        language: str = "French",
     ):
         super().__init__()
         self.trials = trials
         self.dataset_by_image = dataset_by_image
         self.log_file = Path(log_file)
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
-        self.countdown_sec = max(0, int(countdown_sec))
+        self.countdown_sec = normalize_countdown_seconds(countdown_sec)
         self.max_clicks = max(1, int(max_clicks))
         self.show_all_targets = show_all_targets
         self.technique_command = list(technique_command) if technique_command else None
@@ -885,6 +934,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.fullscreen = bool(fullscreen)
         self.emit_session_events = bool(emit_session_events)
         self.session_metadata = dict(session_metadata or {})
+        self.language = language
         self.technique_process: subprocess.Popen | None = None
         self.current_index = -1
         self.current_trial: TrialSpec | None = None
@@ -892,7 +942,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.trial_started_at = 0.0
         self.click_count = 0
         self.miss_count = 0
-        self._countdown_remaining = 0
+        self._countdown_remaining = 0.0
         self._accept_clicks = False
         self._session_ended = False
         self._process_output_buffer = ""
@@ -901,6 +951,11 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._pending_external_click_payload: dict | None = None
         self._exit_code = 0
         self._aborting = False
+        self._app_filter_installed = False
+        self._pretrial_cursor_lock_active = False
+        self.mouse_decoupled = False
+        self._global_keyboard_listener = None
+        self._global_keyboard_listener_failed = False
         self.technique_name = self.trials[0].technique if self.trials else None
         self.ninja_control_file: Path | None = Path(ninja_control_file) if ninja_control_file else None
         if self.technique_command is not None and self._uses_ninja_cursors():
@@ -911,7 +966,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         elif self.ninja_control_file is not None:
             self._set_ninja_control_state("paused")
 
-        self.setWindowTitle("Tache experimentale")
+        self.setWindowTitle("Experimental task" if is_english(self.language) else "Tache experimentale")
         self.resize(1200, 820)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
@@ -920,12 +975,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         layout.setSpacing(0)
 
         self.canvas = TrialCanvas()
+        self.canvas.set_language(self.language)
         self.canvas.clicked.connect(self._handle_click)
         self.canvas.mouse_event.connect(self._handle_mouse_event)
         layout.addWidget(self.canvas, 1)
 
         self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(1000)
+        self.timer.setInterval(int(COUNTDOWN_STEP_SEC * 1000))
         self.timer.timeout.connect(self._tick_countdown)
 
         self.cursor_lock_timer = QtCore.QTimer(self)
@@ -947,10 +1003,12 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
         self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
         self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
-        self._escape_shortcut.activated.connect(lambda: self._abort_experiment("escape"))
-        self._q_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
-        self._q_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
-        self._q_shortcut.activated.connect(lambda: self._abort_experiment("keyboard_q"))
+        self._escape_shortcut.activated.connect(lambda: self._abort_experiment("keyboard_escape"))
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            self._app_filter_installed = True
+        self._start_global_keyboard_listener()
 
         if self.emit_session_events:
             self._write_event(
@@ -989,9 +1047,15 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.cursor_sample_timer.stop()
         self.external_click_timer.stop()
         self._stop_technique_process(wait=not self._aborting)
+        self._set_mouse_association(True)
         self._cleanup_ninja_control_file()
         self._cleanup_annotation_control_file()
         self._end_session("window_close")
+        self._stop_global_keyboard_listener()
+        app = QtWidgets.QApplication.instance()
+        if app is not None and self._app_filter_installed:
+            app.removeEventFilter(self)
+            self._app_filter_installed = False
         super().closeEvent(event)
 
     def _write_event(self, payload: dict):
@@ -1026,12 +1090,58 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self.cursor_sample_timer.stop()
         self.external_click_timer.stop()
         self._stop_technique_process(wait=False)
+        self._set_mouse_association(True)
         self._cleanup_ninja_control_file()
         self._cleanup_annotation_control_file()
         self._end_session(reason)
+        self._stop_global_keyboard_listener()
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.exit(self._exit_code)
+
+    def _start_global_keyboard_listener(self):
+        if sys.platform == "darwin":
+            return
+        if self._global_keyboard_listener is not None or self._global_keyboard_listener_failed:
+            return
+        try:
+            from pynput import keyboard as pynput_keyboard
+        except Exception:
+            self._global_keyboard_listener_failed = True
+            return
+
+        def on_press(key):
+            try:
+                if key == pynput_keyboard.Key.esc:
+                    QtCore.QMetaObject.invokeMethod(
+                        self,
+                        "_abort_from_global_keyboard",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    )
+            except Exception:
+                return
+
+        try:
+            self._global_keyboard_listener = pynput_keyboard.Listener(on_press=on_press)
+            self._global_keyboard_listener.start()
+        except Exception:
+            self._global_keyboard_listener = None
+            self._global_keyboard_listener_failed = True
+
+    def _stop_global_keyboard_listener(self):
+        listener = self._global_keyboard_listener
+        self._global_keyboard_listener = None
+        if listener is None:
+            return
+        try:
+            listener.stop()
+        except Exception:
+            pass
+
+    @QtCore.pyqtSlot()
+    def _abort_from_global_keyboard(self):
+        if self.isVisible():
+            self._abort_experiment("keyboard_escape")
 
     def _start_technique_process(self):
         if self.technique_command is None or self.technique_process is not None:
@@ -1060,7 +1170,9 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                     "command": self.technique_command,
                 }
             )
-            self._set_status_text(f"Echec du lancement de la technique : {exc}")
+            self._set_status_text(
+                f"{'Technique launch failed' if is_english(self.language) else 'Echec du lancement de la technique'} : {exc}"
+            )
             return
         self._write_event(
             {
@@ -1124,7 +1236,10 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         if event == "started":
             points = payload.get("num_points")
             suffix = f" ({points} points)" if points else ""
-            self._set_message_text(f"Calibration Ninja Cursors{suffix}...", style="center")
+            self._set_message_text(
+                f"{'Ninja Cursors calibration' if is_english(self.language) else 'Calibration Ninja Cursors'}{suffix}...",
+                style="center",
+            )
             return
         if event not in {"calibrated", "failed", "cancelled"}:
             return
@@ -1132,11 +1247,11 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             return
         self._waiting_for_ninja_calibration = False
         if event == "calibrated":
-            self._set_message_text("Calibration terminee", style="center")
+            self._set_message_text("Calibration complete" if is_english(self.language) else "Calibration terminee", style="center")
         elif event == "failed":
-            self._set_message_text("Calibration echouee", style="center")
+            self._set_message_text("Calibration failed" if is_english(self.language) else "Calibration echouee", style="center")
         else:
-            self._set_message_text("Calibration annulee", style="center")
+            self._set_message_text("Calibration cancelled" if is_english(self.language) else "Calibration annulee", style="center")
         QtCore.QTimer.singleShot(900, self._show_trial_intro)
 
     def _check_technique_process(self):
@@ -1158,10 +1273,16 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._write_event({"type": "technique_process_exit", "exit_code": exit_code})
         self.technique_process = None
         self.technique_watch_timer.stop()
-        self._set_status_text(f"{self._status_text()} | Technique arretee ({exit_code})")
+        self._set_status_text(
+            f"{self._status_text()} | "
+            f"{'Technique stopped' if is_english(self.language) else 'Technique arretee'} ({exit_code})"
+        )
         if self._waiting_for_ninja_calibration:
             self._waiting_for_ninja_calibration = False
-            self._set_message_text(f"Ninja Cursors arrete ({exit_code})", style="center")
+            self._set_message_text(
+                f"{'Ninja Cursors stopped' if is_english(self.language) else 'Ninja Cursors arrete'} ({exit_code})",
+                style="center",
+            )
             QtCore.QTimer.singleShot(900, self._show_trial_intro)
 
     def _stop_technique_process(self, *, wait: bool = True):
@@ -1210,9 +1331,45 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
     def _set_cursor_to_start(self):
         QtGui.QCursor.setPos(self.canvas.image_center_global())
 
+    def _set_mouse_association(self, enabled: bool) -> bool:
+        # Keep this as a safe no-op in the realistic screenshot task. Calling
+        # CGAssociateMouseAndMouseCursorPosition from this PyQt window caused
+        # native macOS crashes immediately after calibration on some machines.
+        self.mouse_decoupled = False
+        return False
+
+    def _unlock_pretrial_cursor(self):
+        if self._uses_ninja_cursors():
+            self.cursor_lock_timer.stop()
+            return
+        self._set_cursor_to_start()
+        self._set_mouse_association(True)
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.processEvents(QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        self._set_cursor_to_start()
+        self.cursor_lock_timer.stop()
+        self._set_cursor_to_start()
+
+    def _screen_center_global(self) -> QtCore.QPoint:
+        screen = None
+        handle = self.windowHandle()
+        if handle is not None:
+            screen = handle.screen()
+        if screen is None:
+            screen = QtGui.QGuiApplication.screenAt(self.mapToGlobal(self.rect().center()))
+        if screen is not None:
+            return screen.geometry().center()
+        return self.mapToGlobal(self.rect().center())
+
     def _uses_ninja_cursors(self) -> bool:
         return self.technique_name == "ninja_cursors" or self._technique_command_has(
             "target_finder_toolkit.ninjacursors"
+        )
+
+    def _uses_semantic_pointing(self) -> bool:
+        return self.technique_name == "semantic" or self._technique_command_has(
+            "target_finder_toolkit.semanticpointing"
         )
 
     def _set_ninja_control_state(self, state: str):
@@ -1225,7 +1382,16 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             self._write_event({"type": "ninja_control_error", "error": str(exc)})
 
     def _ninja_pretrial_state(self) -> str:
-        return "ready" if self._uses_ninja_cursors() else "paused"
+        return self._ninja_state_at_start("ready")
+
+    def _ninja_active_state(self) -> str:
+        return self._ninja_state_at_start("active")
+
+    def _ninja_state_at_start(self, state: str) -> str:
+        if not self._uses_ninja_cursors():
+            return "paused"
+        center = self._screen_center_global()
+        return f"{state} {int(center.x())} {int(center.y())}"
 
     def _cleanup_ninja_control_file(self):
         if self.ninja_control_file is None or not self.cleanup_control_files:
@@ -1251,6 +1417,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         if image_rect.isNull() or self.canvas._image.isNull():
             return
         canvas_origin = self.canvas.mapToGlobal(QtCore.QPoint(0, 0))
+        start_global = self.canvas.image_center_global()
         scale_x = image_rect.width() / max(float(item.width), 1.0)
         scale_y = image_rect.height() / max(float(item.height), 1.0)
         detections = []
@@ -1279,6 +1446,11 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             "version": 1,
             "state": state,
             "trial_id": self.current_trial.trial_id,
+            "trial_key": (
+                f"{self.session_metadata.get('session_id', '')}:"
+                f"{self.session_metadata.get('block_id', self.current_trial.technique)}:"
+                f"{self._global_trial_id() or self.current_trial.trial_id}"
+            ),
             "technique": self.current_trial.technique,
             "image_path": self.current_trial.image_path,
             "image_size": [item.width, item.height],
@@ -1288,6 +1460,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 image_rect.width(),
                 image_rect.height(),
             ],
+            "start_position_global": [float(start_global.x()), float(start_global.y())],
             "detections": detections,
         }
         tmp_path = self.annotation_control_file.with_suffix(
@@ -1312,6 +1485,14 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             self.cursor_lock_timer.stop()
             return
         self._set_cursor_to_start()
+        if self._pretrial_cursor_lock_active:
+            self._set_mouse_association(False)
+            self._set_cursor_to_start()
+            self.cursor_lock_timer.start()
+            return
+        if self._uses_semantic_pointing():
+            self.cursor_lock_timer.stop()
+            return
         self.cursor_lock_timer.start()
 
     def _set_cursor_to_start_if_needed(self):
@@ -1345,8 +1526,10 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
     def next_trial(self):
         self.current_index += 1
         if self.current_index >= len(self.trials):
-            self._set_status_text(f"Termine. Journal : {self.log_file}")
-            self._set_message_text("Termine", style="center")
+            self._set_status_text(
+                f"{'Finished. Log' if is_english(self.language) else 'Termine. Journal'} : {self.log_file}"
+            )
+            self._set_message_text("Finished" if is_english(self.language) else "Termine", style="center")
             self._stop_technique_process()
             self._cleanup_ninja_control_file()
             self._cleanup_annotation_control_file()
@@ -1355,7 +1538,6 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             return
 
         self.current_trial = self.trials[self.current_index]
-        self._set_ninja_control_state(self._ninja_pretrial_state())
         item = self.dataset_by_image[self.current_trial.image_path]
         self.click_count = 0
         self.miss_count = 0
@@ -1371,13 +1553,27 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 else "mouse"
             ),
         )
+        self._set_ninja_control_state(self._ninja_pretrial_state())
         self._write_annotation_control_state("paused")
+        block_index = self.session_metadata.get("block_index")
+        block_count = self.session_metadata.get("block_count")
+        if block_index is not None and block_count is not None:
+            block_prefix = (
+                f"Block {block_index}/{block_count}"
+                if is_english(self.language)
+                else f"Bloc {block_index}/{block_count}"
+            )
+        else:
+            block_prefix = "Block" if is_english(self.language) else "Bloc"
+        trial_label = "Trial" if is_english(self.language) else "Essai"
+        difficulty_label = "Difficulty" if is_english(self.language) else "Difficulte"
+        target_label = "Target" if is_english(self.language) else "Cible"
         self._set_status_text(
-            f"Essai {self.current_trial.trial_id}/{len(self.trials)} | "
+            f"{block_prefix} | {trial_label} {self.current_trial.trial_id}/{len(self.trials)} | "
             f"Technique: {self.current_trial.technique} | "
-            f"Difficulte: {self.current_trial.difficulty} | "
+            f"{difficulty_label}: {self.current_trial.difficulty} | "
             f"ID={self.current_trial.fitts_id:.2f} | "
-            f"Cible: {self.current_trial.target_class_name}"
+            f"{target_label}: {self.current_trial.target_class_name}"
         )
         self._write_event(
             {
@@ -1388,11 +1584,11 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             }
         )
         if self.current_index == 0 and self.technique_command is not None and self.technique_process is None:
-            self._set_message_text("Preparation de la technique...", style="center")
+            self._set_message_text("Preparing technique..." if is_english(self.language) else "Preparation de la technique...", style="center")
             self._start_technique_process()
             if self._should_wait_for_ninja_calibration():
                 self._waiting_for_ninja_calibration = True
-                self._set_message_text("Initialisation de Ninja Cursors...", style="center")
+                self._set_message_text("Initializing Ninja Cursors..." if is_english(self.language) else "Initialisation de Ninja Cursors...", style="center")
                 return
             countdown_delay = int(max(0.5, self.technique_start_delay_sec) * 1000)
         else:
@@ -1406,11 +1602,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._set_ninja_control_state(self._ninja_pretrial_state())
         self._start_cursor_lock_if_needed()
         if self.current_index == 0:
-            self._set_message_text(
-                f"Après un compte à rebours de {self.countdown_sec} s,\n"
-                "cliquez sur la cible rouge.",
-                style="center",
+            countdown_label = format_countdown_seconds(self.countdown_sec)
+            intro_text = (
+                f"After a {countdown_label} s countdown,\nclick the red target."
+                if is_english(self.language)
+                else f"Après un compte à rebours de {countdown_label} s,\ncliquez sur la cible rouge."
             )
+            self._set_message_text(intro_text, style="center")
             QtCore.QTimer.singleShot(5000, self._start_countdown)
             return
         self._set_message_text(f"Image {self.current_index + 1}", style="center")
@@ -1419,29 +1617,31 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
     def _start_countdown(self):
         self._accept_clicks = False
         self._set_ninja_control_state(self._ninja_pretrial_state())
+        self._pretrial_cursor_lock_active = True
         self._start_cursor_lock_if_needed()
         self._write_annotation_control_state("paused")
         self._countdown_remaining = self.countdown_sec
-        if self._countdown_remaining <= 0:
-            self._begin_click_phase()
-            return
         self.canvas.start_attention_cue(duration=1.0)
-        self._set_message_text(str(self._countdown_remaining), style="center")
+        if self._countdown_remaining <= 0:
+            self._set_message_text("")
+            QtCore.QTimer.singleShot(1000, self._begin_click_phase)
+            return
+        self._set_message_text(format_countdown_seconds(self._countdown_remaining), style="center")
         self.timer.start()
 
     def _tick_countdown(self):
         self._set_cursor_to_start_if_needed()
-        self._countdown_remaining -= 1
+        self._countdown_remaining = round(self._countdown_remaining - COUNTDOWN_STEP_SEC, 10)
         if self._countdown_remaining <= 0:
             self.timer.stop()
             self._begin_click_phase()
         else:
-            self._set_message_text(str(self._countdown_remaining), style="center")
+            self._set_message_text(format_countdown_seconds(self._countdown_remaining), style="center")
 
     def _begin_click_phase(self):
-        self.cursor_lock_timer.stop()
-        self._set_cursor_to_start_if_needed()
-        self._set_ninja_control_state("active")
+        self._unlock_pretrial_cursor()
+        self._pretrial_cursor_lock_active = False
+        self._set_ninja_control_state(self._ninja_active_state())
         self._write_annotation_control_state("active")
         self.canvas.clear_attention_cue()
         self._set_message_text("")
@@ -1592,17 +1792,26 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                     "miss_count": self.miss_count,
                 }
             )
-            self._set_message_text("Reussi" if success else "Echec", style="center")
+            if is_english(self.language):
+                self._set_message_text("Success" if success else "Failure", style="center")
+            else:
+                self._set_message_text("Reussi" if success else "Echec", style="center")
             QtCore.QTimer.singleShot(700, self.next_trial)
         else:
-            self._set_message_text("Echec - recommencez", style="center")
+            self._set_message_text("Miss - try again" if is_english(self.language) else "Echec - recommencez", style="center")
 
     def keyPressEvent(self, event):
-        if event.key() in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
-            reason = "escape" if event.key() == QtCore.Qt.Key.Key_Escape else "keyboard_q"
-            self._abort_experiment(reason)
+        if event.key() == QtCore.Qt.Key.Key_Escape:
+            self._abort_experiment("keyboard_escape")
             return
         super().keyPressEvent(event)
+
+    def eventFilter(self, watched, event):
+        if self.isVisible() and event.type() == QtCore.QEvent.Type.KeyPress:
+            if event.key() == QtCore.Qt.Key.Key_Escape:
+                self._abort_experiment("keyboard_escape")
+                return True
+        return super().eventFilter(watched, event)
 
     def _global_trial_id(self) -> int | None:
         offset = self.session_metadata.get("trial_offset")
@@ -1628,10 +1837,11 @@ def main():
     parser = argparse.ArgumentParser(description="Run a controlled target-selection experimental task prototype")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Directory containing .png/.txt annotated pairs")
     parser.add_argument("--technique", choices=TECHNIQUES, default="mouse", help="Technique label to store in experience logs")
+    parser.add_argument("--language", choices=["French", "English"], default="French", help="UI language for experimental screens")
     parser.add_argument("--trials", "--trial", dest="trials", type=int, default=12, help="Number of trials to generate")
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "mixed"], default="mixed", help="Target difficulty bin")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible trial sampling")
-    parser.add_argument("--countdown", type=int, default=3, help="Countdown seconds before each trial starts")
+    parser.add_argument("--countdown", type=float, default=0.0, help="Countdown seconds before each trial starts")
     parser.add_argument("--max-clicks", type=int, default=1, help="Maximum clicks allowed per trial")
     parser.add_argument("--log-file", default=None, help="JSONL log path")
     parser.add_argument("--participant-id", default=None, help="Participant identifier stored in experience logs")
@@ -1678,6 +1888,8 @@ def main():
     parser.add_argument("--ninja-selection-hold", type=float, default=DEFAULT_NINJA_SELECTION_HOLD, help="Ninja dwell duration before lock")
     parser.add_argument("--ninja-lock-on-dwell", action="store_true", help="Require Ninja dwell lock before click")
     parser.add_argument("--ninja-hide-gaze-point", action="store_true", help="Hide Ninja red gaze point")
+    parser.add_argument("--ninja-hide-debug-status", action="store_true", help="Hide Ninja gaze tracking status overlay")
+    parser.add_argument("--ninja-snap-system-cursor-to-active", action="store_true", help="Move the native cursor to the active Ninja cursor")
     parser.add_argument("--ninja-calib-points", type=int, choices=[5, 9, 13], default=5, help="Ninja calibration point count")
     parser.add_argument("--ninja-auto-calibrate", action="store_true", help="Start Ninja calibration automatically")
     parser.add_argument("--ninja-with-targetfinder", dest="ninja_without_targetfinder", action="store_false", help="Enable TargetFinder detections inside Ninja Cursors")
@@ -1754,6 +1966,7 @@ def main():
         cursor_log_hz=args.cursor_log_hz,
         fullscreen=not args.windowed,
         emit_session_events=not args.no_task_session_events,
+        language=args.language,
         session_metadata={
             "participant_id": args.participant_id,
             "session_id": args.session_id,

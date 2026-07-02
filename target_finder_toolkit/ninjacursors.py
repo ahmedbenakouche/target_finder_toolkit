@@ -32,7 +32,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from pynput import keyboard, mouse
 
 from target_finder_toolkit.eye_calibration import EyeCalibration
-from target_finder_toolkit.annotation_detector import AnnotationDetector
+from target_finder_toolkit.annotation_detector import FakeTargetFinder
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
@@ -371,15 +371,16 @@ class NinjaCursors(QtWidgets.QWidget):
     DEFAULT_RAKE_SPACING = 320.0
     DEFAULT_GAZE_SMOOTHING = 0.35
     DEFAULT_GAZE_OFFSET_X = 0.0
-    DEFAULT_GAZE_OFFSET_Y = -200.0
+    DEFAULT_GAZE_OFFSET_Y = 0.0
     DEFAULT_GAZE_GAIN_X = 1.0
     DEFAULT_GAZE_GAIN_Y = 1.0
-    DEFAULT_TOP_HALF_EXTRA_Y = -200.0
+    DEFAULT_TOP_HALF_EXTRA_Y = 0.0
     DEFAULT_SELECTION_HOLD = 2.0
     DEFAULT_LOCK_ON_DWELL = False
-    DEFAULT_SHOW_GAZE = True
-    UPWARD_SMOOTHING_CAP = 0.05
-    UPWARD_DELTA_GAIN = 1.28
+    DEFAULT_SHOW_GAZE = False
+    ACTIVE_ORANGE = QtGui.QColor(255, 132, 0, 230)
+    ACTIVE_ORANGE_FILL = QtGui.QColor(255, 132, 0, 34)
+    ACTIVE_ORANGE_TARGET_FILL = QtGui.QColor(255, 132, 0, 22)
     CURSOR_ROWS = 2
     CURSOR_COLS = 4
     PAPER_COL_FRACTIONS = (0.125, 0.375, 0.625, 0.875)
@@ -444,10 +445,13 @@ class NinjaCursors(QtWidgets.QWidget):
         selection_hold: float = DEFAULT_SELECTION_HOLD,
         lock_on_dwell: bool = DEFAULT_LOCK_ON_DWELL,
         show_gaze: bool = DEFAULT_SHOW_GAZE,
+        show_debug_status: bool = True,
+        snap_system_cursor_to_active: bool = False,
         calib_points: int = 5,
         auto_calibrate: bool = False,
         auto_calibrate_delay: float = 1.5,
         experiment_control_file: str | None = None,
+        disable_keyboard_quit: bool = False,
     ):
         if WebEyeTrack is None:
             raise RuntimeError(
@@ -458,6 +462,11 @@ class NinjaCursors(QtWidgets.QWidget):
         self.detector = detector
         if self.detector is not None:
             self.detector.overlay_window = self
+            if self.detector.__class__.__name__ == "TargetFinder":
+                # Hiding/showing the Ninja overlay for every YOLO screenshot makes
+                # the eight cursors visibly flicker. Keep the overlay visible in
+                # free-use Ninja mode; controlled tasks use FakeTargetFinder.
+                self.detector.hide_overlay_during_capture = False
         self.cursor_filter = cursor_filter
         self.logger = logger
         self.camera_index = int(camera_index)
@@ -479,11 +488,14 @@ class NinjaCursors(QtWidgets.QWidget):
         self.selection_hold = max(0.0, float(selection_hold))
         self.lock_on_dwell = bool(lock_on_dwell)
         self.show_gaze = bool(show_gaze)
+        self.show_debug_status = bool(show_debug_status)
+        self.snap_system_cursor_to_active = bool(snap_system_cursor_to_active)
         self._calib_points = calib_points if calib_points in (5, 9, 13) else 5
         self._auto_calibrate = auto_calibrate
         self._auto_calibrate_delay_ms = max(0, int(round(float(auto_calibrate_delay) * 1000)))
         self._experiment_control_file = pathlib.Path(experiment_control_file) if experiment_control_file else None
         self._last_experiment_control_state = None
+        self.disable_keyboard_quit = bool(disable_keyboard_quit)
 
         self._mouse_listener = None
         self._keyboard_listener = None
@@ -511,13 +523,16 @@ class NinjaCursors(QtWidgets.QWidget):
         self._raw_offset_y = 0.0
         self._filtered_offset_x = 0.0
         self._filtered_offset_y = 0.0
+        self._last_all_offscreen_reset_t = 0.0
         self._last_observed_mouse = None
         self._ignore_next_mouse_delta = True
+        self._capture_visuals_suspended = False
 
         self._calibration = None
         self._calib_status_text = ""
         self._calib_status_until = 0.0
         self._cleaned_up = False
+        self._quitting = False
 
         geom = screen.geometry()
         self.setGeometry(geom)
@@ -600,6 +615,28 @@ class NinjaCursors(QtWidgets.QWidget):
         self._last_observed_mouse = (self._anchor_point.x(), self._anchor_point.y())
         self._ignore_next_mouse_delta = True
 
+    def _system_cursor_reference_point(self) -> QtCore.QPointF:
+        if self.snap_system_cursor_to_active and self._active_point is not None:
+            ax, ay = self._active_point
+            draw_x, draw_y = self._display_point_for_experiment(float(ax), float(ay))
+            if self._point_is_visible(draw_x, draw_y, margin=0.0):
+                return QtCore.QPointF(draw_x, draw_y)
+        return QtCore.QPointF(self._anchor_point)
+
+    def _set_system_cursor_reference(self, point: QtCore.QPointF):
+        QtGui.QCursor.setPos(int(round(point.x())), int(round(point.y())))
+        self._prev_real = QtCore.QPointF(point)
+        self._last_observed_mouse = (float(point.x()), float(point.y()))
+
+    def _sync_system_cursor_to_active(self):
+        if not self.snap_system_cursor_to_active:
+            return
+        state = self._read_experiment_control_state()
+        if state.startswith("ready") or state.startswith("calibrate") or state.startswith("paused"):
+            return
+        self._set_system_cursor_reference(self._system_cursor_reference_point())
+        hide_cursor_everywhere()
+
     def _refresh_real_cursor(self):
         state = self._read_experiment_control_state()
         if not self._should_hide_system_cursor_for_state(state):
@@ -641,8 +678,8 @@ class NinjaCursors(QtWidgets.QWidget):
         self._last_observed_mouse = (observed_x, observed_y)
         moved = dx != 0.0 or dy != 0.0
 
-        QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
-        self._prev_real = QtCore.QPointF(self._anchor_point)
+        if not self.snap_system_cursor_to_active:
+            self._set_system_cursor_reference(self._system_cursor_reference_point())
         if self._ignore_next_mouse_delta:
             self._ignore_next_mouse_delta = False
             return self._last_observed_mouse[0], self._last_observed_mouse[1], 0.0, 0.0, False
@@ -653,6 +690,8 @@ class NinjaCursors(QtWidgets.QWidget):
         self._raw_offset_y = 0.0
         self._filtered_offset_x = 0.0
         self._filtered_offset_y = 0.0
+        if self.cursor_filter is not None:
+            self.cursor_filter.reset(0.0, 0.0)
         self._unlock_cursor_selection()
         self._active_point = None
         self._active_target = None
@@ -667,6 +706,19 @@ class NinjaCursors(QtWidgets.QWidget):
             self._last_observed_mouse = (float(pos.x()), float(pos.y()))
             self._prev_real = QtCore.QPointF(pos)
 
+    def _apply_experiment_anchor_from_state(self, state: str):
+        parts = state.split()
+        if len(parts) < 3:
+            return
+        if not parts[0].startswith(("ready", "active")):
+            return
+        try:
+            x = float(parts[1])
+            y = float(parts[2])
+        except ValueError:
+            return
+        self._anchor_point = QtCore.QPointF(x, y)
+
     def _read_experiment_control_state(self) -> str:
         if self._experiment_control_file is None:
             return ""
@@ -676,10 +728,11 @@ class NinjaCursors(QtWidgets.QWidget):
             return ""
         if state != self._last_experiment_control_state:
             self._last_experiment_control_state = state
+            self._apply_experiment_anchor_from_state(state)
             if state.startswith("paused"):
                 self._reset_experiment_layout(lock_real_cursor=False)
                 restore_default_cursors()
-            elif state.startswith("ready"):
+            elif state.startswith("ready") or state.startswith("active"):
                 self._reset_experiment_layout()
                 hide_cursor_everywhere()
             elif state.startswith("calibrate"):
@@ -758,6 +811,28 @@ class NinjaCursors(QtWidgets.QWidget):
             y = base_y + self._filtered_offset_y
             points.append((cursor_id, (x, y)))
         return points
+
+    def _reset_cursor_array_offset(self):
+        self._raw_offset_x = 0.0
+        self._raw_offset_y = 0.0
+        self._filtered_offset_x = 0.0
+        self._filtered_offset_y = 0.0
+        if self.cursor_filter is not None:
+            self.cursor_filter.reset(0.0, 0.0)
+        self._unlock_cursor_selection()
+        self._ignore_next_mouse_delta = True
+
+    def _recover_points_if_all_offscreen(
+        self,
+        points: list[tuple[tuple[int, int], tuple[float, float]]],
+    ) -> list[tuple[tuple[int, int], tuple[float, float]]]:
+        if self._visible_points(points):
+            return points
+        now = time.time()
+        if now - self._last_all_offscreen_reset_t >= 0.25:
+            self._last_all_offscreen_reset_t = now
+            self._reset_cursor_array_offset()
+        return self._grid_points()
 
     def _active_cursor_from_gaze(
         self,
@@ -840,16 +915,9 @@ class NinjaCursors(QtWidgets.QWidget):
             return
         keep = self.gaze_smoothing
         old_x, old_y = self._gaze_point
-        keep_x = keep
-        keep_y = keep
-        if y < old_y:
-            # Make upward gaze movements react more readily, because webcam
-            # tracking tends to compress eye-only upward motion.
-            y = old_y + (y - old_y) * self.UPWARD_DELTA_GAIN
-            keep_y = min(keep_y, self.UPWARD_SMOOTHING_CAP)
         self._gaze_point = (
-            old_x * keep_x + x * (1.0 - keep_x),
-            old_y * keep_y + y * (1.0 - keep_y),
+            old_x * keep + x * (1.0 - keep),
+            old_y * keep + y * (1.0 - keep),
         )
 
     def _gaze_is_recent(self) -> bool:
@@ -1108,7 +1176,6 @@ class NinjaCursors(QtWidgets.QWidget):
         self._lock_real_cursor_at_anchor()
         hide_cursor_everywhere()
         points = self._base_cursor_points()
-        active_id = self._ready_active_cursor_id(points)
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -1120,19 +1187,11 @@ class NinjaCursors(QtWidgets.QWidget):
             if not self._point_is_visible(px, py):
                 continue
             draw_x, draw_y = self._display_point_for_experiment(px, py)
-            is_active = cursor_id == active_id
-            painter.setPen(
-                QtGui.QPen(
-                    QtGui.QColor(255, 210, 40, 230) if is_active else QtGui.QColor(160, 160, 160, 150),
-                    5 if is_active else 2,
-                )
-            )
-            painter.setBrush(
-                QtGui.QColor(255, 210, 40, 34) if is_active else QtGui.QColor(120, 120, 120, 10)
-            )
-            radius = self.ACTIVE_RADIUS if is_active else self.CURSOR_RADIUS
+            painter.setPen(QtGui.QPen(QtGui.QColor(160, 160, 160, 150), 2))
+            painter.setBrush(QtGui.QColor(120, 120, 120, 10))
+            radius = self.CURSOR_RADIUS
             painter.drawEllipse(QtCore.QPointF(draw_x, draw_y), radius, radius)
-            painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 240 if is_active else 150), 2))
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 150), 2))
             line_len = 4
             gap = radius + 1
             painter.drawLine(QtCore.QLineF(draw_x, draw_y - gap - line_len, draw_x, draw_y - gap))
@@ -1149,6 +1208,13 @@ class NinjaCursors(QtWidgets.QWidget):
 
     def paintEvent(self, event):
         state = self._read_experiment_control_state()
+        if self._capture_visuals_suspended:
+            painter = QtGui.QPainter(self)
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(self.rect(), QtCore.Qt.GlobalColor.transparent)
+            painter.end()
+            return
+
         if self._calibration and self._calibration.is_calibrating:
             self._lock_real_cursor_at_anchor()
             hide_cursor_everywhere()
@@ -1176,17 +1242,18 @@ class NinjaCursors(QtWidgets.QWidget):
             return
 
         observed_x, observed_y, dx, dy, mouse_moved = self._observe_mouse_delta()
-        points = self._grid_points()
+        points = self._recover_points_if_all_offscreen(self._grid_points())
         if not points:
             return
 
         active_id = self._active_cursor_from_gaze(points)
         if mouse_moved and (self._cursor_locked or not self.lock_on_dwell):
             self._apply_mouse_delta(dx, dy)
-            points = self._grid_points()
+            points = self._recover_points_if_all_offscreen(self._grid_points())
             active_id = self._active_cursor_from_gaze(points)
         point_map = {cursor_id: point for cursor_id, point in points}
         self._active_point = point_map.get(active_id) if active_id is not None else None
+        self._sync_system_cursor_to_active()
         if self._active_point is None:
             painter = QtGui.QPainter(self)
             painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -1218,7 +1285,8 @@ class NinjaCursors(QtWidgets.QWidget):
                 painter.setPen(QtGui.QPen(gaze_color, 2))
                 painter.setBrush(gaze_fill)
                 painter.drawEllipse(QtCore.QPointF(gx, gy), 12, 12)
-            self._draw_debug_status(painter)
+            if self.show_debug_status:
+                self._draw_debug_status(painter)
             painter.end()
             return
 
@@ -1245,8 +1313,8 @@ class NinjaCursors(QtWidgets.QWidget):
             w = self._active_target["w"]
             h = self._active_target["h"]
             rect = QtCore.QRectF(x, y, w, h)
-            painter.setPen(QtGui.QPen(QtGui.QColor(255, 210, 40, 230), 3))
-            painter.setBrush(QtGui.QColor(255, 210, 40, 22))
+            painter.setPen(QtGui.QPen(self.ACTIVE_ORANGE, 3))
+            painter.setBrush(self.ACTIVE_ORANGE_TARGET_FILL)
             painter.drawRoundedRect(rect, 10, 10)
 
         for cursor_id, (px, py) in points:
@@ -1259,7 +1327,7 @@ class NinjaCursors(QtWidgets.QWidget):
             outer_pen = QtGui.QPen(
                 QtGui.QColor(0, 214, 96, 255)
                 if self._cursor_locked and is_active
-                else QtGui.QColor(255, 210, 40, 230)
+                else self.ACTIVE_ORANGE
                 if is_candidate
                 else QtGui.QColor(160, 160, 160, 110 if is_locked_out else 150),
                 5 if is_active else 2,
@@ -1268,7 +1336,7 @@ class NinjaCursors(QtWidgets.QWidget):
             painter.setBrush(
                 QtGui.QColor(0, 214, 96, 48)
                 if self._cursor_locked and is_active
-                else QtGui.QColor(255, 210, 40, 34)
+                else self.ACTIVE_ORANGE_FILL
                 if is_candidate
                 else QtGui.QColor(120, 120, 120, 16 if is_locked_out else 10)
             )
@@ -1298,7 +1366,8 @@ class NinjaCursors(QtWidgets.QWidget):
             painter.setBrush(gaze_fill)
             painter.drawEllipse(QtCore.QPointF(gx, gy), 12, 12)
 
-        self._draw_debug_status(painter)
+        if self.show_debug_status:
+            self._draw_debug_status(painter)
 
         if self.logger is not None:
             candidate_elapsed_ms = 0.0
@@ -1344,10 +1413,29 @@ class NinjaCursors(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def stop_and_quit(self):
+        global _SESSION_STOP_REASON
+        if _SESSION_STOP_REASON is None:
+            _SESSION_STOP_REASON = "keyboard_quit"
+        if self._quitting:
+            return
+        self._quitting = True
+        self._cleanup(runtime_reason=_SESSION_STOP_REASON)
         self.close()
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.quit()
+
+    @QtCore.pyqtSlot(str)
+    def request_quit(self, reason: str = "keyboard_quit"):
+        global _SESSION_STOP_REASON
+        if _SESSION_STOP_REASON is None:
+            _SESSION_STOP_REASON = reason or "keyboard_quit"
+        self.stop_and_quit()
+
+    @QtCore.pyqtSlot(bool)
+    def set_capture_visuals_suspended(self, suspended: bool):
+        self._capture_visuals_suspended = bool(suspended)
+        self.update()
 
     def closeEvent(self, event):
         self._cleanup(runtime_reason=_SESSION_STOP_REASON or "window_close")
@@ -1360,6 +1448,7 @@ class NinjaCursors(QtWidgets.QWidget):
         if self._calibration and self._calibration.is_calibrating:
             try:
                 self._calibration.abort()
+                self._set_detector_capture_suspended(False)
                 _emit_calibration_event("cancelled")
             except Exception:
                 pass
@@ -1397,19 +1486,29 @@ class NinjaCursors(QtWidgets.QWidget):
     def _start_keyboard_listener(self):
         self._pressed_keys = set()
 
+        def is_quit_key(key):
+            key_char = getattr(key, "char", None)
+            if isinstance(key_char, str) and key_char.lower() == "q":
+                return True
+            # macOS ANSI virtual key code for the physical Q key. This catches
+            # layouts/IMEs where pynput does not expose a plain "q" char.
+            key_vk = getattr(key, "vk", None)
+            return sys.platform == "darwin" and key_vk == 12
+
         def on_press(key):
             self._pressed_keys.add(key)
             key_char = getattr(key, "char", None)
-            if isinstance(key_char, str) and key_char.lower() == "q":
-                self._queue_quit()
+            if is_quit_key(key) and not self.disable_keyboard_quit:
+                self._queue_quit("keyboard_q")
             if key == keyboard.Key.esc:
                 if self._calibration and self._calibration.is_calibrating:
                     self._calibration.abort()
+                    self._set_detector_capture_suspended(False)
                     self._calib_status_text = "Calibration cancelled"
                     self._calib_status_until = time.time() + 2.0
                     _emit_calibration_event("cancelled")
-                if self._experiment_control_file is not None:
-                    self._queue_quit()
+                if not self.disable_keyboard_quit:
+                    self._queue_quit("keyboard_esc")
             if isinstance(key_char, str) and key_char.lower() == "c":
                 has_cmd = keyboard.Key.cmd in self._pressed_keys or keyboard.Key.cmd_r in self._pressed_keys
                 has_shift = keyboard.Key.shift in self._pressed_keys or keyboard.Key.shift_r in self._pressed_keys
@@ -1426,9 +1525,10 @@ class NinjaCursors(QtWidgets.QWidget):
         self._keyboard_listener.start()
 
     def _install_quit_shortcut(self):
-        self._quit_shortcut = QtGui.QShortcut(QtGui.QKeySequence("q"), self)
-        self._quit_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
-        self._quit_shortcut.activated.connect(self.stop_and_quit)
+        if not self.disable_keyboard_quit:
+            self._quit_shortcut = QtGui.QShortcut(QtGui.QKeySequence("q"), self)
+            self._quit_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+            self._quit_shortcut.activated.connect(self.stop_and_quit)
 
         calib_shortcut = QtGui.QShortcut(
             QtGui.QKeySequence("Ctrl+Shift+C"), self
@@ -1437,16 +1537,20 @@ class NinjaCursors(QtWidgets.QWidget):
         calib_shortcut.activated.connect(self._start_calibration)
         self._calib_shortcut = calib_shortcut
 
-    def _queue_quit(self):
+    def _queue_quit(self, reason: str = "keyboard_quit"):
         QtCore.QMetaObject.invokeMethod(
             self,
-            "stop_and_quit",
+            "request_quit",
             QtCore.Qt.ConnectionType.QueuedConnection,
+            QtCore.Q_ARG(str, reason),
         )
 
     @QtCore.pyqtSlot()
     def _start_calibration(self):
+        if self._calibration and self._calibration.is_calibrating:
+            return
         sw, sh = self._screen_px_dimensions
+        self._set_detector_capture_suspended(True)
         self._calibration = EyeCalibration(
             sw, sh,
             num_points=self._calib_points,
@@ -1462,6 +1566,7 @@ class NinjaCursors(QtWidgets.QWidget):
         pass
 
     def _on_calib_done(self, success, mean_error_px):
+        self._set_detector_capture_suspended(False)
         if success:
             self._calib_status_text = f"Calibrated! Error: {mean_error_px:.0f}px"
             correction_values = self._calibration.correction_values if self._calibration is not None else None
@@ -1487,6 +1592,13 @@ class NinjaCursors(QtWidgets.QWidget):
             self._calib_status_text = "Calibration failed"
             _emit_calibration_event("failed")
         self._calib_status_until = time.time() + 3.0
+
+    def _set_detector_capture_suspended(self, suspended: bool):
+        if self.detector is None:
+            return
+        setter = getattr(self.detector, "set_capture_suspended", None)
+        if callable(setter):
+            setter(bool(suspended))
 
     def _start_mouse_listener(self):
         def on_click(x, y, button, pressed):
@@ -1519,6 +1631,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return event
         if event_type not in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
             return event
+        hide_cursor_everywhere()
         try:
             px, py = Quartz.CGEventGetLocation(event)
         except Exception:
@@ -1572,6 +1685,7 @@ class NinjaCursors(QtWidgets.QWidget):
             self._pending_click_target = None
             self._pending_click_cursor_id = None
             self._unlock_cursor_selection()
+            hide_cursor_everywhere()
         return event
 
     @QtCore.pyqtSlot(int, int)
@@ -1650,8 +1764,7 @@ class NinjaCursors(QtWidgets.QWidget):
         finally:
             hide_cursor_everywhere()
             self._simulating_click = False
-            QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
-            self._prev_real = QtCore.QPointF(self._anchor_point)
+            self._set_system_cursor_reference(self._system_cursor_reference_point())
             self._ignore_next_mouse_delta = True
             self._start_mouse_listener()
 
@@ -1741,12 +1854,15 @@ def main():
     parser.add_argument("--selection-hold", type=float, default=NinjaCursors.DEFAULT_SELECTION_HOLD, help="Seconds gaze must remain on the same cursor before it locks automatically")
     parser.add_argument("--lock-on-dwell", action="store_true", help="Require gaze dwell locking before clicks. By default, the currently active cursor can be clicked immediately.")
     parser.add_argument("--hide-gaze-point", action="store_true", help="Hide the red on-screen gaze feedback marker")
+    parser.add_argument("--hide-debug-status", action="store_true", help="Hide the on-screen Ninja gaze tracking status overlay")
+    parser.add_argument("--snap-system-cursor-to-active", action="store_true", help="Move the native system cursor to the currently active Ninja cursor to reduce visual mismatch on macOS")
     parser.add_argument("--calib-points", type=int, choices=[5, 9, 13], default=5, help="Number of calibration points (5, 9, or 13)")
     parser.add_argument("--auto-calibrate", action="store_true", help="Start eye calibration immediately on launch")
     parser.add_argument("--auto-calibrate-delay", type=float, default=1.5, help="Seconds to wait before automatic eye calibration starts")
     parser.add_argument("--without-targetfinder", action="store_true", help="Run Ninja Cursors(gaze) without TargetFinder detection or target highlighting")
     parser.add_argument("--experiment-control-file", default=None, help="Optional control file used by the experimental task to pause/resume cursor movement")
     parser.add_argument("--annotation-control-file", default=None, help="Use controlled-task annotations instead of live YOLO detection")
+    parser.add_argument("--disable-keyboard-quit", action="store_true", help="Disable overlay-level q/Esc quit shortcuts; controlled experiments handle quitting")
     args = parser.parse_args()
 
     if WebEyeTrack is None:
@@ -1766,7 +1882,7 @@ def main():
 
     det = None
     if args.annotation_control_file:
-        det = AnnotationDetector(args.annotation_control_file)
+        det = FakeTargetFinder(args.annotation_control_file)
     elif not args.without_targetfinder:
         det = TargetFinder(args.model_path, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args)) if args.filter != "none" else None
@@ -1793,6 +1909,7 @@ def main():
             selection_hold=args.selection_hold,
             lock_on_dwell=bool(args.lock_on_dwell),
             show_gaze=not args.hide_gaze_point,
+            snap_system_cursor_to_active=bool(args.snap_system_cursor_to_active),
             without_targetfinder=bool(args.without_targetfinder),
             detection_source="annotations" if args.annotation_control_file else ("none" if args.without_targetfinder else "yolo"),
             annotation_control_file=args.annotation_control_file,
@@ -1803,6 +1920,7 @@ def main():
                 if args.lock_on_dwell
                 else "nearest_gaze_cursor_direct_click"
             ),
+            keyboard_quit_enabled=not args.disable_keyboard_quit,
         )
         if det is not None:
             det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
@@ -1822,10 +1940,13 @@ def main():
         selection_hold=args.selection_hold,
         lock_on_dwell=args.lock_on_dwell,
         show_gaze=not args.hide_gaze_point,
+        show_debug_status=not args.hide_debug_status,
+        snap_system_cursor_to_active=args.snap_system_cursor_to_active,
         calib_points=args.calib_points,
         auto_calibrate=args.auto_calibrate,
         auto_calibrate_delay=args.auto_calibrate_delay,
         experiment_control_file=args.experiment_control_file,
+        disable_keyboard_quit=args.disable_keyboard_quit,
     )
 
 

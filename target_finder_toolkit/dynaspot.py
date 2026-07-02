@@ -23,7 +23,7 @@ from pynput import keyboard, mouse
 import argparse
 
 from target_finder_toolkit.targetfinder import TargetFinder
-from target_finder_toolkit.annotation_detector import AnnotationDetector
+from target_finder_toolkit.annotation_detector import FakeTargetFinder
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
@@ -66,6 +66,7 @@ class DynaSpot(QtWidgets.QWidget):
         lag: float | None = None,
         reduce_time: float | None = None,
         include_text_targets: bool = False,
+        disable_keyboard_quit: bool = False,
     ):
         super().__init__()
         self.detector = detector
@@ -79,6 +80,7 @@ class DynaSpot(QtWidgets.QWidget):
         self.lag = float(self.LAG if lag is None else lag)
         self.reduce_time = float(self.REDUCE_TIME if reduce_time is None else reduce_time)
         self.include_text_targets = bool(include_text_targets)
+        self.disable_keyboard_quit = bool(disable_keyboard_quit)
 
         self._mouse_listener = None
         self._keyboard_listener = None
@@ -366,9 +368,9 @@ class DynaSpot(QtWidgets.QWidget):
     def _start_keyboard_listener(self):
         def on_press(key):
             try:
-                if key.char == 'd':
+                if key.char == 'b':
                     QtCore.QMetaObject.invokeMethod(self, "toggle_dynaspot", QtCore.Qt.ConnectionType.QueuedConnection)
-                elif key.char == 'q':
+                elif key.char == 'q' and not self.disable_keyboard_quit:
                     QtCore.QMetaObject.invokeMethod(self, "stop_and_quit", QtCore.Qt.ConnectionType.QueuedConnection)
             except AttributeError:
                 pass
@@ -675,10 +677,11 @@ def main():
     parser.add_argument('--reduce-time', type=float, default=DynaSpot.REDUCE_TIME, help="Time used to shrink the spot back to a point")
     parser.add_argument('--annotation-control-file', default=None, help="Use controlled-task annotations instead of live YOLO detection")
     parser.add_argument('--include-text-targets', action='store_true', help="Allow Text annotations to be selected by DynaSpot")
+    parser.add_argument('--disable-keyboard-quit', action='store_true', help="Disable the overlay-level q quit shortcut; controlled experiments handle quitting")
     args = parser.parse_args()
 
     if args.annotation_control_file:
-        det = AnnotationDetector(args.annotation_control_file)
+        det = FakeTargetFinder(args.annotation_control_file)
     else:
         if args.model_path is None:
             here = os.path.dirname(os.path.abspath(__file__))
@@ -703,6 +706,7 @@ def main():
             detection_source="annotations" if args.annotation_control_file else "yolo",
             annotation_control_file=args.annotation_control_file,
             include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
+            keyboard_quit_enabled=not args.disable_keyboard_quit,
         )
         det.set_callback(lambda dets, added, removed, _frame: logger.log_detection_change(dets, added, removed))
     dynaspot(
@@ -714,6 +718,7 @@ def main():
         lag=args.lag,
         reduce_time=args.reduce_time,
         include_text_targets=bool(args.include_text_targets or args.annotation_control_file),
+        disable_keyboard_quit=args.disable_keyboard_quit,
     )
 
 
