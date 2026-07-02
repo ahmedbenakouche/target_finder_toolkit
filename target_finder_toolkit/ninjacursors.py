@@ -37,6 +37,7 @@ from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_fil
 from target_finder_toolkit.logging_utils import SessionLogger
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.targetfinder import TargetFinder
+from target_finder_toolkit.webeyetrack_compat import patch_webeyetrack_dataclass_defaults
 from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
 
 
@@ -57,6 +58,7 @@ def _ensure_mediapipe_python_alias():
 
 
 _ensure_mediapipe_python_alias()
+patch_webeyetrack_dataclass_defaults()
 
 try:
     from webeyetrack import WebEyeTrack, WebEyeTrackConfig

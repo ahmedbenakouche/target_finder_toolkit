@@ -19,6 +19,7 @@ from target_finder_toolkit.filters import (
 )
 from target_finder_toolkit.logging_utils import make_default_log_path
 from target_finder_toolkit.mouse_utils import restore_default_cursors
+from target_finder_toolkit.webeyetrack_compat import patch_webeyetrack_dataclass_defaults
 
 
 def _ensure_mediapipe_python_alias():
@@ -4233,6 +4234,7 @@ error "No supported browser window found"
         if cfg.enable_rake_cursor and not baseline_enabled:
             try:
                 _ensure_mediapipe_python_alias()
+                patch_webeyetrack_dataclass_defaults()
                 importlib.import_module("webeyetrack")
             except Exception as exc:
                 self.info_label.setText(f"{self._text('missing_webeyetrack')} ({exc})")
