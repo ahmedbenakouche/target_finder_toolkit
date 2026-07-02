@@ -51,6 +51,10 @@ from target_finder_toolkit.experimental_task import (
 from target_finder_toolkit.filters import add_filter_arguments
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.windows_process_utils import (
+    attach_windows_kill_on_close_job,
+    close_windows_process_job,
+)
 
 try:
     import Quartz
@@ -537,12 +541,17 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         if self._session_ended or self._aborting:
             return
         if self.technique_command is not None and self.technique_process is None:
-            self.technique_process = subprocess.Popen(
-                self.technique_command,
-                cwd=str(PROJECT_ROOT),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=not sys.platform.startswith("win"),
+            popen_kwargs = {
+                "cwd": str(PROJECT_ROOT),
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+            }
+            if sys.platform.startswith("win"):
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                popen_kwargs["start_new_session"] = True
+            self.technique_process = attach_windows_kill_on_close_job(
+                subprocess.Popen(self.technique_command, **popen_kwargs)
             )
             self.logger.write(
                 {
@@ -1083,6 +1092,7 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
                 self.technique_process.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self.technique_process.kill()
+        close_windows_process_job(self.technique_process)
         restore_default_cursors()
         self.logger.write({"type": "session_end", "reason": reason})
         self.logger.close()

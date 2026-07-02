@@ -42,6 +42,10 @@ from target_finder_toolkit.experimental_task import (
     sample_trials,
 )
 from target_finder_toolkit.filters import add_filter_arguments
+from target_finder_toolkit.windows_process_utils import (
+    attach_windows_kill_on_close_job,
+    close_windows_process_job,
+)
 
 
 TECHNIQUES = ("mouse", "bubble", "dynaspot", "semantic", "ninja_cursors")
@@ -925,7 +929,7 @@ def _popen_technique(command: list[str]) -> subprocess.Popen:
         popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         popen_kwargs["start_new_session"] = True
-    proc = subprocess.Popen(command, **popen_kwargs)
+    proc = attach_windows_kill_on_close_job(subprocess.Popen(command, **popen_kwargs))
     if proc.stdout is not None:
         try:
             os.set_blocking(proc.stdout.fileno(), False)
@@ -1259,6 +1263,7 @@ def stop_preloaded_techniques(
             except Exception:
                 pass
         finally:
+            close_windows_process_job(proc)
             write_event(
                 session_log,
                 {

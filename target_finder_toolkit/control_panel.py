@@ -20,6 +20,10 @@ from target_finder_toolkit.filters import (
 from target_finder_toolkit.logging_utils import make_default_log_path
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 from target_finder_toolkit.webeyetrack_compat import patch_webeyetrack_dataclass_defaults
+from target_finder_toolkit.windows_process_utils import (
+    attach_windows_kill_on_close_job,
+    close_windows_process_job,
+)
 
 
 def _ensure_mediapipe_python_alias():
@@ -4202,6 +4206,7 @@ error "No supported browser window found"
         if self._process_output_buffer.strip():
             self._process_output_lines.append(self._process_output_buffer.strip())
             self._process_output_lines = self._process_output_lines[-20:]
+        close_windows_process_job(self.process)
         self.process = None
         self._process_output_buffer = ""
         self._process_watch_timer.stop()
@@ -4251,7 +4256,7 @@ error "No supported browser window found"
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_kwargs["start_new_session"] = True
-        self.process = subprocess.Popen(cmd, **popen_kwargs)
+        self.process = attach_windows_kill_on_close_job(subprocess.Popen(cmd, **popen_kwargs))
         self._process_output_buffer = ""
         self._process_output_lines = []
         if self.process.stdout is not None:
@@ -4282,6 +4287,7 @@ error "No supported browser window found"
 
     def _stop_demo(self, silent: bool = False):
         if not self._is_demo_running():
+            close_windows_process_job(self.process)
             self.process = None
             self._process_watch_timer.stop()
             restore_default_cursors()
@@ -4308,6 +4314,7 @@ error "No supported browser window found"
                 self.process.wait(timeout=3)
         finally:
             self._drain_process_output()
+            close_windows_process_job(self.process)
             self.process = None
             self._process_output_buffer = ""
             self._process_watch_timer.stop()

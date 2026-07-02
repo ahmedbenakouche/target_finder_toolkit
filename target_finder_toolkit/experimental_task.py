@@ -31,6 +31,10 @@ from target_finder_toolkit.filters import add_filter_arguments
 from target_finder_toolkit.logging_utils import make_default_log_path
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.windows_process_utils import (
+    attach_windows_kill_on_close_job,
+    close_windows_process_job,
+)
 
 try:
     from target_finder_toolkit.targetfinder import CLASS_NAMES
@@ -1156,7 +1160,9 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         else:
             popen_kwargs["start_new_session"] = True
         try:
-            self.technique_process = subprocess.Popen(self.technique_command, **popen_kwargs)
+            self.technique_process = attach_windows_kill_on_close_job(
+                subprocess.Popen(self.technique_command, **popen_kwargs)
+            )
             if self.technique_process.stdout is not None:
                 try:
                     os.set_blocking(self.technique_process.stdout.fileno(), False)
@@ -1271,6 +1277,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             self._handle_technique_output_line(line)
             self._process_output_buffer = ""
         self._write_event({"type": "technique_process_exit", "exit_code": exit_code})
+        close_windows_process_job(self.technique_process)
         self.technique_process = None
         self.technique_watch_timer.stop()
         self._set_status_text(
@@ -1321,6 +1328,7 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
                 pass
         finally:
             restore_default_cursors()
+            close_windows_process_job(proc)
             self._write_event(
                 {
                     "type": "technique_process_stop",
