@@ -4182,6 +4182,8 @@ error "No supported browser window found"
             self._handle_process_output_line(line)
 
     def _format_process_error(self, exit_code: int) -> str:
+        if sys.platform.startswith("win") and int(exit_code) > 0x7FFFFFFF:
+            exit_code = int(exit_code) - 0x100000000
         tail = "\n".join(self._process_output_lines[-8:]).strip()
         if not tail:
             return f"{self._text('stopped')} (exit code {exit_code})"

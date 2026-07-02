@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -59,6 +60,17 @@ TECHNIQUE_LABELS_EN = {
     "semantic": "Semantic Pointing",
     "ninja_cursors": "Ninja Cursors",
 }
+DEFAULT_NINJA_READY_TIMEOUT_SEC = 60.0
+DEFAULT_NINJA_CALIBRATION_TIMEOUT_SEC = 180.0
+
+
+def _windows_escape_pressed() -> bool:
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000)
+    except Exception:
+        return False
 
 
 def is_english(language: str | None) -> bool:
@@ -344,6 +356,7 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             self._global_keyboard_listener_failed = False
             self._keyboard_events_enabled = True
             self._app_filter_installed = False
+            self._win_escape_timer = None
             self.setWindowTitle("Experiment" if is_english(self._language) else "Expérience")
             self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
             self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -427,6 +440,10 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
             self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
             self._escape_shortcut.activated.connect(self._abort)
+            if sys.platform.startswith("win"):
+                self._win_escape_timer = QtCore.QTimer(self)
+                self._win_escape_timer.setInterval(50)
+                self._win_escape_timer.timeout.connect(self._poll_windows_escape)
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.installEventFilter(self)
@@ -525,6 +542,7 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
                     lambda: raise_macos_window_above_system_ui(self, level_offset=level_offset),
                 )
             self._start_global_keyboard_listener()
+            self._start_windows_escape_poll()
             if grab_keyboard:
                 self._grab_session_keyboard()
             else:
@@ -542,6 +560,7 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             self._manual_wait_active = True
             try:
                 while self.isVisible() and not self.aborted and not self._continue_requested:
+                    self._poll_windows_escape()
                     if app is not None:
                         app.processEvents(QtCore.QEventLoop.ProcessEventsFlag.AllEvents, 50)
                     time.sleep(0.01)
@@ -567,11 +586,13 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
 
         def hide(self):
             self._release_session_keyboard()
+            self._stop_windows_escape_poll()
             super().hide()
 
         def closeEvent(self, event):
             self._release_session_keyboard()
             self._stop_global_keyboard_listener()
+            self._stop_windows_escape_poll()
             app = QtWidgets.QApplication.instance()
             if app is not None and self._app_filter_installed:
                 app.removeEventFilter(self)
@@ -642,6 +663,22 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             except Exception:
                 self._global_keyboard_listener = None
                 self._global_keyboard_listener_failed = True
+
+        def _start_windows_escape_poll(self):
+            timer = self._win_escape_timer
+            if timer is not None and not timer.isActive():
+                timer.start()
+
+        def _stop_windows_escape_poll(self):
+            timer = self._win_escape_timer
+            if timer is not None and timer.isActive():
+                timer.stop()
+
+        def _poll_windows_escape(self):
+            if not self.isVisible() or not self._keyboard_events_enabled or self.aborted:
+                return
+            if _windows_escape_pressed():
+                self._abort()
 
         def _stop_global_keyboard_listener(self):
             listener = self._global_keyboard_listener
@@ -1046,10 +1083,12 @@ def wait_for_initial_ninja_calibration(
     *,
     app=None,
     abort_check=None,
+    timeout_sec: float | None = DEFAULT_NINJA_CALIBRATION_TIMEOUT_SEC,
 ) -> str:
     if "ninja_cursors" not in processes:
         return "missing"
     print("waiting for Ninja Cursors calibration...")
+    deadline = None if timeout_sec is None else time.monotonic() + max(0.0, float(timeout_sec))
     while True:
         if app is not None:
             app.processEvents()
@@ -1072,6 +1111,18 @@ def wait_for_initial_ninja_calibration(
                 },
             )
             return "exited"
+        if deadline is not None and time.monotonic() >= deadline:
+            _drain_preloaded_outputs(processes, session_log)
+            write_event(
+                session_log,
+                {
+                    "type": "ninja_wait_timeout",
+                    "phase": "initial_calibration",
+                    "timeout_sec": float(timeout_sec),
+                },
+            )
+            print(f"Ninja Cursors calibration timed out after {timeout_sec} s.", flush=True)
+            return "timeout"
         time.sleep(0.1)
 
 
@@ -1081,6 +1132,7 @@ def wait_for_ninja_ready(
     *,
     app=None,
     abort_check=None,
+    timeout_sec: float | None = DEFAULT_NINJA_READY_TIMEOUT_SEC,
 ) -> str:
     item = processes.get("ninja_cursors")
     if item is None:
@@ -1088,6 +1140,7 @@ def wait_for_ninja_ready(
     if item.ready:
         return "ready"
     print("waiting for Ninja Cursors to become ready...")
+    deadline = None if timeout_sec is None else time.monotonic() + max(0.0, float(timeout_sec))
     while True:
         if app is not None:
             app.processEvents()
@@ -1112,6 +1165,18 @@ def wait_for_ninja_ready(
                 },
             )
             return "exited"
+        if deadline is not None and time.monotonic() >= deadline:
+            _drain_preloaded_outputs(processes, session_log)
+            write_event(
+                session_log,
+                {
+                    "type": "ninja_wait_timeout",
+                    "phase": "ready",
+                    "timeout_sec": float(timeout_sec),
+                },
+            )
+            print(f"Ninja Cursors ready timed out after {timeout_sec} s.", flush=True)
+            return "timeout"
         time.sleep(0.1)
 
 
@@ -1489,6 +1554,16 @@ def main():
                     app=app,
                 )
                 raise SystemExit(130)
+            if ninja_ready == "timeout":
+                write_session_end("ninja_ready_timeout")
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
+                raise SystemExit(1)
             session_screen.show_content(
                 title="Eye-tracking calibration" if is_english(args.language) else "Calibration du regard",
                 body=(
@@ -1564,6 +1639,16 @@ def main():
                     app=app,
                 )
                 raise SystemExit(130)
+            if calibration_result == "timeout":
+                write_session_end("ninja_calibration_timeout")
+                cleanup_session_resources(
+                    preloaded_processes=preloaded_processes,
+                    session_log=session_log,
+                    ninja_control_file=ninja_control_file,
+                    session_screen=session_screen,
+                    app=app,
+                )
+                raise SystemExit(1)
             session_screen.show_content(
                 title="Calibration complete" if is_english(args.language) else "Calibration terminée",
                 body=(

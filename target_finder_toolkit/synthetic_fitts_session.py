@@ -651,6 +651,9 @@ def run_session(args) -> int:
                 if ninja_ready == "exited":
                     write_session_end("ninja_exited_during_initialization")
                     return 130
+                if ninja_ready == "timeout":
+                    write_session_end("ninja_ready_timeout")
+                    return 1
 
                 session_screen.show_content(
                     title="Eye-tracking calibration" if args.language == "English" else "Calibration du regard",
@@ -703,6 +706,9 @@ def run_session(args) -> int:
                 if calibration_result == "exited":
                     write_session_end("ninja_exited_during_calibration")
                     return 130
+                if calibration_result == "timeout":
+                    write_session_end("ninja_calibration_timeout")
+                    return 1
 
         write_event(session_log_file, {"type": "initialization_end"})
         session_screen.show_content(
