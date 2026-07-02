@@ -40,6 +40,10 @@ from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
 
 
+if sys.platform.startswith("win"):
+    import atexit
+
+
 def _ensure_mediapipe_python_alias():
     """Provide a compatibility alias for WebEyeTrack on newer MediaPipe builds."""
     try:
@@ -70,6 +74,16 @@ __all__ = ["ninja_cursors", "main"]
 _SESSION_STOP_REASON = None
 _CALIB_EVENT_PREFIX = "__NINJA_CALIB__ "
 _NINJA_EVENT_PREFIX = "__NINJA_EVENT__ "
+
+
+if sys.platform.startswith("win"):
+    def _restore_windows_cursor_safely():
+        try:
+            restore_default_cursors()
+        except Exception:
+            pass
+
+    atexit.register(_restore_windows_cursor_safely)
 
 
 _WEIGHT_FILE_CACHE: dict[str, Optional[str]] = {}
@@ -502,6 +516,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self._gaze_timer = None
         self._paint_timer = None
         self._cursor_refresh_timer = None
+        self._win_quit_poll_timer = None
         self._quit_shortcut = None
         self._tracking_ok = False
         self._gaze_point: Optional[tuple[float, float]] = None
@@ -581,6 +596,11 @@ class NinjaCursors(QtWidgets.QWidget):
         self._cursor_refresh_timer.timeout.connect(self._refresh_real_cursor)
         self._cursor_refresh_timer.start(16 if sys.platform == "darwin" else 50)
 
+        if sys.platform.startswith("win") and not self.disable_keyboard_quit:
+            self._win_quit_poll_timer = QtCore.QTimer(self)
+            self._win_quit_poll_timer.timeout.connect(self._poll_windows_quit_keys)
+            self._win_quit_poll_timer.start(30)
+
         QtCore.QTimer.singleShot(0, self._prime_hidden_cursor)
 
         if self._auto_calibrate:
@@ -588,6 +608,8 @@ class NinjaCursors(QtWidgets.QWidget):
 
     def _should_hide_system_cursor_for_state(self, state: str | None = None) -> bool:
         if self._experiment_control_file is None:
+            if sys.platform.startswith("win"):
+                return False
             return True
         if state is None:
             state = self._read_experiment_control_state()
@@ -596,6 +618,10 @@ class NinjaCursors(QtWidgets.QWidget):
             or state.startswith("calibrate")
             or state.startswith("active")
         )
+
+    def _hide_system_cursor_if_needed(self, state: str | None = None):
+        if self._should_hide_system_cursor_for_state(state):
+            hide_cursor_everywhere()
 
     def _prime_hidden_cursor(self):
         state = self._read_experiment_control_state()
@@ -607,7 +633,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return
         QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
         self._prev_real = QtCore.QPointF(self._anchor_point)
-        hide_cursor_everywhere()
+        self._hide_system_cursor_if_needed(state)
 
     def _lock_real_cursor_at_anchor(self):
         QtGui.QCursor.setPos(int(self._anchor_point.x()), int(self._anchor_point.y()))
@@ -635,13 +661,13 @@ class NinjaCursors(QtWidgets.QWidget):
         if state.startswith("ready") or state.startswith("calibrate") or state.startswith("paused"):
             return
         self._set_system_cursor_reference(self._system_cursor_reference_point())
-        hide_cursor_everywhere()
+        self._hide_system_cursor_if_needed(state)
 
     def _refresh_real_cursor(self):
         state = self._read_experiment_control_state()
         if not self._should_hide_system_cursor_for_state(state):
             return
-        hide_cursor_everywhere()
+        self._hide_system_cursor_if_needed(state)
         if state.startswith("ready") or state.startswith("calibrate"):
             self._lock_real_cursor_at_anchor()
 
@@ -679,7 +705,10 @@ class NinjaCursors(QtWidgets.QWidget):
         moved = dx != 0.0 or dy != 0.0
 
         if not self.snap_system_cursor_to_active:
-            self._set_system_cursor_reference(self._system_cursor_reference_point())
+            if sys.platform.startswith("win") and self._experiment_control_file is None:
+                self._prev_real = QtCore.QPointF(observed_x, observed_y)
+            else:
+                self._set_system_cursor_reference(self._system_cursor_reference_point())
         if self._ignore_next_mouse_delta:
             self._ignore_next_mouse_delta = False
             return self._last_observed_mouse[0], self._last_observed_mouse[1], 0.0, 0.0, False
@@ -734,10 +763,10 @@ class NinjaCursors(QtWidgets.QWidget):
                 restore_default_cursors()
             elif state.startswith("ready") or state.startswith("active"):
                 self._reset_experiment_layout()
-                hide_cursor_everywhere()
+                self._hide_system_cursor_if_needed(state)
             elif state.startswith("calibrate"):
                 self._reset_experiment_layout()
-                hide_cursor_everywhere()
+                self._hide_system_cursor_if_needed(state)
                 if not (self._calibration and self._calibration.is_calibrating):
                     QtCore.QTimer.singleShot(0, self._start_calibration)
                     self.update()
@@ -1174,7 +1203,7 @@ class NinjaCursors(QtWidgets.QWidget):
 
     def _paint_ready_cursors(self):
         self._lock_real_cursor_at_anchor()
-        hide_cursor_everywhere()
+        self._hide_system_cursor_if_needed()
         points = self._base_cursor_points()
 
         painter = QtGui.QPainter(self)
@@ -1217,7 +1246,7 @@ class NinjaCursors(QtWidgets.QWidget):
 
         if self._calibration and self._calibration.is_calibrating:
             self._lock_real_cursor_at_anchor()
-            hide_cursor_everywhere()
+            self._hide_system_cursor_if_needed(state)
             self._paint_calibration()
             return
 
@@ -1458,6 +1487,9 @@ class NinjaCursors(QtWidgets.QWidget):
             self._paint_timer.stop()
         if self._cursor_refresh_timer is not None:
             self._cursor_refresh_timer.stop()
+        if self._win_quit_poll_timer is not None:
+            self._win_quit_poll_timer.stop()
+            self._win_quit_poll_timer = None
         if self.detector is not None:
             self.detector.stop()
         if self._mouse_listener is not None:
@@ -1478,6 +1510,12 @@ class NinjaCursors(QtWidgets.QWidget):
             except Exception:
                 pass
             self._capture = None
+        if sys.platform.startswith("win"):
+            try:
+                self.hide()
+                QtWidgets.QApplication.processEvents()
+            except Exception:
+                pass
         restore_default_cursors()
         if self.logger is not None and runtime_reason is not None:
             self.logger.log_session_end(reason=runtime_reason)
@@ -1493,7 +1531,9 @@ class NinjaCursors(QtWidgets.QWidget):
             # macOS ANSI virtual key code for the physical Q key. This catches
             # layouts/IMEs where pynput does not expose a plain "q" char.
             key_vk = getattr(key, "vk", None)
-            return sys.platform == "darwin" and key_vk == 12
+            if sys.platform == "darwin" and key_vk == 12:
+                return True
+            return sys.platform.startswith("win") and key_vk == 0x51
 
         def on_press(key):
             self._pressed_keys.add(key)
@@ -1544,6 +1584,22 @@ class NinjaCursors(QtWidgets.QWidget):
             QtCore.Qt.ConnectionType.QueuedConnection,
             QtCore.Q_ARG(str, reason),
         )
+
+    @QtCore.pyqtSlot()
+    def _poll_windows_quit_keys(self):
+        if self.disable_keyboard_quit or self._quitting:
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            q_down = bool(user32.GetAsyncKeyState(0x51) & 0x8000)
+            esc_down = bool(user32.GetAsyncKeyState(0x1B) & 0x8000)
+        except Exception:
+            return
+        if q_down:
+            self.request_quit("keyboard_q")
+        elif esc_down:
+            self.request_quit("keyboard_esc")
 
     @QtCore.pyqtSlot()
     def _start_calibration(self):
@@ -1631,7 +1687,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return event
         if event_type not in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
             return event
-        hide_cursor_everywhere()
+        self._hide_system_cursor_if_needed()
         try:
             px, py = Quartz.CGEventGetLocation(event)
         except Exception:
@@ -1685,7 +1741,7 @@ class NinjaCursors(QtWidgets.QWidget):
             self._pending_click_target = None
             self._pending_click_cursor_id = None
             self._unlock_cursor_selection()
-            hide_cursor_everywhere()
+            self._hide_system_cursor_if_needed()
         return event
 
     @QtCore.pyqtSlot(int, int)
@@ -1762,9 +1818,14 @@ class NinjaCursors(QtWidgets.QWidget):
         except Exception as exc:
             print(f"[ninja] click send error: {type(exc).__name__}: {exc}", flush=True)
         finally:
-            hide_cursor_everywhere()
+            self._hide_system_cursor_if_needed()
             self._simulating_click = False
-            self._set_system_cursor_reference(self._system_cursor_reference_point())
+            if sys.platform.startswith("win") and self._experiment_control_file is None and not self.snap_system_cursor_to_active:
+                pos = QtGui.QCursor.pos()
+                self._last_observed_mouse = (float(pos.x()), float(pos.y()))
+                self._prev_real = QtCore.QPointF(pos)
+            else:
+                self._set_system_cursor_reference(self._system_cursor_reference_point())
             self._ignore_next_mouse_delta = True
             self._start_mouse_listener()
 
