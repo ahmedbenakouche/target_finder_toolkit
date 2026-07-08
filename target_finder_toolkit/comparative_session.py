@@ -27,6 +27,10 @@ from target_finder_toolkit.experimental_session import (
     task_runtime_args,
     write_event,
 )
+from target_finder_toolkit.synthetic_fitts_session import (
+    DEFAULT_CONDITIONS_FILE,
+    DEFAULT_SYNTHETIC_BLOCKS,
+)
 from target_finder_toolkit.experimental_task import DEFAULT_DATA_DIR, PROJECT_ROOT
 from target_finder_toolkit.fitts_distractors_task import (
     DEFAULT_COUNTDOWN,
@@ -91,6 +95,8 @@ def build_task_command(args, task_name: str, output_dir: Path) -> list[str]:
             *_base_session_args(args),
             "--synthetic-blocks",
             str(args.synthetic_blocks),
+            "--conditions-file",
+            str(args.conditions_file),
             "--output-dir",
             str(output_dir),
         ]
@@ -237,7 +243,8 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--language", choices=["French", "English"], default="French")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Annotated realistic screenshot dataset directory")
     parser.add_argument("--trials-per-block", type=int, default=DEFAULT_TRIALS)
-    parser.add_argument("--synthetic-blocks", type=int, default=12)
+    parser.add_argument("--synthetic-blocks", type=int, default=DEFAULT_SYNTHETIC_BLOCKS)
+    parser.add_argument("--conditions-file", default=str(DEFAULT_CONDITIONS_FILE), help="CSV file containing ordered synthetic Fitts conditions")
     parser.add_argument("--countdown", type=float, default=DEFAULT_COUNTDOWN)
     parser.add_argument("--max-clicks", type=int, default=DEFAULT_MAX_CLICKS)
     parser.add_argument("--cursor-log-hz", type=float, default=30.0)
@@ -279,6 +286,7 @@ def run(args) -> int:
                 "order_rule": "odd_participants_synthetic_first_even_participants_realistic_first",
                 "trials_per_block": args.trials_per_block,
                 "synthetic_blocks": args.synthetic_blocks,
+                "conditions_file": str(args.conditions_file),
                 "comparative_log_group": "control_comparative",
                 "realistic_log_group": "control_our_task",
                 "synthetic_log_group": "control_fitts_synthetic",

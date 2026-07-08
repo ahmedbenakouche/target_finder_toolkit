@@ -288,6 +288,7 @@ class SemanticPointing(QtWidgets.QWidget):
         self.prev_real = init
         self.fake_pos = QtCore.QPointF(init)
         self.s = 2  # semantic index reflecting desired speed
+        self._last_control_trial_id = None
 
         # Full-screen geometry (Qt DPI-aware)
         self.geom = QtWidgets.QApplication.primaryScreen().geometry()
@@ -309,6 +310,7 @@ class SemanticPointing(QtWidgets.QWidget):
 
         # Start detection thread
         self.detector.start()
+        self._reset_to_experimental_center_if_needed()
 
         # refresh to update drawing and especially manage the speed of fake cursor
         self._timer = QtCore.QTimer(self)
@@ -322,7 +324,6 @@ class SemanticPointing(QtWidgets.QWidget):
         self.control_panel = ControlPanel(self.detector)
         self.control_panel.move(20,20)
         self.control_panel.hide()
-        self._last_control_trial_id = None
         if self._is_macos:
             self._set_overlay_clickthrough(True)
 

@@ -71,6 +71,7 @@ HEADER_HEIGHT = 64
 RELEASE_GUARD_MS = 120
 HOME_RADIUS = 24.0
 MIN_DISTRACTOR_DIAMETER = 6.0
+MIN_TARGET_DIAMETER = 0.0
 DISTRACTOR_SCREEN_MARGIN = 12.0
 
 DIFFICULTY_IDS = {
@@ -78,7 +79,7 @@ DIFFICULTY_IDS = {
     "medium": 4.0,
     "hard": 5.0,
 }
-SYNTHETIC_ID_VALUES = (2.5, 3.0, 3.5, 4.0, 4.5, 5.0)
+SYNTHETIC_ID_VALUES = (2.0, 4.0, 6.0, 8.0)
 DENSITY_VALUES = {
     "low": 0.1,
     "medium": 0.3,
@@ -111,8 +112,14 @@ class SyntheticTrial:
     distractors: tuple[SyntheticObject, ...]
     amplitude: float
     target_width: float
+    nominal_target_width: float
+    effective_fitts_id: float
     angle_deg: float
     layout_metadata: dict
+    condition_index: int | None = None
+    condition_block_index: int | None = None
+    condition_repeat_index: int | None = None
+    condition_metadata: dict | None = None
 
 
 class JsonlLogger:
@@ -151,6 +158,32 @@ def default_log_file(participant_id: str) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in participant_id).strip("_")
     return logs_dir / f"{safe_id or 'participant'}_{stamp}_fitts_distractors.jsonl"
+
+
+def _normalize_condition_sequence(condition_sequence: list[dict] | tuple[dict, ...] | None) -> tuple[dict, ...]:
+    if not condition_sequence:
+        return ()
+    normalized: list[dict] = []
+    for index, raw_condition in enumerate(condition_sequence, start=1):
+        if not isinstance(raw_condition, dict):
+            continue
+        density = str(raw_condition.get("density") or "medium")
+        id_value = float(raw_condition.get("id_value"))
+        normalized.append(
+            {
+                "condition_index": int(raw_condition.get("condition_index") or index),
+                "condition_block_index": index,
+                "id_value": id_value,
+                "difficulty": str(raw_condition.get("difficulty") or f"ID {id_value:g}"),
+                "density": density,
+                "rho": float(raw_condition.get("rho", DENSITY_VALUES.get(density, 0.3))),
+                "technique_label": raw_condition.get("technique_label"),
+                "csv_row": raw_condition.get("csv_row"),
+                "csv_order": raw_condition.get("csv_order"),
+                "csv_token": raw_condition.get("csv_token"),
+            }
+        )
+    return tuple(normalized)
 
 
 def point_to_list(point: QtCore.QPointF | QtCore.QPoint) -> list[float]:
@@ -301,6 +334,7 @@ def generate_trial(
     widget_size: tuple[int, int],
     rng: random.Random,
     id_value: float | None = None,
+    condition_metadata: dict | None = None,
 ) -> SyntheticTrial:
     width, height = widget_size
     id_value = float(id_value) if id_value is not None else DIFFICULTY_IDS[difficulty]
@@ -311,7 +345,8 @@ def generate_trial(
     angle_deg = 0.0
     angle = math.radians(angle_deg)
 
-    target_width = amplitude / (2.0**id_value - 1.0)
+    nominal_target_width = amplitude / (2.0**id_value - 1.0)
+    target_width = max(nominal_target_width, MIN_TARGET_DIAMETER)
     target_center = (
         home[0] + amplitude * math.cos(angle),
         home[1] + amplitude * math.sin(angle),
@@ -321,7 +356,8 @@ def generate_trial(
     # amplitude while keeping the requested ID by recomputing W.
     while not _inside_task_area(target_center, target_width, width, height) and amplitude > 260.0:
         amplitude *= 0.90
-        target_width = amplitude / (2.0**id_value - 1.0)
+        nominal_target_width = amplitude / (2.0**id_value - 1.0)
+        target_width = max(nominal_target_width, MIN_TARGET_DIAMETER)
         target_center = (
             home[0] + amplitude * math.cos(angle),
             home[1] + amplitude * math.sin(angle),
@@ -352,8 +388,32 @@ def generate_trial(
         distractors=tuple(distractors),
         amplitude=target.distance,
         target_width=target.diameter,
+        nominal_target_width=nominal_target_width,
+        effective_fitts_id=target.fitts_id,
         angle_deg=angle_deg,
-        layout_metadata=layout_metadata,
+        layout_metadata={
+            **layout_metadata,
+            "requested_fitts_id": id_value,
+            "nominal_target_width": nominal_target_width,
+            "minimum_target_diameter": MIN_TARGET_DIAMETER,
+            "effective_fitts_id": target.fitts_id,
+        },
+        condition_index=(
+            int(condition_metadata["condition_index"])
+            if condition_metadata is not None and condition_metadata.get("condition_index") is not None
+            else None
+        ),
+        condition_block_index=(
+            int(condition_metadata["condition_block_index"])
+            if condition_metadata is not None and condition_metadata.get("condition_block_index") is not None
+            else None
+        ),
+        condition_repeat_index=(
+            int(condition_metadata["condition_repeat_index"])
+            if condition_metadata is not None and condition_metadata.get("condition_repeat_index") is not None
+            else None
+        ),
+        condition_metadata=dict(condition_metadata or {}),
     )
 
 
@@ -383,6 +443,7 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         cleanup_control_files: bool = True,
         session_metadata: dict | None = None,
         quit_application_on_complete: bool = True,
+        condition_sequence: list[dict] | tuple[dict, ...] | None = None,
     ):
         super().__init__()
         self.participant_id = participant_id
@@ -390,7 +451,14 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         self.difficulty = difficulty
         self.density = density
         self.id_value = float(id_value) if id_value is not None else None
-        self.trial_count = max(1, int(trials))
+        self.condition_sequence = _normalize_condition_sequence(condition_sequence)
+        self.trials_per_condition = max(1, int(trials))
+        self.condition_count = len(self.condition_sequence) if self.condition_sequence else 1
+        self.trial_count = (
+            self.condition_count * self.trials_per_condition
+            if self.condition_sequence
+            else self.trials_per_condition
+        )
         self.countdown = max(0.0, float(countdown))
         self.max_clicks = max(1, int(max_clicks))
         self.cursor_log_hz = max(1.0, float(cursor_log_hz))
@@ -470,6 +538,9 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
                 "difficulty": self.difficulty,
                 "density": self.density,
                 "trials": self.trial_count,
+                "trials_per_condition": self.trials_per_condition,
+                "condition_count": self.condition_count,
+                "condition_sequence": list(self.condition_sequence),
                 "countdown_sec": self.countdown,
                 "release_guard_ms": RELEASE_GUARD_MS,
                 "log_file": str(log_file),
@@ -632,6 +703,24 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
             "trial_id": self.current_trial.trial_id if self.current_trial else None,
         }
 
+    def _condition_for_trial_index(self, trial_index: int) -> dict:
+        if not self.condition_sequence:
+            return {
+                "condition_index": None,
+                "condition_block_index": 1,
+                "condition_repeat_index": trial_index,
+                "id_value": self.id_value,
+                "difficulty": self.difficulty,
+                "density": self.density,
+                "rho": DENSITY_VALUES.get(self.density),
+            }
+        sequence_index = (trial_index - 1) % len(self.condition_sequence)
+        repeat_index = ((trial_index - 1) // len(self.condition_sequence)) + 1
+        condition = dict(self.condition_sequence[sequence_index])
+        condition["condition_block_index"] = sequence_index + 1
+        condition["condition_repeat_index"] = repeat_index
+        return condition
+
     def _next_trial(self):
         if self._session_ended or self._aborting:
             return
@@ -642,14 +731,16 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(700, lambda: self._finish_window(0))
             return
 
+        condition = self._condition_for_trial_index(self.current_index)
         self.current_trial = generate_trial(
             trial_id=self.current_index,
             technique=self.technique,
-            difficulty=self.difficulty,
-            density=self.density,
-            id_value=self.id_value,
+            difficulty=str(condition.get("difficulty") or self.difficulty),
+            density=str(condition.get("density") or self.density),
+            id_value=condition.get("id_value", self.id_value),
             widget_size=(max(900, self.width()), max(620, self.height())),
             rng=self.rng,
+            condition_metadata=condition,
         )
         self.state = "countdown"
         self.accept_clicks = False
@@ -870,10 +961,18 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
             "density": trial.density,
             "fitts_id": trial.id_value,
             "rho": trial.rho,
+            "condition_index": trial.condition_index,
+            "condition_block_index": trial.condition_block_index,
+            "condition_repeat_index": trial.condition_repeat_index,
+            "condition_count": self.condition_count,
+            "trials_per_condition": self.trials_per_condition,
+            "condition_metadata": dict(trial.condition_metadata or {}),
             "index_of_sparseness": None if trial.index_of_sparseness is None else round(trial.index_of_sparseness, 4),
             "home": [round(trial.home[0], 3), round(trial.home[1], 3)],
             "amplitude": round(trial.amplitude, 3),
             "target_width": round(trial.target_width, 3),
+            "nominal_target_width": round(trial.nominal_target_width, 3),
+            "effective_fitts_id": round(trial.effective_fitts_id, 4),
             "angle_deg": round(trial.angle_deg, 3),
             "layout_metadata": {
                 key: (
@@ -1142,11 +1241,16 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
                 )
             else:
                 block_label = "Block" if is_english(self.language) else "Bloc"
+            condition_label = (
+                f"Condition {self.current_trial.condition_block_index or 1}/{self.condition_count}"
+            )
             trial_label = "Trial" if is_english(self.language) else "Essai"
+            repeat_index = self.current_trial.condition_repeat_index or self.current_trial.trial_id
             text = (
                 f"{task_label}  "
                 f"{block_label}  "
-                f"{trial_label} {self.current_trial.trial_id}/{self.trial_count}  "
+                f"{condition_label}  "
+                f"{trial_label} {repeat_index}/{self.trials_per_condition}  "
                 f"ID={self.current_trial.id_value:g}  "
                 f"rho={self.current_trial.rho:g}  "
                 f"{misses_label}={self.miss_count}"
@@ -1240,6 +1344,7 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--block-id", default=None)
     parser.add_argument("--block-order", default=None)
     parser.add_argument("--trial-offset", type=int, default=0)
+    parser.add_argument("--condition-sequence-json", default=None)
     parser.add_argument("--no-launch-technique", action="store_true")
     parser.add_argument("--annotation-control-file", default=None)
     parser.add_argument("--ninja-control-file", default=None)
@@ -1281,15 +1386,25 @@ def parse_args(argv: list[str] | None = None):
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    condition_sequence = None
+    if args.condition_sequence_json:
+        try:
+            parsed_conditions = json.loads(args.condition_sequence_json)
+            if isinstance(parsed_conditions, list):
+                condition_sequence = parsed_conditions
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Invalid --condition-sequence-json: {exc}") from exc
     if args.summary_only:
+        summary_condition = (condition_sequence or [None])[0]
         trial = generate_trial(
             trial_id=1,
             technique=args.technique,
-            difficulty=args.difficulty,
-            density=args.density,
-            id_value=args.id_value,
+            difficulty=str(summary_condition.get("difficulty") if summary_condition else args.difficulty),
+            density=str(summary_condition.get("density") if summary_condition else args.density),
+            id_value=(summary_condition.get("id_value") if summary_condition else args.id_value),
             widget_size=(1200, 800),
             rng=random.Random(args.seed),
+            condition_metadata=summary_condition,
         )
         print(
             json.dumps(
@@ -1358,6 +1473,7 @@ def main(argv: list[str] | None = None) -> int:
         external_technique_active=bool(args.no_launch_technique and args.technique != "mouse"),
         cleanup_control_files=not args.keep_control_files,
         session_metadata=session_metadata,
+        condition_sequence=condition_sequence,
     )
     if args.windowed:
         window.show()

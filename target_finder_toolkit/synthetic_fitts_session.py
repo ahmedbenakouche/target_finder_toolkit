@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import random
@@ -46,6 +47,31 @@ from target_finder_toolkit.fitts_distractors_task import (
 )
 
 
+DEFAULT_CONDITIONS_FILE = PROJECT_ROOT / "experiment_design" / "conditions.csv"
+DEFAULT_SYNTHETIC_BLOCKS = 60
+TECHNIQUE_LABEL_MAP = {
+    "A": "mouse",
+    "B": "semantic",
+    "C": "bubble",
+    "D": "dynaspot",
+    "E": "ninja_cursors",
+}
+RHO_TO_DENSITY = {round(value, 6): name for name, value in DENSITY_VALUES.items()}
+
+
+@dataclass(frozen=True)
+class SyntheticSessionCondition:
+    condition_index: int
+    id_value: float
+    difficulty: str
+    density: str
+    technique_label: str | None = None
+    rho: float | None = None
+    csv_row: int | None = None
+    csv_order: int | None = None
+    csv_token: str | None = None
+
+
 @dataclass(frozen=True)
 class SyntheticSessionBlock:
     block_id: str
@@ -55,6 +81,14 @@ class SyntheticSessionBlock:
     id_value: float
     trials: int
     condition_index: int
+    condition_count: int
+    movement_count: int
+    conditions: tuple[SyntheticSessionCondition, ...]
+    technique_label: str | None = None
+    rho: float | None = None
+    csv_row: int | None = None
+    csv_order: int | None = None
+    csv_token: str | None = None
 
 
 def _safe_id(participant_id: str) -> str:
@@ -131,6 +165,151 @@ def _make_synthetic_condition_pool() -> list[dict]:
     return conditions
 
 
+def _density_from_rho(rho: float) -> str:
+    key = round(float(rho), 6)
+    if key not in RHO_TO_DENSITY:
+        raise ValueError(
+            f"Unsupported rho={rho:g} in conditions file. Expected one of "
+            f"{', '.join(str(value) for value in DENSITY_VALUES.values())}."
+        )
+    return RHO_TO_DENSITY[key]
+
+
+def _parse_csv_condition_token(token: str, *, row_number: int, order: int) -> dict:
+    parts = next(csv.reader([token], skipinitialspace=True))
+    if len(parts) != 3:
+        raise ValueError(
+            f"Invalid condition token at row {row_number}, order {order}: {token!r}. "
+            "Expected format: technique,ID,rho."
+        )
+    technique_label = parts[0].strip().upper()
+    if technique_label not in TECHNIQUE_LABEL_MAP:
+        raise ValueError(
+            f"Unknown technique label {technique_label!r} at row {row_number}, order {order}. "
+            f"Expected one of {', '.join(sorted(TECHNIQUE_LABEL_MAP))}."
+        )
+    id_value = float(parts[1].strip())
+    rho = float(parts[2].strip())
+    density = _density_from_rho(rho)
+    return {
+        "condition_index": order,
+        "id_value": id_value,
+        "difficulty": f"ID {id_value:g}",
+        "density": density,
+        "rho": rho,
+        "technique_label": technique_label,
+        "technique": TECHNIQUE_LABEL_MAP[technique_label],
+        "csv_row": row_number,
+        "csv_order": order,
+        "csv_token": token.strip(),
+    }
+
+
+def _load_conditions_from_csv(
+    *,
+    participant_id: str,
+    conditions_file: Path,
+    seed: int | None = None,
+) -> tuple[list[dict], dict]:
+    path = Path(conditions_file).expanduser()
+    participant_number = _participant_number(participant_id, seed=None)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+
+    lines = [line.strip() for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    if not lines:
+        raise ValueError(f"Conditions file is empty: {path}")
+    row_index = participant_number - 1
+    if row_index < 0 or row_index >= len(lines):
+        raise ValueError(
+            f"Participant {participant_id!r} maps to row {participant_number}, "
+            f"but {path} only contains {len(lines)} participant rows."
+        )
+
+    raw_tokens = [token.strip() for token in lines[row_index].split(";") if token.strip()]
+    conditions = [
+        _parse_csv_condition_token(token, row_number=participant_number, order=index)
+        for index, token in enumerate(raw_tokens, start=1)
+    ]
+    return conditions, {
+        "method": "conditions_csv_participant_row_order",
+        "condition_file": str(path),
+        "participant_number": participant_number,
+        "csv_row": participant_number,
+        "available_conditions": len(conditions),
+        "seed": seed,
+    }
+
+
+def _condition_to_dataclass(condition: dict) -> SyntheticSessionCondition:
+    return SyntheticSessionCondition(
+        condition_index=int(condition["condition_index"]),
+        id_value=float(condition["id_value"]),
+        difficulty=str(condition["difficulty"]),
+        density=str(condition["density"]),
+        technique_label=condition.get("technique_label"),
+        rho=condition.get("rho", DENSITY_VALUES.get(str(condition["density"]))),
+        csv_row=condition.get("csv_row"),
+        csv_order=condition.get("csv_order"),
+        csv_token=condition.get("csv_token"),
+    )
+
+
+def _group_conditions_by_consecutive_technique(conditions: list[dict]) -> list[list[dict]]:
+    """The design CSV orders conditions in technique-level blocks.
+
+    Each participant row contains 60 conditions. Consecutive equal technique
+    labels form one interaction-technique block; inside it, the 12 ID x rho
+    conditions are executed in the CSV order.
+    """
+
+    groups: list[list[dict]] = []
+    current: list[dict] = []
+    current_technique: str | None = None
+    for condition in conditions:
+        technique = str(condition["technique"])
+        if current and technique != current_technique:
+            groups.append(current)
+            current = []
+        current.append(condition)
+        current_technique = technique
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _make_block_from_condition_group(
+    *,
+    group_index: int,
+    group: list[dict],
+    trials_per_condition: int,
+) -> SyntheticSessionBlock:
+    if not group:
+        raise ValueError("Cannot create a synthetic block from an empty condition group.")
+    first = group[0]
+    technique = str(first["technique"])
+    technique_label = first.get("technique_label")
+    block_id = f"{technique}_conditions_{group_index:02d}"
+    conditions = tuple(_condition_to_dataclass(condition) for condition in group)
+    return SyntheticSessionBlock(
+        block_id=block_id,
+        technique=technique,
+        difficulty=str(first["difficulty"]),
+        density=str(first["density"]),
+        id_value=float(first["id_value"]),
+        trials=trials_per_condition,
+        condition_index=int(first["condition_index"]),
+        condition_count=len(conditions),
+        movement_count=len(conditions) * trials_per_condition,
+        conditions=conditions,
+        technique_label=technique_label,
+        rho=first.get("rho", DENSITY_VALUES.get(str(first["density"]))),
+        csv_row=first.get("csv_row"),
+        csv_order=first.get("csv_order"),
+        csv_token=first.get("csv_token"),
+    )
+
+
 def _select_condition_subset(
     *,
     participant_id: str,
@@ -170,69 +349,98 @@ def make_synthetic_plan(
     block_count: int,
     trials_per_block: int,
     seed: int | None = None,
+    conditions_file: str | Path | None = DEFAULT_CONDITIONS_FILE,
 ) -> tuple[list[SyntheticSessionBlock], dict]:
-    selected_conditions, assignment = _select_condition_subset(
-        participant_id=participant_id,
-        block_count=block_count,
-        seed=seed,
-    )
-    block_count = len(selected_conditions)
-
-    technique_cycle = list(TECHNIQUES)
-    if technique_cycle:
-        rotation = _participant_row_index(participant_id, seed, len(technique_cycle))
-        technique_cycle = technique_cycle[rotation:] + technique_cycle[:rotation]
-
-    techniques: list[str] = []
-    while len(techniques) < block_count:
-        techniques.extend(technique_cycle)
-    techniques = techniques[:block_count]
-
-    base_blocks: list[SyntheticSessionBlock] = []
-    for index, (condition, technique) in enumerate(zip(selected_conditions, techniques), start=1):
-        id_token = str(condition["id_value"]).replace(".", "_")
-        density = condition["density"]
-        block_id = f"{technique}_id{id_token}_{density}"
-        base_blocks.append(
-            SyntheticSessionBlock(
-                block_id=block_id,
-                technique=technique,
-                difficulty=condition["difficulty"],
-                density=density,
-                id_value=condition["id_value"],
-                trials=trials_per_block,
-                condition_index=condition["condition_index"],
-            )
+    conditions_path = Path(conditions_file).expanduser() if conditions_file else None
+    if conditions_path is not None and conditions_path.is_file():
+        selected_conditions, assignment = _load_conditions_from_csv(
+            participant_id=participant_id,
+            conditions_file=conditions_path,
+            seed=seed,
         )
-
-    if block_count > 1 and block_count % 2 == 0:
-        square = balanced_latin_square_indices(block_count)
-        row_index = _participant_row_index(participant_id, seed, len(square))
-        order_indices = square[row_index]
-        order_method = "balanced_latin_square"
+        condition_count = max(1, min(int(block_count), len(selected_conditions)))
+        selected_conditions = selected_conditions[:condition_count]
+        order_indices = list(range(condition_count))
+        plan_metadata = {
+            "condition_assignment": {
+                **assignment,
+                "condition_count": condition_count,
+                "selected_conditions": selected_conditions,
+            },
+            "technique_assignment": {
+                "method": "conditions_csv_technique_labels",
+                "mapping": TECHNIQUE_LABEL_MAP,
+            },
+            "block_ordering": {
+                "method": "conditions_csv_order",
+                "row_index": assignment["csv_row"] - 1,
+                "order_indices": order_indices,
+            },
+        }
     else:
-        rng = random.Random(_stable_seed(f"{participant_id}:synthetic_order", seed))
-        order_indices = list(range(block_count))
-        rng.shuffle(order_indices)
-        row_index = None
-        order_method = "stable_random_order"
+        selected_conditions, assignment = _select_condition_subset(
+            participant_id=participant_id,
+            block_count=block_count,
+            seed=seed,
+        )
+        block_count = len(selected_conditions)
 
-    blocks = [base_blocks[index] for index in order_indices]
-    plan_metadata = {
-        "condition_assignment": assignment,
-        "technique_assignment": {
-            "method": "participant_rotated_balanced_repetition_before_ordering",
-            "techniques": list(TECHNIQUES),
-            "participant_rotation": rotation if technique_cycle else 0,
-            "cycle_for_this_participant": technique_cycle,
-        },
-        "block_ordering": {
-            "method": order_method,
-            "row_index": row_index,
-            "order_indices": order_indices,
-        },
-    }
-    return blocks, plan_metadata
+        technique_cycle = list(TECHNIQUES)
+        if technique_cycle:
+            rotation = _participant_row_index(participant_id, seed, len(technique_cycle))
+            technique_cycle = technique_cycle[rotation:] + technique_cycle[:rotation]
+
+        techniques: list[str] = []
+        while len(techniques) < block_count:
+            techniques.extend(technique_cycle)
+        techniques = techniques[:block_count]
+
+        for condition, technique in zip(selected_conditions, techniques):
+            condition["technique"] = technique
+
+        if block_count > 1 and block_count % 2 == 0:
+            square = balanced_latin_square_indices(block_count)
+            row_index = _participant_row_index(participant_id, seed, len(square))
+            order_indices = square[row_index]
+            order_method = "balanced_latin_square"
+        else:
+            rng = random.Random(_stable_seed(f"{participant_id}:synthetic_order", seed))
+            order_indices = list(range(block_count))
+            rng.shuffle(order_indices)
+            row_index = None
+            order_method = "stable_random_order"
+
+        selected_conditions = [selected_conditions[index] for index in order_indices]
+        plan_metadata = {
+            "condition_assignment": assignment,
+            "technique_assignment": {
+                "method": "participant_rotated_balanced_repetition_before_ordering",
+                "techniques": list(TECHNIQUES),
+                "participant_rotation": rotation if technique_cycle else 0,
+                "cycle_for_this_participant": technique_cycle,
+            },
+            "block_ordering": {
+                "method": order_method,
+                "row_index": row_index,
+                "order_indices": order_indices,
+            },
+        }
+
+    condition_groups = _group_conditions_by_consecutive_technique(selected_conditions)
+    base_blocks = [
+        _make_block_from_condition_group(
+            group_index=index,
+            group=group,
+            trials_per_condition=trials_per_block,
+        )
+        for index, group in enumerate(condition_groups, start=1)
+    ]
+    plan_metadata["condition_count"] = len(selected_conditions)
+    plan_metadata["technique_block_count"] = len(base_blocks)
+    plan_metadata["conditions_per_technique_block"] = [block.condition_count for block in base_blocks]
+    plan_metadata["trials_per_condition"] = trials_per_block
+    plan_metadata["total_movements"] = sum(block.movement_count for block in base_blocks)
+    return base_blocks, plan_metadata
 
 
 def make_synthetic_blocks(
@@ -241,12 +449,14 @@ def make_synthetic_blocks(
     block_count: int,
     trials_per_block: int,
     seed: int | None = None,
+    conditions_file: str | Path | None = DEFAULT_CONDITIONS_FILE,
 ) -> list[SyntheticSessionBlock]:
     blocks, _metadata = make_synthetic_plan(
         participant_id=participant_id,
         block_count=block_count,
         trials_per_block=trials_per_block,
         seed=seed,
+        conditions_file=conditions_file,
     )
     return blocks
 
@@ -297,6 +507,8 @@ def _build_block_command(
         block.density,
         "--id-value",
         str(block.id_value),
+        "--condition-sequence-json",
+        json.dumps([asdict(condition) for condition in block.conditions], separators=(",", ":")),
         "--countdown",
         str(args.countdown),
         "--max-clicks",
@@ -397,7 +609,8 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--participant", required=True, help="Participant id, e.g. P01")
     parser.add_argument("--language", choices=["French", "English"], default="French")
     parser.add_argument("--trials-per-block", type=int, default=DEFAULT_TRIALS)
-    parser.add_argument("--synthetic-blocks", type=int, default=12, help="Number of sampled synthetic blocks per participant")
+    parser.add_argument("--synthetic-blocks", type=int, default=DEFAULT_SYNTHETIC_BLOCKS, help="Number of synthetic conditions to run for this participant")
+    parser.add_argument("--conditions-file", default=str(DEFAULT_CONDITIONS_FILE), help="CSV file containing one ordered condition row per participant")
     parser.add_argument("--density", choices=tuple(DENSITY_VALUES), default="medium", help=argparse.SUPPRESS)
     parser.add_argument("--countdown", type=float, default=DEFAULT_COUNTDOWN)
     parser.add_argument("--max-clicks", type=int, default=DEFAULT_MAX_CLICKS)
@@ -476,6 +689,7 @@ def run_block_in_process(
         external_technique_active=bool(preloaded),
         cleanup_control_files=not bool(preloaded),
         quit_application_on_complete=False,
+        condition_sequence=[asdict(condition) for condition in block.conditions],
         session_metadata={
             "session_id": session_id,
             "block_index": block_index,
@@ -536,7 +750,17 @@ def run_session(args) -> int:
         block_count=max(1, int(args.synthetic_blocks)),
         trials_per_block=max(1, int(args.trials_per_block)),
         seed=args.seed,
+        conditions_file=args.conditions_file,
     )
+    actual_id_values = sorted({float(condition.id_value) for block in ordered_blocks for condition in block.conditions})
+    actual_densities = sorted({condition.density for block in ordered_blocks for condition in block.conditions})
+    actual_rhos = sorted({
+        float(condition.rho)
+        for block in ordered_blocks
+        for condition in block.conditions
+        if condition.rho is not None
+    })
+    selected_conditions = plan_metadata.get("condition_assignment", {}).get("selected_conditions")
     total_started = time.monotonic()
     write_event(
         session_log_file,
@@ -548,16 +772,22 @@ def run_session(args) -> int:
             "task_label": "control_synthetic_fitts_with_distractors_task",
             "log_group": _log_group_from_session_dir(session_dir),
             "techniques": list(TECHNIQUES),
-            "id_values": list(SYNTHETIC_ID_VALUES),
-            "densities": list(DENSITY_VALUES.keys()),
-            "condition_pool": _make_synthetic_condition_pool(),
-            "condition_sampling": "participant_group_randomized_without_replacement",
+            "id_values": actual_id_values,
+            "densities": actual_densities,
+            "rho_values": actual_rhos,
+            "conditions_file": str(Path(args.conditions_file).expanduser()) if args.conditions_file else None,
+            "condition_pool": selected_conditions if selected_conditions is not None else _make_synthetic_condition_pool(),
+            "condition_sampling": plan_metadata.get("condition_assignment", {}).get("method"),
             "plan_metadata": plan_metadata,
+            "trials_per_condition": max(1, int(args.trials_per_block)),
             "trials_per_block": max(1, int(args.trials_per_block)),
             "block_count": len(ordered_blocks),
-            "total_trials": sum(block.trials for block in ordered_blocks),
+            "condition_count": sum(block.condition_count for block in ordered_blocks),
+            "total_trials": sum(block.movement_count for block in ordered_blocks),
+            "total_movements": sum(block.movement_count for block in ordered_blocks),
             "block_order": [asdict(block) for block in ordered_blocks],
-            "counterbalancing": "synthetic_blocks_ordered_with_balanced_latin_square_when_possible",
+            "counterbalancing": plan_metadata.get("block_ordering", {}).get("method"),
+            "order_source": plan_metadata.get("block_ordering", {}).get("method"),
             "source": "synthetic_generated_targets_fake_targetfinder",
             "session_dir": str(session_dir),
         },
@@ -795,10 +1025,19 @@ def run_session(args) -> int:
                     "trial_offset": trial_offset,
                     "block_id": block.block_id,
                     "technique": block.technique,
+                    "technique_label": block.technique_label,
                     "difficulty": block.difficulty,
                     "id_value": block.id_value,
                     "density": block.density,
+                    "rho": block.rho,
                     "condition_index": block.condition_index,
+                    "condition_count": block.condition_count,
+                    "movement_count": block.movement_count,
+                    "trials_per_condition": block.trials,
+                    "conditions": [asdict(condition) for condition in block.conditions],
+                    "csv_row": block.csv_row,
+                    "csv_order": block.csv_order,
+                    "csv_token": block.csv_token,
                     "trials": block.trials,
                     "command": cmd,
                     "block_log_file": str(block_log_file),
@@ -836,10 +1075,19 @@ def run_session(args) -> int:
                     "trial_offset": trial_offset,
                     "block_id": block.block_id,
                     "technique": block.technique,
+                    "technique_label": block.technique_label,
                     "difficulty": block.difficulty,
                     "id_value": block.id_value,
                     "density": block.density,
+                    "rho": block.rho,
                     "condition_index": block.condition_index,
+                    "condition_count": block.condition_count,
+                    "movement_count": block.movement_count,
+                    "trials_per_condition": block.trials,
+                    "conditions": [asdict(condition) for condition in block.conditions],
+                    "csv_row": block.csv_row,
+                    "csv_order": block.csv_order,
+                    "csv_token": block.csv_token,
                     "returncode": returncode,
                     "elapsed_sec": round(elapsed, 3),
                 },
@@ -849,7 +1097,7 @@ def run_session(args) -> int:
                 write_session_end(reason, failed_block_index=block_index, returncode=returncode)
                 return returncode
 
-            trial_offset += block.trials
+            trial_offset += block.movement_count
             if block_index < len(ordered_blocks):
                 next_block = ordered_blocks[block_index]
                 pause_started = time.time()
@@ -913,6 +1161,7 @@ def main(argv: list[str] | None = None) -> int:
             block_count=max(1, int(args.synthetic_blocks)),
             trials_per_block=max(1, int(args.trials_per_block)),
             seed=args.seed,
+            conditions_file=args.conditions_file,
         )
         print(
             json.dumps(

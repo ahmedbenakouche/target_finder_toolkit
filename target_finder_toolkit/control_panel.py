@@ -98,7 +98,7 @@ DEFAULT_RAKE_GAZE_OFFSET_Y = 0.0
 DEFAULT_RAKE_SELECTION_HOLD = 2.0
 DEFAULT_RAKE_LOCK_ON_DWELL = False
 DEFAULT_RAKE_USE_CALIBRATION = True
-DEFAULT_RAKE_CALIB_POINTS = 5
+DEFAULT_RAKE_CALIB_POINTS = 13
 DEFAULT_RAKE_AUTO_CALIBRATE = False
 DEFAULT_RAKE_WITHOUT_TARGETFINDER = True
 DEFAULT_RAKE_SHOW_GAZE = False
@@ -107,7 +107,7 @@ DEFAULT_RAKE_SNAP_SYSTEM_CURSOR = True
 DEFAULT_EXPERIMENT_DATA_DIR = str(Path(__file__).resolve().parents[3] / "data" / "web")
 DEFAULT_EXPERIMENT_TASK_TYPE = "realistic"
 DEFAULT_SYNTHETIC_DENSITY = "medium"
-DEFAULT_SYNTHETIC_BLOCKS = 12
+DEFAULT_SYNTHETIC_BLOCKS = 60
 DEFAULT_PATIENT_EXPERIMENT_TRIALS = 8
 DEFAULT_CONTROL_EXPERIMENT_TRIALS = 12
 DEFAULT_EXPERIMENT_TRIALS = DEFAULT_PATIENT_EXPERIMENT_TRIALS
@@ -148,8 +148,8 @@ UI_TEXTS = {
         "usage_section": "Usage mode",
         "usage_test": "Test a technique",
         "usage_test_desc": "Free test/demo mode. Choose one technique, adjust parameters, then start it.",
-        "usage_baseline": "Standard mouse tasks",
-        "usage_baseline_desc": "Qualitative baseline with the standard mouse only: cursor stability, long-distance movement, and dense interface tasks.",
+        "usage_baseline": "Three qualitative tasks",
+        "usage_baseline_desc": "Qualitative sequence: standard mouse without filter on the three tasks, standard mouse with 1€ filter on the three tasks, Bubble Cursor on tasks 1 and 3, Semantic Pointing on tasks 1 and 3, then Ninja Cursors on the three tasks.",
         "usage_experiment": "Run an experiment",
         "usage_experiment_desc": "Controlled experiment mode. Choose either the patient realistic protocol or the healthy-control comparative protocol.",
         "usage_choose_first": "Choose a usage mode first.",
@@ -226,7 +226,7 @@ UI_TEXTS = {
         "rake_calibration_section": "Calibration",
         "rake_use_calibration": "Use calibration (range: off/on, default: on)",
         "rake_use_calibration_desc": "Runs gaze calibration before Ninja Cursors starts. The resulting correction values fill the editable gain/offset fields.",
-        "rake_calibration_points": "Calibration points (choices: 5/9/13, default: 5)",
+        "rake_calibration_points": "Calibration points (choices: 5/9/13, default: 13)",
         "rake_calibration_points_desc": "Number of points used during multi-point calibration. More points usually improve accuracy but take longer.",
         "rake_calibration_actions": "Calibration actions",
         "rake_calibration_actions_desc": "When calibration is enabled, Start / Apply launches Ninja Cursors(gaze), begins calibration automatically, and fills the correction fields when done.",
@@ -300,8 +300,8 @@ UI_TEXTS = {
         "experiment_difficulty_desc": "Difficulty bin sampled by Fitts ID: easy [0,3), medium [3,5), hard [5,8.5). Mixed samples from all bins.",
         "synthetic_density": "Synthetic distractor density (choices: low/medium/high, default: medium)",
         "synthetic_density_desc": "Distractor density rho for the synthetic Fitts task: low = 0.1, medium = 0.3, high = 0.6.",
-        "synthetic_blocks": "Fitts synthetic only: synthetic blocks per participant (range: 1-18, default: 12)",
-        "synthetic_blocks_desc": "Fitts synthetic task only: number of blocks sampled from the 18 ID × density combinations for this participant. The other complete-experiment parameters apply to both tasks.",
+        "synthetic_blocks": "Fitts synthetic only: conditions per participant (range: 1-60, default: 60)",
+        "synthetic_blocks_desc": "Fitts synthetic task only: number of ordered conditions read from experiment_design/conditions.csv for this participant. The other complete-experiment parameters apply to both tasks.",
         "experiment_countdown": "Countdown (seconds, range: 0-30, step: 0.5, default: 0)",
         "experiment_countdown_desc": "Seconds before each trial starts while the cursor is held at the task start position.",
         "experiment_max_clicks": "Max clicks per trial (range: 1-20, default: 1)",
@@ -347,7 +347,7 @@ UI_TEXTS = {
         "running_bubble": "Bubble Cursor is running.",
         "running_semantic": "Semantic Pointing is running.",
         "running_targetfinder": "TargetFinder Overlay is running.",
-        "running_baseline": "Normal Mouse Baseline is running.",
+        "running_baseline": "Qualitative task sequence is running.",
         "running_mouse_filter": "Standard Mouse is running.",
         "running_dynaspot": "DynaSpot is running.",
         "running_rake": "Ninja Cursors(gaze) is running.",
@@ -382,8 +382,8 @@ UI_TEXTS = {
         "usage_section": "Mode d’utilisation",
         "usage_test": "Tester une technique",
         "usage_test_desc": "Mode test/démo libre. Choisissez une technique, ajustez les paramètres, puis lancez-la.",
-        "usage_baseline": "Tâches souris standard",
-        "usage_baseline_desc": "Baseline qualitative avec la souris standard uniquement : stabilité du curseur, mouvement longue distance et interface dense.",
+        "usage_baseline": "Trois tâches qualitatives",
+        "usage_baseline_desc": "Séquence qualitative : souris standard sans filtre sur les trois tâches, souris standard avec filtre 1€ sur les trois tâches, Bubble Cursor sur les tâches 1 et 3, pointage sémantique sur les tâches 1 et 3, puis Ninja Cursors sur les trois tâches.",
         "usage_experiment": "Lancer une expérience",
         "usage_experiment_desc": "Mode expérimental contrôlé. Choisissez soit le protocole patient réaliste, soit le protocole contrôle comparatif.",
         "usage_choose_first": "Choisissez d’abord un mode d’utilisation.",
@@ -460,7 +460,7 @@ UI_TEXTS = {
         "rake_calibration_section": "Calibration",
         "rake_use_calibration": "Utiliser la calibration (plage : off/on, défaut : on)",
         "rake_use_calibration_desc": "Lance une calibration du regard avant Ninja Cursors. Les corrections obtenues remplissent les champs gain/décalage, qui restent modifiables.",
-        "rake_calibration_points": "Points de calibration (choix : 5/9/13, défaut : 5)",
+        "rake_calibration_points": "Points de calibration (choix : 5/9/13, défaut : 13)",
         "rake_calibration_points_desc": "Nombre de points utilisés pendant la calibration multipoint. Davantage de points améliore souvent la précision mais prend plus de temps.",
         "rake_calibration_actions": "Actions de calibration",
         "rake_calibration_actions_desc": "Quand la calibration est activée, Démarrer / Appliquer lance Ninja Cursors(gaze), démarre automatiquement la calibration et remplit les champs de correction.",
@@ -534,8 +534,8 @@ UI_TEXTS = {
         "experiment_difficulty_desc": "Niveau échantillonné selon l’ID de Fitts : easy [0,3), medium [3,5), hard [5,8.5). Mixed échantillonne tous les niveaux.",
         "synthetic_density": "Densité des distracteurs synthétiques (choix : low/medium/high, défaut : medium)",
         "synthetic_density_desc": "Densité rho des distracteurs pour la tâche synthétique de Fitts : low = 0.1, medium = 0.3, high = 0.6.",
-        "synthetic_blocks": "Fitts synthétique uniquement : blocs synthétiques par participant (plage : 1-18, défaut : 12)",
-        "synthetic_blocks_desc": "Tâche Fitts synthétique uniquement : nombre de blocs tirés parmi les 18 combinaisons ID × densité pour ce participant. Les autres paramètres de l’expérience complète s’appliquent aux deux tâches.",
+        "synthetic_blocks": "Fitts synthétique uniquement : conditions par participant (plage : 1-60, défaut : 60)",
+        "synthetic_blocks_desc": "Tâche Fitts synthétique uniquement : nombre de conditions ordonnées lues dans experiment_design/conditions.csv pour ce participant. Les autres paramètres de l’expérience complète s’appliquent aux deux tâches.",
         "experiment_countdown": "Compte à rebours (secondes, plage : 0-30, pas : 0.5, défaut : 0)",
         "experiment_countdown_desc": "Secondes avant le début de chaque essai pendant que le curseur reste à la position de départ de la tâche.",
         "experiment_max_clicks": "Clics max par essai (plage : 1-20, défaut : 1)",
@@ -581,7 +581,7 @@ UI_TEXTS = {
         "running_bubble": "Bubble Cursor est en cours.",
         "running_semantic": "Le pointage sémantique est en cours.",
         "running_targetfinder": "L’overlay TargetFinder est en cours.",
-        "running_baseline": "La baseline souris standard est en cours.",
+        "running_baseline": "La sequence de taches qualitatives est en cours.",
         "running_mouse_filter": "Souris standard est en cours.",
         "running_dynaspot": "DynaSpot est en cours.",
         "running_rake": "Ninja Cursors(gaze) est en cours.",
@@ -1609,7 +1609,7 @@ class ControlPanel(QtWidgets.QWidget):
 
         self.synthetic_blocks_spin = QtWidgets.QSpinBox()
         self.synthetic_blocks_spin.setKeyboardTracking(False)
-        self.synthetic_blocks_spin.setRange(1, 18)
+        self.synthetic_blocks_spin.setRange(1, 60)
         self.synthetic_blocks_spin.setValue(DEFAULT_SYNTHETIC_BLOCKS)
 
         self.experiment_countdown_spin = QtWidgets.QDoubleSpinBox()
@@ -1790,8 +1790,9 @@ class ControlPanel(QtWidgets.QWidget):
             self.experiment_enabled_row,
             *self._experiment_param_rows,
         ]
+        self.filter_selector_row = self._create_field_row("filter", self.filter_selector_button, "filter_desc")
         filter_rows = [
-            self._create_field_row("filter", self.filter_selector_button, "filter_desc"),
+            self.filter_selector_row,
             *self._filter_param_rows,
         ]
         logging_rows = [
@@ -1814,9 +1815,10 @@ class ControlPanel(QtWidgets.QWidget):
 
         self._setup_group = self._create_setting_group("setup_section", setup_rows)
         self._experiment_group = self._create_setting_group("experiment_section", experiment_toggle_rows)
+        self._filter_group = self._create_setting_group("filter_section", filter_rows)
         groups = [
             self._setup_group,
-            self._create_setting_group("filter_section", filter_rows),
+            self._filter_group,
             self._create_setting_group("logging_section", logging_rows),
             self._create_setting_group("detection_section", detection_rows),
             self._experiment_group,
@@ -2290,6 +2292,8 @@ class ControlPanel(QtWidgets.QWidget):
             self.usage_experiment_button.setChecked(self._usage_mode == "experiment")
         if getattr(self, "_setup_group", None) is not None:
             self._setup_group.setVisible(not usage_experiment)
+        if getattr(self, "_filter_group", None) is not None:
+            self._filter_group.setVisible(not usage_experiment and not baseline_enabled)
         if getattr(self, "model_path_row", None) is not None:
             self.model_path_row.setVisible(not usage_experiment and not baseline_enabled and not mouse_filter_enabled)
         if getattr(self, "technique_row", None) is not None:
@@ -2388,7 +2392,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.synthetic_density_combo.setEnabled(experiment_enabled and synthetic_task and not synthetic_full_session)
         self.synthetic_blocks_spin.setEnabled(experiment_enabled and (synthetic_full_session or comparative_synthetic_task or comparative_full_mode))
         for row in getattr(self, "_filter_param_rows", []):
-            row.setVisible(filter_params_visible)
+            row.setVisible(filter_params_visible and not baseline_enabled)
         for widget in (
             self.filter_freq_spin,
             self.filter_min_cutoff_spin,
@@ -3836,6 +3840,8 @@ error "No supported browser window found"
             str(cfg.experiment_trials),
             "--synthetic-blocks",
             str(cfg.synthetic_blocks),
+            "--conditions-file",
+            str(self.project_root / "experiment_design" / "conditions.csv"),
             "--countdown",
             str(cfg.experiment_countdown),
             "--max-clicks",
@@ -3931,6 +3937,8 @@ error "No supported browser window found"
             str(cfg.experiment_trials),
             "--synthetic-blocks",
             str(cfg.synthetic_blocks),
+            "--conditions-file",
+            str(self.project_root / "experiment_design" / "conditions.csv"),
             "--countdown",
             str(cfg.experiment_countdown),
             "--max-clicks",

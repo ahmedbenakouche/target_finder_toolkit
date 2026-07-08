@@ -752,6 +752,7 @@ def bubble_cursor(
     )
     ov.show()
     raise_macos_window_above_system_ui(ov, level_offset=1)
+    print("__BUBBLE_EVENT__ ready", flush=True)
     is_active = getattr(detector, "is_active", None)
     if not callable(is_active) or bool(is_active()):
         if sys.platform == "darwin":

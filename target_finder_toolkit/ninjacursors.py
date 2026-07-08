@@ -1714,8 +1714,16 @@ class NinjaCursors(QtWidgets.QWidget):
             self._pending_click_point = self._active_point
             self._pending_click_target = self._active_target
             self._pending_click_cursor_id = self._active_cursor_id
+            target_point = self._pending_click_point
+            target_for_log = self._pending_click_target
+            cursor_id_for_log = self._pending_click_cursor_id
+        else:
+            # For drags, mouseDown must start at the selected Ninja cursor, but
+            # mouseUp must follow the current orange cursor position at release.
+            target_point = self._active_point or self._pending_click_point
+            target_for_log = self._active_target or self._pending_click_target
+            cursor_id_for_log = self._active_cursor_id or self._pending_click_cursor_id
 
-        target_point = self._pending_click_point or self._active_point
         if target_point is None:
             return event
 
@@ -1735,9 +1743,9 @@ class NinjaCursors(QtWidgets.QWidget):
                     raw=[round(float(px), 3), round(float(py), 3)],
                     effective=[round(tx, 3), round(ty, 3)],
                     redirected=redirected,
-                    target=self._pending_click_target,
+                    target=target_for_log,
                     **self._log_mode_fields(),
-                    **self._click_cursor_fields(self._pending_click_cursor_id),
+                    **self._click_cursor_fields(cursor_id_for_log),
                 )
             self._pending_click_point = None
             self._pending_click_target = None

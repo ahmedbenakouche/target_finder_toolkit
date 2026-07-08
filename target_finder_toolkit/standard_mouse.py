@@ -12,13 +12,13 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pynput import keyboard, mouse
 
 from target_finder_toolkit.filters import add_filter_arguments, filter_kwargs_from_args, PointFilter2D
 from target_finder_toolkit.logging_utils import SessionLogger
-from target_finder_toolkit.targetfinder import TargetFinder
 
 
 class StandardMouseRunner(QtCore.QObject):
@@ -26,19 +26,28 @@ class StandardMouseRunner(QtCore.QObject):
         super().__init__()
         self.args = args
         self.logger = logger
-        self.detector = TargetFinder(
-            args.model_path,
-            args.change_thresh,
-            args.capture_interval,
-            args.confidence,
-            args.iou,
-        )
+        self.detector = None
+        if not args.without_targetfinder:
+            from target_finder_toolkit.targetfinder import TargetFinder
+
+            self.detector = TargetFinder(
+                args.model_path,
+                args.change_thresh,
+                args.capture_interval,
+                args.confidence,
+                args.iou,
+            )
         self.cursor_filter = PointFilter2D(args.filter, **filter_kwargs_from_args(args))
         self._mouse_listener = None
         self._keyboard_listener = None
         self._ignore_warp_until = 0.0
         self._last_filtered = None
         self._stop_reason = "app_exit"
+        self._control_file = Path(args.control_file) if args.control_file else None
+        self._last_control_state = ""
+        self._control_timer = QtCore.QTimer(self)
+        self._control_timer.setInterval(30)
+        self._control_timer.timeout.connect(self._poll_control_file)
 
     def start(self):
         pos = QtGui.QCursor.pos()
@@ -55,14 +64,41 @@ class StandardMouseRunner(QtCore.QObject):
                 capture_interval=self.args.capture_interval,
                 confidence=self.args.confidence,
                 iou=self.args.iou,
-                detection_source="yolo",
+                detection_source="none" if self.detector is None else "yolo",
             )
-            self.detector.set_callback(
-                lambda dets, added, removed, _frame: self.logger.log_detection_change(dets, added, removed)
-            )
-        self.detector.start()
         self._start_mouse_listener()
         self._start_keyboard_listener()
+        if self._control_file is not None:
+            self._control_timer.start()
+        if self.detector is not None:
+            if self.logger is not None:
+                self.detector.set_callback(
+                    lambda dets, added, removed, _frame: self.logger.log_detection_change(dets, added, removed)
+                )
+            self.detector.start()
+
+    def _poll_control_file(self):
+        if self._control_file is None:
+            return
+        try:
+            state = self._control_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            return
+        if not state or state == self._last_control_state:
+            return
+        self._last_control_state = state
+        parts = state.split()
+        if len(parts) < 3 or not parts[0].startswith(("active", "ready", "reset")):
+            return
+        try:
+            x = float(parts[1])
+            y = float(parts[2])
+        except ValueError:
+            return
+        self.cursor_filter.reset(x, y)
+        self._last_filtered = (x, y)
+        self._ignore_warp_until = time.monotonic() + 0.02
+        QtGui.QCursor.setPos(int(round(x)), int(round(y)))
 
     def _start_mouse_listener(self):
         def on_move(x, y):
@@ -78,12 +114,14 @@ class StandardMouseRunner(QtCore.QObject):
 
         def on_click(x, y, button, pressed):
             if pressed and self.logger is not None:
-                target = self.detector.find_detection_for_point(
-                    float(x),
-                    float(y),
-                    include_text=True,
-                    fallback_nearest=False,
-                )
+                target = None
+                if self.detector is not None:
+                    target = self.detector.find_detection_for_point(
+                        float(x),
+                        float(y),
+                        include_text=True,
+                        fallback_nearest=False,
+                    )
                 self.logger.log_click(
                     technique="standard_mouse",
                     button=str(button),
@@ -130,7 +168,7 @@ class StandardMouseRunner(QtCore.QObject):
                 technique="standard_mouse",
                 filter_name=self.cursor_filter.filter_name,
                 **self.cursor_filter.params,
-                detection_count=len(self.detector.get_detections()),
+                detection_count=len(self.detector.get_detections()) if self.detector is not None else 0,
             )
         if self.cursor_filter.enabled:
             self._ignore_warp_until = time.monotonic() + 0.006
@@ -138,9 +176,11 @@ class StandardMouseRunner(QtCore.QObject):
 
     def stop(self):
         try:
-            self.detector.stop()
+            if self.detector is not None:
+                self.detector.stop()
         except Exception:
             pass
+        self._control_timer.stop()
         for listener in (self._mouse_listener, self._keyboard_listener):
             if listener is None:
                 continue
@@ -163,6 +203,8 @@ def parse_args(argv: list[str] | None = None):
     add_filter_arguments(parser)
     parser.add_argument("--log-file", default=None)
     parser.add_argument("--log-cursor-hz", type=float, default=30.0)
+    parser.add_argument("--without-targetfinder", action="store_true", help="Run the standard cursor/filter without live TargetFinder detection")
+    parser.add_argument("--control-file", default=None, help="Optional file used by a task window to reset the filter origin")
     args = parser.parse_args(argv)
     if args.model_path is None:
         here = os.path.dirname(os.path.abspath(__file__))
