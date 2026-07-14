@@ -205,6 +205,8 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 
 #### Available options:
 
+> **Note:** The models are automatically loaded by the toolkit. They are also available on Hugging Face: [ab-dev26/targetfinder](https://huggingface.co/ab-dev26/targetfinder).
+
 | Option | Description |
 |--------|-------------|
 | `--model` | Select one of our trained YOLO26 models. A higher input resolution or a larger model size provides better performance, especially for small widgets, but increases inference time. Available models: yolo26[n\|s\|m]-[640\|1280\|1920] (default = yolo26n-640) |
