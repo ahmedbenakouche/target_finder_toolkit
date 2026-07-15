@@ -1,7 +1,10 @@
+[![PyPI Version](https://img.shields.io/pypi/v/target-finder-toolkit)](https://pypi.org/project/target-finder-toolkit)
+[![Downloads](https://static.pepy.tech/badge/target-finder-toolkit)](https://pepy.tech/project/target-finder-toolkit)
+
 # TargetFinder Toolkit
 
 This toolkit accompanies the work presented in the article **TargetFinder: Detecting Widgets from Pixels on Desktop Interfaces**.  
-It provides a real-time detection system using the YOLO26 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
+It provides a real-time detection system using the YOLOv8 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
 
 The system is lightweight and easy to integrate, enabling the implementation of advanced interaction techniques.  
 As proof of concept, we include two interaction techniques built on top of TargetFinder:
@@ -19,6 +22,11 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 ## Installation
 
+```bash
+pip install target-finder-toolkit
+```
+
+Or after cloning the repository:
 ```bash
 pip install .
 ```
@@ -82,7 +90,7 @@ def on_change(detections, added, removed, frame):
     pp.pretty_print_change(detections, added, removed)
 
 if __name__ == "__main__":
-    det = TargetFinder(model_name="yolo26n-1280")   # default = yolo26n-640
+    det = TargetFinder()
     det.set_callback(on_change, with_frame=False, diff_iou=0.5)
     det.start()
 
@@ -169,7 +177,7 @@ if __name__ == "__main__":
 For the full API reference and detailed explanations of all parameters,  
 visit the documentation site:
 
-👉 [**Documentation (API & Developer Guide)**](https://target-finder-toolkit.netlify.app/)
+👉 [**Documentation (API & Developer Guide)**](https://zingy-biscuit-a4bc5c.netlify.app/)
 
 
 
@@ -205,11 +213,9 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 
 #### Available options:
 
-> **Note:** The models are automatically loaded by the toolkit. They are also available on Hugging Face: [ab-dev26/targetfinder](https://huggingface.co/ab-dev26/targetfinder).
-
 | Option | Description |
 |--------|-------------|
-| `--model` | Select one of our trained YOLO26 models. A higher input resolution or a larger model size provides better performance, especially for small widgets, but increases inference time. Available models: yolo26[n\|s\|m]-[640\|1280\|1920] (default = yolo26n-640) |
+| `--model-path` | By default, TargetFinder loads our trained model `YOLOv8n` packaged with the toolkit, but you can supply your own. |
 | `--change-thresh` | Screen change detection threshold. A higher value makes detection less sensitive to small variations. (`default = 100`). |
 | `--capture-interval` | Time between screen captures in seconds. Lower values = higher frequency but more CPU/GPU usage. (`default = 1/30 ≈ 0.033s`). |
 | `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0], default = 0.28`). |
@@ -220,7 +226,6 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 Example:
 ```bash
 bubblecursor \
-  --model yolo26n-1280 \
   --change-thresh 100 \
   --capture-interval 0.033 \
   --confidence 0.28 \
