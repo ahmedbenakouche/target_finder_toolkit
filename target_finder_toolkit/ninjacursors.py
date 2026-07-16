@@ -1609,6 +1609,12 @@ class NinjaCursors(QtWidgets.QWidget):
             return
         sw, sh = self._screen_px_dimensions
         self._set_detector_capture_suspended(True)
+        # Calibration is fitted from WebEyeTrack's coordinates.  Do not carry
+        # manual corrections from a previous run into the calibrated runtime.
+        self.gaze_gain_x = 1.0
+        self.gaze_gain_y = 1.0
+        self.gaze_offset_x = 0.0
+        self.gaze_offset_y = 0.0
         self._calibration = EyeCalibration(
             sw, sh,
             num_points=self._calib_points,
@@ -1629,12 +1635,12 @@ class NinjaCursors(QtWidgets.QWidget):
             self._calib_status_text = f"Calibrated! Error: {mean_error_px:.0f}px"
             correction_values = self._calibration.correction_values if self._calibration is not None else None
             if correction_values:
-                self.gaze_gain_x = max(0.1, min(float(correction_values["gaze_gain_x"]), 10.0))
-                self.gaze_gain_y = max(0.1, min(float(correction_values["gaze_gain_y"]), 10.0))
-                max_offset_x = min(1000.0, max(100.0, float(self._screen_rect.width()) * 0.75))
-                max_offset_y = min(1000.0, max(100.0, float(self._screen_rect.height()) * 0.75))
-                self.gaze_offset_x = max(-max_offset_x, min(float(correction_values["gaze_offset_x"]), max_offset_x))
-                self.gaze_offset_y = max(-max_offset_y, min(float(correction_values["gaze_offset_y"]), max_offset_y))
+                # The full affine matrix remains inside WebEyeTrack.  A second
+                # gain/offset correction here would apply calibration twice.
+                self.gaze_gain_x = 1.0
+                self.gaze_gain_y = 1.0
+                self.gaze_offset_x = 0.0
+                self.gaze_offset_y = 0.0
                 correction_values = {
                     "gaze_gain_x": self.gaze_gain_x,
                     "gaze_gain_y": self.gaze_gain_y,

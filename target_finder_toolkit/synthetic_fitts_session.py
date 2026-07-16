@@ -575,6 +575,11 @@ def _build_block_command(
         cmd += ["--annotation-control-file", str(annotation_control_file)]
     if ninja_control_file is not None and block.technique == "ninja_cursors":
         cmd += ["--ninja-control-file", str(ninja_control_file)]
+    if block.technique == "ninja_cursors":
+        # The synthetic task already knows every target it generated.  Keep
+        # Ninja on the no-live-TargetFinder path; the annotation control file
+        # still supplies the known target list used by the interaction logic.
+        cmd.append("--without-targetfinder")
     if args.windowed:
         cmd.append("--windowed")
     if args.no_technique_log:
@@ -597,8 +602,8 @@ def _build_block_command(
         cmd.append("--ninja-snap-system-cursor-to-active")
     if args.ninja_auto_calibrate:
         cmd.append("--ninja-auto-calibrate")
-    if not args.ninja_without_targetfinder:
-        cmd.append("--ninja-with-targetfinder")
+    # Synthetic sessions use procedurally generated ground-truth targets,
+    # not live TargetFinder/YOLO detections.
     return cmd
 
 

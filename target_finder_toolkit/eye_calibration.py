@@ -100,6 +100,7 @@ class EyeCalibration:
         """Begin calibration. Clears any existing affine_matrix on the tracker."""
         self._tracker_ref = tracker
         tracker.affine_matrix = None
+        tracker.affine_matrix_tf = None
         self._calibrated = False
         self._correction_values = None
         self._calibrating = True
@@ -134,6 +135,13 @@ class EyeCalibration:
             self.on_progress(self._point_idx, progress)
 
         if elapsed > self.SETTLE_SEC and self._frame_count < self.GAZE_RESULTS_PER_POINT:
+            
+            if self._frame_count % 5 == 0:
+                print(
+                    f"[raw gaze] point={self._point_idx}, "
+                    f"norm_pog={getattr(gaze_result, 'norm_pog', None)}"
+                )
+
             if len(self._gaze_results) <= self._point_idx:
                 self._gaze_results.append([])
             self._gaze_results[self._point_idx].append(gaze_result)
@@ -183,64 +191,79 @@ class EyeCalibration:
         print(f"[calib] fitting with {len(calib_gaze_results)} total samples")
 
         try:
-            returned_calib = tracker.adapt_from_gaze_results(
-                calib_gaze_results,
-                np.array(calib_norm_pogs),
-                affine_transform=True,
-                steps_inner=10,
-                inner_lr=1e-4,
-                pt_type='calib',
+            # Fit one transform from the exact coordinates produced at runtime.
+            # WebEyeTrack's adapt(..., affine_transform=True) computes affine
+            # *before* updating the MAML gaze head.  The subsequent weight update
+            # changes the source coordinate space and can make that affine matrix
+            # invalid (often pushing every result above/left of the screen).
+            # Keeping the model fixed makes calibration deterministic.
+            raw_pogs = np.asarray(
+                [gr.norm_pog for gr in calib_gaze_results],
+                dtype=np.float64,
             )
-            self._calibrated = True
-
-            if tracker.affine_matrix is not None:
-                m = tracker.affine_matrix.copy()
-                scale_x = np.linalg.norm(m[0, :2])
-                scale_y = np.linalg.norm(m[1, :2])
-                max_scale = 1.25
-                if scale_x > max_scale:
-                    m[0, :2] *= max_scale / scale_x
-                if scale_y > max_scale:
-                    m[1, :2] *= max_scale / scale_y
-                tracker.affine_matrix = m
+            targets = np.asarray(calib_norm_pogs, dtype=np.float64)
+            if raw_pogs.shape != targets.shape or raw_pogs.ndim != 2 or raw_pogs.shape[1] != 2:
+                raise RuntimeError(
+                    f"Invalid calibration samples: raw={raw_pogs.shape}, targets={targets.shape}"
+                )
+            source_augmented = np.column_stack(
+                [raw_pogs, np.ones(raw_pogs.shape[0], dtype=np.float64)]
+            )
+            if np.linalg.matrix_rank(source_augmented) < 3:
+                raise RuntimeError(
+                    "Calibration samples do not span the screen; keep the head still "
+                    "and look directly at every point"
+                )
+            coefficients, _, _, _ = np.linalg.lstsq(
+                source_augmented,
+                targets,
+                rcond=None,
+            )
+            m = coefficients.T.astype(np.float32)
+            if m.shape != (2, 3) or not np.all(np.isfinite(m)):
+                raise RuntimeError(f"Invalid affine calibration matrix: shape={m.shape}")
+            tracker.affine_matrix = m
+            try:
+                import tensorflow as tf
+                tracker.affine_matrix_tf = tf.convert_to_tensor(m, dtype=tf.float32)
+            except Exception:
                 tracker.affine_matrix_tf = None
-                try:
-                    import tensorflow as tf
-                    tracker.affine_matrix_tf = tf.convert_to_tensor(m, dtype=tf.float32)
-                except Exception:
-                    pass
 
-                clamped_sx = np.linalg.norm(m[0, :2])
-                clamped_sy = np.linalg.norm(m[1, :2])
-                offset_x_px = float(m[0, 2] * self.screen_w)
-                offset_y_px = float(m[1, 2] * self.screen_h)
-                self._correction_values = {
-                    "gaze_gain_x": float(clamped_sx),
-                    "gaze_gain_y": float(clamped_sy),
-                    "gaze_offset_x": offset_x_px,
-                    "gaze_offset_y": offset_y_px,
-                    "affine_matrix": m.tolist(),
-                }
-                print(f"[calib] scale: raw=({scale_x:.3f}, {scale_y:.3f}) clamped=({clamped_sx:.3f}, {clamped_sy:.3f})")
-                print(f"[calib] offset_px=({offset_x_px:.0f}, {offset_y_px:.0f})")
+            # The Kalman state was built from uncalibrated coordinates.  Reset
+            # it before the first affine-transformed measurement; otherwise the
+            # old position/velocity can pin gaze to a screen edge for seconds.
+            kalman = getattr(tracker, "kalman_filter", None)
+            if kalman is not None:
+                if hasattr(kalman, "x"):
+                    kalman.x = np.zeros_like(kalman.x)
+                if hasattr(kalman, "P"):
+                    kalman.P = np.eye(kalman.P.shape[0], dtype=kalman.P.dtype)
 
-            preds = np.array(returned_calib)
-            targets = np.array(calib_norm_pogs)
+            # Manual correction must be neutral because WebEyeTrack now applies
+            # the complete affine transform to norm_pog on every frame.
+            self._correction_values = {
+                "gaze_gain_x": 1.0,
+                "gaze_gain_y": 1.0,
+                "gaze_offset_x": 0.0,
+                "gaze_offset_y": 0.0,
+                "affine_matrix": m.tolist(),
+            }
+            self._calibrated = True
+            print(f"[calib] affine matrix kept for runtime:\n{m}")
+
+            preds = source_augmented @ m.T
             diff_px = (preds - targets) * np.array([self.screen_w, self.screen_h])
             errors_px = np.sqrt(np.sum(diff_px ** 2, axis=1))
             mean_err_px = float(np.mean(errors_px))
 
             self._save_result(mean_err_px)
-            # The panel uses calibration as an automatic initializer for the
-            # editable gain/offset fields. Disable WebEyeTrack's affine state so
-            # the runtime does not apply both affine and manual corrections.
-            tracker.affine_matrix = None
-            tracker.affine_matrix_tf = None
             print(f"Eye calibration complete! Mean error: {mean_err_px:.1f}px")
             if self.on_done:
                 self.on_done(True, mean_err_px)
 
         except Exception as e:
+            self._calibrated = False
+            self._correction_values = None
             print(f"Eye calibration error: {e}")
             if self.on_done:
                 self.on_done(False, None)

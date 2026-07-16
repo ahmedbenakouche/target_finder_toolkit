@@ -108,9 +108,10 @@ DEFAULT_EXPERIMENT_DATA_DIR = str(Path(__file__).resolve().parents[3] / "data" /
 DEFAULT_EXPERIMENT_TASK_TYPE = "realistic"
 DEFAULT_SYNTHETIC_DENSITY = "medium"
 DEFAULT_SYNTHETIC_BLOCKS = 60
-DEFAULT_PATIENT_EXPERIMENT_TRIALS = 8
-DEFAULT_CONTROL_EXPERIMENT_TRIALS = 12
-DEFAULT_EXPERIMENT_TRIALS = DEFAULT_PATIENT_EXPERIMENT_TRIALS
+DEFAULT_REALISTIC_EXPERIMENT_TRIALS = 9
+DEFAULT_FITTS_EXPERIMENT_TRIALS = 9
+# Kept as a compatibility alias for older configuration files.
+DEFAULT_EXPERIMENT_TRIALS = DEFAULT_REALISTIC_EXPERIMENT_TRIALS
 DEFAULT_EXPERIMENT_DIFFICULTY = "mixed"
 DEFAULT_EXPERIMENT_COUNTDOWN = 0.0
 DEFAULT_EXPERIMENT_MAX_CLICKS = 1
@@ -121,7 +122,7 @@ DEFAULT_EXPERIMENT_PARTICIPANT_ID = "P01"
 DEFAULT_BASELINE_TRIALS_PER_TASK = 5
 DEFAULT_COMPARATIVE_TASK_PART = "control_our_task"
 DEFAULT_COMPARATIVE_RUN_MODE = "test"
-EXPERIMENT_LOG_ROOTS = ("patient_logs", "control_comparative", "control_our_task", "control_fitts_synthetic")
+EXPERIMENT_LOG_ROOTS = ("control_comparative", "control_our_task", "control_fitts_synthetic")
 DEFAULT_USAGE_MODE = "test"
 PAGE_USAGE = 0
 PAGE_EXPERIMENT_PROTOCOL = 1
@@ -151,7 +152,7 @@ UI_TEXTS = {
         "usage_baseline": "Three qualitative tasks",
         "usage_baseline_desc": "Qualitative sequence: standard mouse without filter on the three tasks, standard mouse with 1€ filter on the three tasks, Bubble Cursor on tasks 1 and 3, Semantic Pointing on tasks 1 and 3, then Ninja Cursors on the three tasks.",
         "usage_experiment": "Run an experiment",
-        "usage_experiment_desc": "Controlled experiment mode. Choose either the patient realistic protocol or the healthy-control comparative protocol.",
+        "usage_experiment_desc": "Controlled experiment mode. Choose either separate testing of the two control tasks or the complete control protocol.",
         "usage_choose_first": "Choose a usage mode first.",
         "setup_section": "Technique setup",
         "filter_section": "Pointer filter",
@@ -271,10 +272,10 @@ UI_TEXTS = {
         "experiment_enabled_desc": "When enabled, Start / Apply launches a controlled experimental task instead of a free demo.",
         "experiment_protocol": "Experimental protocol",
         "experiment_protocol_desc": "Choose the protocol to run after pressing Start / Apply.",
-        "experiment_protocol_realistic": "Patient protocol - realistic task",
-        "experiment_protocol_realistic_desc": "For patients: runs only the complete realistic screenshot target-selection task.",
-        "experiment_protocol_comparative": "Control protocol - realistic task + synthetic Fitts",
-        "experiment_protocol_comparative_desc": "For healthy controls: includes the realistic screenshot task and the synthetic Fitts-with-distractors task, with the order balanced by participant ID.",
+        "experiment_protocol_realistic": "Test the two control tasks separately",
+        "experiment_protocol_realistic_desc": "Testing mode: launch either the realistic screenshot task or the synthetic Fitts-with-distractors task; their logs remain separate.",
+        "experiment_protocol_comparative": "Run the complete control protocol",
+        "experiment_protocol_comparative_desc": "Complete mode: runs the realistic and synthetic Fitts tasks in participant-specific counterbalanced order.",
         "comparative_run_mode_desc": "Choose how to run the healthy-control protocol.",
         "comparative_run_test": "Test the two control tasks separately",
         "comparative_run_test_desc": "Testing mode: launch either the control realistic task or the control synthetic Fitts task, with separate logs.",
@@ -290,12 +291,10 @@ UI_TEXTS = {
         "experiment_participant_id_desc": "Identifier written in the session log and used to select one Balanced Latin Square block order.",
         "experiment_data_dir": "Dataset folder (default: stage/data/web)",
         "experiment_data_dir_desc": "Folder containing the annotated screenshot .png/.txt pairs used to generate trials.",
-        "experiment_trials": "Trials / trials per block (range: 1-1000, default: 8)",
-        "experiment_trials_desc": "Number of trials in each technique × difficulty block.",
-        "experiment_trials_patient": "Trials / trials per block (range: 1-1000, default: 8)",
-        "experiment_trials_patient_desc": "Number of trials in each technique × difficulty block.",
-        "experiment_trials_control": "Trials / trials per block (range: 1-1000, default: 12)",
-        "experiment_trials_control_desc": "Number of trials per block for the realistic and synthetic tasks.",
+        "experiment_realistic_trials": "Realistic task: trials per block (range: 1-1000, default: 9)",
+        "experiment_realistic_trials_desc": "Number of trials in each technique × difficulty block of the realistic annotated-screenshot task.",
+        "experiment_fitts_trials": "Synthetic Fitts task: trials per condition (range: 1-1000, default: 9)",
+        "experiment_fitts_trials_desc": "Number of repetitions for each technique × ID × distractor-density condition in the synthetic Fitts task.",
         "experiment_difficulty": "Difficulty (choices: easy/medium/hard/mixed, default: mixed)",
         "experiment_difficulty_desc": "Difficulty bin sampled by Fitts ID: easy [0,3), medium [3,5), hard [5,8.5). Mixed samples from all bins.",
         "synthetic_density": "Synthetic distractor density (choices: low/medium/high, default: medium)",
@@ -385,7 +384,7 @@ UI_TEXTS = {
         "usage_baseline": "Trois tâches qualitatives",
         "usage_baseline_desc": "Séquence qualitative : souris standard sans filtre sur les trois tâches, souris standard avec filtre 1€ sur les trois tâches, Bubble Cursor sur les tâches 1 et 3, pointage sémantique sur les tâches 1 et 3, puis Ninja Cursors sur les trois tâches.",
         "usage_experiment": "Lancer une expérience",
-        "usage_experiment_desc": "Mode expérimental contrôlé. Choisissez soit le protocole patient réaliste, soit le protocole contrôle comparatif.",
+        "usage_experiment_desc": "Mode expérimental contrôlé. Choisissez soit le test séparé des deux tâches contrôle, soit le protocole contrôle complet.",
         "usage_choose_first": "Choisissez d’abord un mode d’utilisation.",
         "setup_section": "Configuration de la technique",
         "filter_section": "Filtre du pointeur",
@@ -505,10 +504,10 @@ UI_TEXTS = {
         "experiment_enabled_desc": "Si activé, Démarrer / Appliquer lance une tâche expérimentale contrôlée au lieu d’une démo libre.",
         "experiment_protocol": "Protocole expérimental",
         "experiment_protocol_desc": "Choisissez le protocole à lancer après Démarrer / Appliquer.",
-        "experiment_protocol_realistic": "Protocole patient - tâche réaliste",
-        "experiment_protocol_realistic_desc": "Pour les patients : lance uniquement la tâche complète de sélection de cibles sur captures réalistes.",
-        "experiment_protocol_comparative": "Protocole contrôle - tâche réaliste + Fitts synthétique",
-        "experiment_protocol_comparative_desc": "Pour les participants sans troubles moteurs : inclut la tâche réaliste sur captures d’écran et la tâche synthétique de Fitts avec distracteurs, avec un ordre équilibré par identifiant participant.",
+        "experiment_protocol_realistic": "Tester séparément les deux tâches contrôle",
+        "experiment_protocol_realistic_desc": "Mode test : lancer séparément la tâche réaliste sur captures et la tâche Fitts synthétique, avec des journaux distincts.",
+        "experiment_protocol_comparative": "Exécuter le protocole contrôle complet",
+        "experiment_protocol_comparative_desc": "Mode complet : exécuter les tâches réaliste et Fitts synthétique dans l’ordre contrebalancé selon l’identifiant du participant.",
         "comparative_run_mode_desc": "Choisissez comment lancer le protocole contrôle.",
         "comparative_run_test": "Tester les deux tâches contrôle séparément",
         "comparative_run_test_desc": "Mode test : lancer soit la tâche réaliste contrôle, soit la tâche Fitts synthétique contrôle, avec des logs séparés.",
@@ -524,12 +523,10 @@ UI_TEXTS = {
         "experiment_participant_id_desc": "Identifiant enregistré dans le journal de session et utilisé pour sélectionner un ordre de blocs dans le carré latin équilibré.",
         "experiment_data_dir": "Dossier du jeu de données (défaut : stage/data/web)",
         "experiment_data_dir_desc": "Dossier contenant les paires annotées .png/.txt utilisées pour générer les essais.",
-        "experiment_trials": "Essais / essais par bloc (plage : 1-1000, défaut : 8)",
-        "experiment_trials_desc": "Nombre d’essais dans chaque bloc technique × difficulté.",
-        "experiment_trials_patient": "Essais / essais par bloc (plage : 1-1000, défaut : 8)",
-        "experiment_trials_patient_desc": "Nombre d’essais dans chaque bloc technique × difficulté.",
-        "experiment_trials_control": "Essais / essais par bloc (plage : 1-1000, défaut : 12)",
-        "experiment_trials_control_desc": "Nombre d’essais par bloc pour les tâches réaliste et synthétique.",
+        "experiment_realistic_trials": "Tâche réaliste : essais par bloc (plage : 1-1000, défaut : 9)",
+        "experiment_realistic_trials_desc": "Nombre d’essais dans chaque bloc technique × difficulté de la tâche réaliste sur captures annotées.",
+        "experiment_fitts_trials": "Tâche Fitts synthétique : essais par condition (plage : 1-1000, défaut : 9)",
+        "experiment_fitts_trials_desc": "Nombre de répétitions pour chaque condition technique × ID × densité de distracteurs de la tâche Fitts synthétique.",
         "experiment_difficulty": "Difficulté (choix : easy/medium/hard/mixed, défaut : mixed)",
         "experiment_difficulty_desc": "Niveau échantillonné selon l’ID de Fitts : easy [0,3), medium [3,5), hard [5,8.5). Mixed échantillonne tous les niveaux.",
         "synthetic_density": "Densité des distracteurs synthétiques (choix : low/medium/high, défaut : medium)",
@@ -653,6 +650,8 @@ class PanelConfig:
     comparative_run_mode: str = DEFAULT_COMPARATIVE_RUN_MODE
     experiment_data_dir: str = DEFAULT_EXPERIMENT_DATA_DIR
     experiment_trials: int = DEFAULT_EXPERIMENT_TRIALS
+    realistic_trials: int = DEFAULT_REALISTIC_EXPERIMENT_TRIALS
+    fitts_trials: int = DEFAULT_FITTS_EXPERIMENT_TRIALS
     experiment_difficulty: str = DEFAULT_EXPERIMENT_DIFFICULTY
     synthetic_density: str = DEFAULT_SYNTHETIC_DENSITY
     synthetic_blocks: int = DEFAULT_SYNTHETIC_BLOCKS
@@ -1308,9 +1307,9 @@ class ControlPanel(QtWidgets.QWidget):
         self.comparative_test_button.setObjectName("ActionButton")
         self.comparative_test_button.setCheckable(True)
         self._bind_text(self.comparative_test_button, "comparative_run_test")
-        card_layout.addWidget(self.comparative_test_button)
-        card_layout.addWidget(self._create_note("comparative_run_test_desc"))
-        card_layout.addWidget(self._create_separator())
+        # Kept for signal/backward compatibility, but the protocol page now
+        # exposes exactly two choices below.
+        self.comparative_test_button.setVisible(False)
 
         self.experiment_realistic_button = QtWidgets.QPushButton()
         self.experiment_realistic_button.setObjectName("ActionButton")
@@ -1591,13 +1590,20 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_task_type_combo.setCurrentText(DEFAULT_EXPERIMENT_TASK_TYPE)
 
         self.comparative_task_part_combo = QtWidgets.QComboBox()
-        self.comparative_task_part_combo.addItems(["control_our_task", "control_fitts_synthetic"])
-        self.comparative_task_part_combo.setCurrentText(DEFAULT_COMPARATIVE_TASK_PART)
+        self.comparative_task_part_combo.setObjectName("TaskDropdown")
+        self.comparative_task_part_combo.addItem("realistic", "control_our_task")
+        self.comparative_task_part_combo.addItem("synthetic_fitts", "control_fitts_synthetic")
+        self._set_combo_data(self.comparative_task_part_combo, DEFAULT_COMPARATIVE_TASK_PART)
 
         self.experiment_trials_spin = QtWidgets.QSpinBox()
         self.experiment_trials_spin.setKeyboardTracking(False)
         self.experiment_trials_spin.setRange(1, 1000)
-        self.experiment_trials_spin.setValue(DEFAULT_EXPERIMENT_TRIALS)
+        self.experiment_trials_spin.setValue(DEFAULT_REALISTIC_EXPERIMENT_TRIALS)
+        self.realistic_trials_spin = self.experiment_trials_spin
+        self.fitts_trials_spin = QtWidgets.QSpinBox()
+        self.fitts_trials_spin.setKeyboardTracking(False)
+        self.fitts_trials_spin.setRange(1, 1000)
+        self.fitts_trials_spin.setValue(DEFAULT_FITTS_EXPERIMENT_TRIALS)
 
         self.experiment_difficulty_combo = QtWidgets.QComboBox()
         self.experiment_difficulty_combo.addItems(["mixed", "easy", "medium", "hard"])
@@ -1731,7 +1737,14 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_data_dir_row = self._create_field_row("experiment_data_dir", self.experiment_data_picker, "experiment_data_dir_desc")
         self.experiment_session_enabled_row = self._create_switch_row("experiment_session_enabled", self.experiment_session_enabled_cb, "experiment_session_enabled_desc")
         self.experiment_participant_id_row = self._create_field_row("experiment_participant_id", self.experiment_participant_id_edit, "experiment_participant_id_desc")
-        self.experiment_trials_row = self._create_field_row("experiment_trials", self.experiment_trials_spin, "experiment_trials_desc")
+        self.experiment_realistic_trials_row = self._create_field_row(
+            "experiment_realistic_trials", self.realistic_trials_spin, "experiment_realistic_trials_desc"
+        )
+        self.experiment_fitts_trials_row = self._create_field_row(
+            "experiment_fitts_trials", self.fitts_trials_spin, "experiment_fitts_trials_desc"
+        )
+        # Compatibility alias for code that refreshes the old row name.
+        self.experiment_trials_row = self.experiment_realistic_trials_row
         self.experiment_difficulty_row = self._create_field_row("experiment_difficulty", self.experiment_difficulty_combo, "experiment_difficulty_desc")
         self.synthetic_density_row = self._create_field_row("synthetic_density", self.synthetic_density_combo, "synthetic_density_desc")
         self.synthetic_blocks_row = self._create_field_row("synthetic_blocks", self.synthetic_blocks_spin, "synthetic_blocks_desc")
@@ -1750,7 +1763,9 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_separator(),
             self.experiment_participant_id_row,
             self._create_separator(),
-            self.experiment_trials_row,
+            self.experiment_realistic_trials_row,
+            self._create_separator(),
+            self.experiment_fitts_trials_row,
             self._create_separator(),
             self.experiment_difficulty_row,
             self._create_separator(),
@@ -1877,8 +1892,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.usage_test_button.clicked.connect(lambda: self._set_usage_mode("test", navigate=True))
         self.usage_baseline_button.clicked.connect(lambda: self._set_baseline_usage_mode(navigate=True))
         self.usage_experiment_button.clicked.connect(lambda: self._set_usage_mode("experiment", navigate=True))
-        self.experiment_realistic_button.clicked.connect(lambda: self._set_experiment_protocol("realistic"))
-        self.experiment_comparative_button.clicked.connect(lambda: self._set_experiment_protocol("comparative"))
+        self.experiment_realistic_button.clicked.connect(lambda: self._set_comparative_run_mode("test"))
+        self.experiment_comparative_button.clicked.connect(lambda: self._set_comparative_run_mode("full"))
         self.comparative_test_button.clicked.connect(lambda: self._set_comparative_run_mode("test"))
         self.comparative_full_button.clicked.connect(lambda: self._set_comparative_run_mode("full"))
         self.mode_selector_button.clicked.connect(self._handle_mode_selection)
@@ -1929,6 +1944,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_participant_id_edit.textChanged.connect(self._handle_runtime_option_change)
         self.baseline_participant_id_edit.textChanged.connect(self._handle_runtime_option_change)
         self.experiment_trials_spin.valueChanged.connect(self._handle_runtime_option_change)
+        self.fitts_trials_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.experiment_difficulty_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
         self.synthetic_density_combo.currentIndexChanged.connect(self._handle_runtime_option_change)
         self.synthetic_blocks_spin.valueChanged.connect(self._handle_runtime_option_change)
@@ -1964,6 +1980,7 @@ class ControlPanel(QtWidgets.QWidget):
         self._register_numeric_field(self.rake_gaze_offset_y_spin, "rake_gaze_offset_y")
         self._register_numeric_field(self.rake_selection_hold_spin, "rake_selection_hold")
         self._register_numeric_field(self.experiment_trials_spin, "experiment_trials")
+        self._register_numeric_field(self.fitts_trials_spin, "fitts_trials")
         self._register_numeric_field(self.experiment_countdown_spin, "experiment_countdown")
         self._register_numeric_field(self.experiment_max_clicks_spin, "experiment_max_clicks")
         self._register_numeric_field(self.synthetic_blocks_spin, "synthetic_blocks")
@@ -2096,12 +2113,24 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_task_type_combo.setCurrentText(task_type)
         self.experiment_task_type_combo.blockSignals(previous)
 
+    @staticmethod
+    def _combo_data(combo: QtWidgets.QComboBox) -> str:
+        data = combo.currentData()
+        return str(data) if data is not None else combo.currentText()
+
+    @staticmethod
+    def _set_combo_data(combo: QtWidgets.QComboBox, value: str):
+        index = combo.findData(value)
+        if index < 0:
+            index = combo.findText(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
     def _refresh_experiment_protocol_buttons(self):
         if not hasattr(self, "experiment_realistic_button"):
             return
-        task_type = self.experiment_task_type_combo.currentText()
-        self.experiment_realistic_button.setChecked(task_type == "realistic")
-        self.experiment_comparative_button.setChecked(task_type == "comparative")
+        self.experiment_realistic_button.setChecked(self._comparative_run_mode == "test")
+        self.experiment_comparative_button.setChecked(self._comparative_run_mode == "full")
 
     def _refresh_comparative_run_buttons(self):
         if not hasattr(self, "comparative_test_button"):
@@ -2126,64 +2155,40 @@ class ControlPanel(QtWidgets.QWidget):
         return "control_our_task"
 
     def _update_experiment_trials_text(self, task_type: str | None = None):
-        if not hasattr(self, "experiment_trials_row"):
+        if not hasattr(self, "experiment_realistic_trials_row"):
             return
-        if task_type is None:
-            task_type = self.experiment_task_type_combo.currentText()
-        comparative_part = (
-            self.comparative_task_part_combo.currentText()
-            if hasattr(self, "comparative_task_part_combo")
-            else DEFAULT_COMPARATIVE_TASK_PART
-        )
-        is_control_protocol = (
-            task_type == "comparative"
-            or (
-                self._usage_mode == "experiment"
-                and comparative_part in {"control_our_task", "control_fitts_synthetic"}
-                and self._comparative_run_mode in {"test", "full"}
-            )
-            or (
-                self._usage_mode == "experiment"
-                and hasattr(self, "experiment_trials_spin")
-                and self.experiment_trials_spin.value() == DEFAULT_CONTROL_EXPERIMENT_TRIALS
-            )
-        )
-        if is_control_protocol:
-            text_key = "experiment_trials_control"
-            description_key = "experiment_trials_control_desc"
-        else:
-            text_key = "experiment_trials_patient"
-            description_key = "experiment_trials_patient_desc"
-
-        label = getattr(self.experiment_trials_row, "setting_label", None)
-        description = getattr(self.experiment_trials_row, "setting_description", None)
-        dynamic_widgets = {widget for widget in (label, description) if widget is not None}
-        if dynamic_widgets:
-            self._text_bindings = [
-                binding
-                for binding in self._text_bindings
-                if binding[0] not in dynamic_widgets
-            ]
-        if label is not None:
-            label.setText(self._text(text_key))
-        if description is not None:
-            description.setText(self._text(description_key))
-
-        for widget in getattr(self.experiment_trials_row, "help_widgets", []):
-            self._help_prompt_keys[widget] = (text_key, description_key)
-        self._focus_prompt_keys[self.experiment_trials_spin] = text_key
+        for row, text_key, description_key, widget in (
+            (
+                self.experiment_realistic_trials_row,
+                "experiment_realistic_trials",
+                "experiment_realistic_trials_desc",
+                self.realistic_trials_spin,
+            ),
+            (
+                self.experiment_fitts_trials_row,
+                "experiment_fitts_trials",
+                "experiment_fitts_trials_desc",
+                self.fitts_trials_spin,
+            ),
+        ):
+            label = getattr(row, "setting_label", None)
+            description = getattr(row, "setting_description", None)
+            if label is not None:
+                label.setText(self._text(text_key))
+            if description is not None:
+                description.setText(self._text(description_key))
+            for help_widget in getattr(row, "help_widgets", []):
+                self._help_prompt_keys[help_widget] = (text_key, description_key)
+            self._focus_prompt_keys[widget] = text_key
 
     def _set_experiment_protocol(self, task_type: str):
         task_type = task_type if task_type in {"realistic", "comparative"} else "realistic"
         self._set_experiment_task_type(task_type)
         if task_type == "comparative":
-            self.comparative_task_part_combo.setCurrentText(self._recommended_comparative_task_part())
+            self._set_combo_data(self.comparative_task_part_combo, self._recommended_comparative_task_part())
             self._refresh_comparative_run_buttons()
-        self.experiment_trials_spin.setValue(
-            DEFAULT_CONTROL_EXPERIMENT_TRIALS
-            if task_type == "comparative"
-            else DEFAULT_PATIENT_EXPERIMENT_TRIALS
-        )
+        self.experiment_trials_spin.setValue(DEFAULT_REALISTIC_EXPERIMENT_TRIALS)
+        self.fitts_trials_spin.setValue(DEFAULT_FITTS_EXPERIMENT_TRIALS)
         self._refresh_experiment_protocol_buttons()
         self._update_experiment_trials_text(task_type)
         self._update_mode_dependent_fields()
@@ -2200,9 +2205,10 @@ class ControlPanel(QtWidgets.QWidget):
     def _set_comparative_run_mode(self, mode: str):
         self._comparative_run_mode = mode if mode in {"test", "full"} else DEFAULT_COMPARATIVE_RUN_MODE
         self._set_experiment_task_type("comparative")
-        self.experiment_trials_spin.setValue(DEFAULT_CONTROL_EXPERIMENT_TRIALS)
+        self.experiment_trials_spin.setValue(DEFAULT_REALISTIC_EXPERIMENT_TRIALS)
+        self.fitts_trials_spin.setValue(DEFAULT_FITTS_EXPERIMENT_TRIALS)
         if self._comparative_run_mode == "test":
-            self.comparative_task_part_combo.setCurrentText(self._recommended_comparative_task_part())
+            self._set_combo_data(self.comparative_task_part_combo, self._recommended_comparative_task_part())
         self._refresh_experiment_protocol_buttons()
         self._refresh_comparative_run_buttons()
         self._update_experiment_trials_text("comparative")
@@ -2269,14 +2275,25 @@ class ControlPanel(QtWidgets.QWidget):
         comparative_full_mode = comparative_task and self._comparative_run_mode == "full"
         comparative_test_mode = comparative_task and self._comparative_run_mode == "test"
         comparative_part = (
-            self.comparative_task_part_combo.currentText()
+            self._combo_data(self.comparative_task_part_combo)
             if getattr(self, "comparative_task_part_combo", None) is not None
             else DEFAULT_COMPARATIVE_TASK_PART
         )
         comparative_synthetic_task = comparative_test_mode and comparative_part == "control_fitts_synthetic"
+        comparative_realistic_task = comparative_test_mode and comparative_part == "control_our_task"
         synthetic_full_session = usage_experiment and synthetic_task
         comparative_full_session = usage_experiment and comparative_task
         managed_full_session = synthetic_full_session or comparative_full_session
+        realistic_trials_visible = experiment_enabled and (
+            comparative_full_mode
+            or comparative_realistic_task
+            or (not comparative_task and not synthetic_task)
+        )
+        fitts_trials_visible = experiment_enabled and (
+            synthetic_task
+            or comparative_synthetic_task
+            or comparative_full_mode
+        )
         technique_options_visible = not usage_experiment and not baseline_enabled
         experiment_session_enabled = (
             usage_experiment or (experiment_enabled and self.experiment_session_enabled_cb.isChecked())
@@ -2339,6 +2356,10 @@ class ControlPanel(QtWidgets.QWidget):
             )
         if getattr(self, "comparative_task_part_row", None) is not None:
             self.comparative_task_part_row.setVisible(experiment_enabled and comparative_test_mode)
+        if getattr(self, "experiment_realistic_trials_row", None) is not None:
+            self.experiment_realistic_trials_row.setVisible(realistic_trials_visible)
+        if getattr(self, "experiment_fitts_trials_row", None) is not None:
+            self.experiment_fitts_trials_row.setVisible(fitts_trials_visible)
         if getattr(self, "synthetic_density_row", None) is not None:
             self.synthetic_density_row.setVisible(experiment_enabled and synthetic_task and not synthetic_full_session)
         if getattr(self, "synthetic_blocks_row", None) is not None:
@@ -2371,6 +2392,7 @@ class ControlPanel(QtWidgets.QWidget):
             self.experiment_participant_id_edit,
             self.experiment_task_type_combo,
             self.experiment_trials_spin,
+            self.fitts_trials_spin,
             self.experiment_difficulty_combo,
             self.synthetic_density_combo,
             self.synthetic_blocks_spin,
@@ -2384,6 +2406,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.experiment_data_path_edit.setEnabled(experiment_enabled and not synthetic_task and not comparative_synthetic_task)
         self.experiment_browse_button.setEnabled(experiment_enabled and not synthetic_task and not comparative_synthetic_task)
         self.comparative_task_part_combo.setEnabled(experiment_enabled and comparative_test_mode)
+        self.realistic_trials_spin.setEnabled(realistic_trials_visible)
+        self.fitts_trials_spin.setEnabled(fitts_trials_visible)
         self.experiment_session_enabled_cb.setEnabled(experiment_enabled and not synthetic_task and not comparative_task)
         self.experiment_participant_id_edit.setEnabled(participant_id_visible)
         self.experiment_difficulty_combo.setEnabled(
@@ -2835,6 +2859,9 @@ error "No supported browser window found"
         switch_off_bg = "#d1d1d6"
         switch_off_border = "#c7c7cc"
         switch_on_bg = "#34c759"
+        task_dropdown_arrow = (
+            Path(__file__).resolve().parent / "assets" / "task_dropdown_arrows.svg"
+        ).as_posix()
 
         if self.high_contrast_cb.isChecked():
             bg_main = "#ffffff"
@@ -3128,6 +3155,18 @@ error "No supported browser window found"
                 background: transparent;
             }}
 
+            QComboBox#TaskDropdown::drop-down {{
+                width: 34px;
+                border: none;
+                background: transparent;
+            }}
+
+            QComboBox#TaskDropdown::down-arrow {{
+                image: url({task_dropdown_arrow});
+                width: 18px;
+                height: 18px;
+            }}
+
             QComboBox QAbstractItemView {{
                 background: {input_bg};
                 border: 1px solid {border_soft};
@@ -3214,6 +3253,7 @@ error "No supported browser window found"
             self.rake_gaze_offset_y_spin,
             self.rake_selection_hold_spin,
             self.experiment_trials_spin,
+            self.fitts_trials_spin,
             self.synthetic_blocks_spin,
             self.experiment_countdown_spin,
             self.experiment_max_clicks_spin,
@@ -3269,10 +3309,12 @@ error "No supported browser window found"
             rake_calibration_status=self._rake_calibration_status,
             experiment_enabled=usage_experiment or self.experiment_enabled_cb.isChecked(),
             experiment_task_type=self.experiment_task_type_combo.currentText(),
-            comparative_task_part=self.comparative_task_part_combo.currentText(),
+            comparative_task_part=self._combo_data(self.comparative_task_part_combo),
             comparative_run_mode=self._comparative_run_mode,
             experiment_data_dir=self.experiment_data_path_edit.text().strip() or DEFAULT_EXPERIMENT_DATA_DIR,
-            experiment_trials=self.experiment_trials_spin.value(),
+            experiment_trials=self.realistic_trials_spin.value(),
+            realistic_trials=self.realistic_trials_spin.value(),
+            fitts_trials=self.fitts_trials_spin.value(),
             experiment_difficulty=self.experiment_difficulty_combo.currentText(),
             synthetic_density=self.synthetic_density_combo.currentText(),
             synthetic_blocks=self.synthetic_blocks_spin.value(),
@@ -3341,10 +3383,11 @@ error "No supported browser window found"
             if cfg.experiment_task_type in {"realistic", "synthetic_fitts", "comparative"}
             else DEFAULT_EXPERIMENT_TASK_TYPE
         )
-        self.comparative_task_part_combo.setCurrentText(
+        self._set_combo_data(
+            self.comparative_task_part_combo,
             cfg.comparative_task_part
             if cfg.comparative_task_part in {"control_our_task", "control_fitts_synthetic"}
-            else DEFAULT_COMPARATIVE_TASK_PART
+            else DEFAULT_COMPARATIVE_TASK_PART,
         )
         self._comparative_run_mode = (
             cfg.comparative_run_mode
@@ -3352,7 +3395,11 @@ error "No supported browser window found"
             else DEFAULT_COMPARATIVE_RUN_MODE
         )
         self.experiment_data_path_edit.setText(cfg.experiment_data_dir or DEFAULT_EXPERIMENT_DATA_DIR)
-        self.experiment_trials_spin.setValue(cfg.experiment_trials)
+        legacy_trials = int(getattr(cfg, "experiment_trials", DEFAULT_EXPERIMENT_TRIALS))
+        realistic_trials = int(getattr(cfg, "realistic_trials", legacy_trials))
+        fitts_trials = int(getattr(cfg, "fitts_trials", legacy_trials))
+        self.realistic_trials_spin.setValue(max(1, min(1000, realistic_trials)))
+        self.fitts_trials_spin.setValue(max(1, min(1000, fitts_trials)))
         self.experiment_difficulty_combo.setCurrentText(
             cfg.experiment_difficulty if cfg.experiment_difficulty in {"easy", "medium", "hard", "mixed"} else DEFAULT_EXPERIMENT_DIFFICULTY
         )
@@ -3461,7 +3508,9 @@ error "No supported browser window found"
         cfg.comparative_task_part = DEFAULT_COMPARATIVE_TASK_PART
         cfg.comparative_run_mode = DEFAULT_COMPARATIVE_RUN_MODE
         cfg.experiment_data_dir = DEFAULT_EXPERIMENT_DATA_DIR
-        cfg.experiment_trials = DEFAULT_EXPERIMENT_TRIALS
+        cfg.experiment_trials = DEFAULT_REALISTIC_EXPERIMENT_TRIALS
+        cfg.realistic_trials = DEFAULT_REALISTIC_EXPERIMENT_TRIALS
+        cfg.fitts_trials = DEFAULT_FITTS_EXPERIMENT_TRIALS
         cfg.experiment_difficulty = DEFAULT_EXPERIMENT_DIFFICULTY
         cfg.synthetic_density = DEFAULT_SYNTHETIC_DENSITY
         cfg.synthetic_blocks = DEFAULT_SYNTHETIC_BLOCKS
@@ -3665,7 +3714,7 @@ error "No supported browser window found"
             "--data-dir",
             cfg.experiment_data_dir,
             "--trials",
-            str(cfg.experiment_trials),
+            str(cfg.realistic_trials),
             "--difficulty",
             cfg.experiment_difficulty,
             "--countdown",
@@ -3734,8 +3783,8 @@ error "No supported browser window found"
                 cmd.append("--ninja-snap-system-cursor-to-active")
             if cfg.rake_use_calibration:
                 cmd.append("--ninja-auto-calibrate")
-            if not cfg.rake_without_targetfinder:
-                cmd.append("--ninja-with-targetfinder")
+            # Experimental tasks use ground-truth annotations / generated targets,
+            # not live TargetFinder/YOLO detections.
         return cmd
 
     def _build_synthetic_fitts_command(self, cfg: PanelConfig):
@@ -3754,7 +3803,7 @@ error "No supported browser window found"
             "--technique",
             technique,
             "--trials",
-            str(cfg.experiment_trials),
+            str(cfg.fitts_trials),
             "--difficulty",
             difficulty,
             "--density",
@@ -3823,8 +3872,8 @@ error "No supported browser window found"
                 cmd.append("--ninja-snap-system-cursor-to-active")
             if cfg.rake_use_calibration:
                 cmd.append("--ninja-auto-calibrate")
-            if not cfg.rake_without_targetfinder:
-                cmd.append("--ninja-with-targetfinder")
+            # Synthetic Fitts uses generated ground-truth targets,
+            # not live TargetFinder/YOLO detections.
         return cmd
 
     def _build_synthetic_fitts_session_command(self, cfg: PanelConfig, output_dir: Path | None = None):
@@ -3837,7 +3886,7 @@ error "No supported browser window found"
             "--participant",
             cfg.experiment_participant_id.strip() or DEFAULT_EXPERIMENT_PARTICIPANT_ID,
             "--trials-per-block",
-            str(cfg.experiment_trials),
+            str(cfg.fitts_trials),
             "--synthetic-blocks",
             str(cfg.synthetic_blocks),
             "--conditions-file",
@@ -3918,8 +3967,8 @@ error "No supported browser window found"
             cmd.append("--ninja-snap-system-cursor-to-active")
         if cfg.rake_use_calibration:
             cmd.append("--ninja-auto-calibrate")
-        if not cfg.rake_without_targetfinder:
-            cmd.append("--ninja-with-targetfinder")
+        # Synthetic Fitts sessions use generated ground-truth targets,
+        # not live TargetFinder/YOLO detections.
         return cmd
 
     def _build_comparative_session_command(self, cfg: PanelConfig):
@@ -3934,7 +3983,9 @@ error "No supported browser window found"
             "--data-dir",
             cfg.experiment_data_dir,
             "--trials-per-block",
-            str(cfg.experiment_trials),
+            str(cfg.realistic_trials),
+            "--fitts-trials-per-condition",
+            str(cfg.fitts_trials),
             "--synthetic-blocks",
             str(cfg.synthetic_blocks),
             "--conditions-file",
@@ -4015,8 +4066,8 @@ error "No supported browser window found"
             cmd.append("--ninja-snap-system-cursor-to-active")
         if cfg.rake_use_calibration:
             cmd.append("--ninja-auto-calibrate")
-        if not cfg.rake_without_targetfinder:
-            cmd.append("--ninja-with-targetfinder")
+        # Comparative sessions use ground-truth labels for both task families,
+        # not live TargetFinder/YOLO detections.
         return cmd
 
     def _build_experiment_session_command(self, cfg: PanelConfig, output_dir: Path | None = None):
@@ -4031,7 +4082,7 @@ error "No supported browser window found"
             "--data-dir",
             cfg.experiment_data_dir,
             "--trials-per-block",
-            str(cfg.experiment_trials),
+            str(cfg.realistic_trials),
             "--countdown",
             str(cfg.experiment_countdown),
             "--max-clicks",
@@ -4099,8 +4150,8 @@ error "No supported browser window found"
             cmd.append("--ninja-snap-system-cursor-to-active")
         if cfg.rake_use_calibration:
             cmd.append("--ninja-auto-calibrate")
-        if not cfg.rake_without_targetfinder:
-            cmd.append("--ninja-with-targetfinder")
+        # Realistic experimental sessions use annotation-control files,
+        # not live TargetFinder/YOLO detections.
         return cmd
 
     def _is_demo_running(self):

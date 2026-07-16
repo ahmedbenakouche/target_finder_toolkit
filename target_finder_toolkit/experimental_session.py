@@ -288,8 +288,8 @@ def task_runtime_args(args) -> list[str]:
         values.append("--ninja-snap-system-cursor-to-active")
     if args.ninja_auto_calibrate:
         values.append("--ninja-auto-calibrate")
-    if not args.ninja_without_targetfinder:
-        values.append("--ninja-with-targetfinder")
+    # Full experimental sessions use annotation-control files with known labels,
+    # not live TargetFinder/YOLO detections.
     return values
 
 
@@ -1377,7 +1377,7 @@ def main():
     parser.add_argument("--participant", required=True, help="Participant id, e.g. P01")
     parser.add_argument("--language", choices=["French", "English"], default="French", help="UI language for experimental screens")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Annotated dataset directory")
-    parser.add_argument("--trials-per-block", type=int, default=8, help="Trials per technique/difficulty block")
+    parser.add_argument("--trials-per-block", type=int, default=9, help="Trials per technique/difficulty block")
     parser.add_argument("--countdown", type=float, default=0.0, help="Countdown seconds passed to each block")
     parser.add_argument("--max-clicks", type=int, default=1, help="Maximum clicks per trial")
     parser.add_argument("--seed", type=int, default=None, help="Optional seed combined with participant id")

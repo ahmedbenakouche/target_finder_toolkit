@@ -60,14 +60,15 @@ def comparative_task_order(participant_id: str, seed: int | None = None) -> list
     return ["realistic", "synthetic_fitts"]
 
 
-def _base_session_args(args) -> list[str]:
+def _base_session_args(args, trials_per_block: int | None = None) -> list[str]:
+    trials = args.trials_per_block if trials_per_block is None else trials_per_block
     values = [
         "--language",
         args.language,
         "--participant",
         args.participant,
         "--trials-per-block",
-        str(args.trials_per_block),
+        str(trials),
         "--countdown",
         str(args.countdown),
         "--max-clicks",
@@ -92,7 +93,7 @@ def build_task_command(args, task_name: str, output_dir: Path) -> list[str]:
             sys.executable,
             "-m",
             "target_finder_toolkit.synthetic_fitts_session",
-            *_base_session_args(args),
+            *_base_session_args(args, args.fitts_trials_per_condition),
             "--synthetic-blocks",
             str(args.synthetic_blocks),
             "--conditions-file",
@@ -243,6 +244,12 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--language", choices=["French", "English"], default="French")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Annotated realistic screenshot dataset directory")
     parser.add_argument("--trials-per-block", type=int, default=DEFAULT_TRIALS)
+    parser.add_argument(
+        "--fitts-trials-per-condition",
+        type=int,
+        default=DEFAULT_TRIALS,
+        help="Repetitions per synthetic Fitts technique x ID x density condition",
+    )
     parser.add_argument("--synthetic-blocks", type=int, default=DEFAULT_SYNTHETIC_BLOCKS)
     parser.add_argument("--conditions-file", default=str(DEFAULT_CONDITIONS_FILE), help="CSV file containing ordered synthetic Fitts conditions")
     parser.add_argument("--countdown", type=float, default=DEFAULT_COUNTDOWN)
@@ -285,6 +292,7 @@ def run(args) -> int:
                 "task_order": order,
                 "order_rule": "odd_participants_synthetic_first_even_participants_realistic_first",
                 "trials_per_block": args.trials_per_block,
+                "fitts_trials_per_condition": args.fitts_trials_per_condition,
                 "synthetic_blocks": args.synthetic_blocks,
                 "conditions_file": str(args.conditions_file),
                 "comparative_log_group": "control_comparative",

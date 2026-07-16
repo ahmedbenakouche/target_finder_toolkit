@@ -63,7 +63,7 @@ except Exception:  # pragma: no cover - only available on macOS with PyObjC.
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TRIALS = 12
+DEFAULT_TRIALS = 9
 DEFAULT_COUNTDOWN = 0.0
 DEFAULT_MAX_CLICKS = 1
 DEFAULT_CURSOR_HZ = 30.0
