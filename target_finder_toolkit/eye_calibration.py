@@ -136,12 +136,6 @@ class EyeCalibration:
 
         if elapsed > self.SETTLE_SEC and self._frame_count < self.GAZE_RESULTS_PER_POINT:
             
-            if self._frame_count % 5 == 0:
-                print(
-                    f"[raw gaze] point={self._point_idx}, "
-                    f"norm_pog={getattr(gaze_result, 'norm_pog', None)}"
-                )
-
             if len(self._gaze_results) <= self._point_idx:
                 self._gaze_results.append([])
             self._gaze_results[self._point_idx].append(gaze_result)
