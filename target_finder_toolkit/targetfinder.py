@@ -165,7 +165,6 @@ class TargetFinder:
         self.interval      = float(_require_between("capture_interval", capture_interval, 0, 1e6))
         self.conf          = float(_require_between("confidence", confidence, 0.0, 1.0))
         self.iou           = float(_require_between("iou", iou, 0.0, 1.0))
-        self.imgsz         = int(imgsz)
 
         # Public snapshot used by the overlay: list of tuples (x, y, w, h, score, cls_id)
         self.detections = []
@@ -360,7 +359,7 @@ class TargetFinder:
         Returns:
             Detections with keys ``id, x, y, width, height, score, class_id, class_name``.
         """
-        results = self.model(img_bgr, conf=self.conf, iou=self.iou, imgsz=self.imgsz, verbose=False)[0]
+        results = self.model(img_bgr, conf=self.conf, iou=self.iou, verbose=False)[0]
         boxes = results.boxes.xyxy.cpu().numpy()
         scores = results.boxes.conf.cpu().numpy()
         class_ids = results.boxes.cls.cpu().numpy()
