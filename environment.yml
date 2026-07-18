@@ -1,0 +1,15 @@
+name: target-finder
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.11
+  - numpy
+  - opencv
+  - mss
+  - pyqt6
+  - pyautogui
+  - pynput
+  - pytorch::pytorch
+  - pip:
+    - ultralytics

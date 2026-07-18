@@ -28,13 +28,19 @@ classifiers = [
 ]
 keywords = ["yolo", "gui", "widgets", "detection", "hci"]
 
+[project.optional-dependencies]
+macos = [
+    "pyobjc-framework-Quartz>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+]
+
 [project.scripts]
 targetfinder-gui = "target_finder_toolkit.targetfinder:main"
 bubblecursor     = "target_finder_toolkit.bubblecursor:main"
 semanticpointing = "target_finder_toolkit.semanticpointing:main"
 
 [project.urls]
-Repository = "https://anonymous.4open.science/r/target_finder_toolkit-9A81/README.md"
+Repository = "https://github.com/ahmedbenakouche/target_finder_toolkit"
 Documentation = "https://zingy-biscuit-a4bc5c.netlify.app/"
 
 [tool.setuptools]

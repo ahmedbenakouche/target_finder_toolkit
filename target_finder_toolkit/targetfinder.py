@@ -25,8 +25,13 @@ import mss
 from ultralytics import YOLO
 from PyQt6 import QtWidgets, QtGui, QtCore
 import argparse
+import pyautogui
 
 __all__ = ["TargetFinder", "show_detections", "main"]
+
+
+class ScreenCaptureError(Exception):
+    pass
 
 # Mapping of class IDs to names
 CLASS_NAMES = {
@@ -160,6 +165,7 @@ class TargetFinder:
         self.interval      = float(_require_between("capture_interval", capture_interval, 0, 1e6))
         self.conf          = float(_require_between("confidence", confidence, 0.0, 1.0))
         self.iou           = float(_require_between("iou", iou, 0.0, 1.0))
+        self.imgsz         = int(imgsz)
 
         # Public snapshot used by the overlay: list of tuples (x, y, w, h, score, cls_id)
         self.detections = []
@@ -170,7 +176,8 @@ class TargetFinder:
 
         # Control flags for the background loop
         self._stop = False
-        self.overlay_window = None  # will be set by OverlayWindow
+        self.hide_overlay_during_capture = True
+        self.overlay_window = {}  # screen_key -> OverlayWindow, set by OverlayWindow or caller
 
         # Tracking state to keep stable IDs between frames
         self._prev_det_dicts = []   # previous frame detection dicts (with "id")
@@ -227,6 +234,41 @@ class TargetFinder:
         self._with_frame = bool(with_frame)
         self._diff_iou = float(_require_between("diff_iou", diff_iou, 0.0, 1.0))
 
+    @staticmethod
+    def get_monitor_from_mouse(sct):
+        """Return the mss monitor dict and its 1-based index for the screen
+        that currently contains the mouse pointer."""
+        x, y = pyautogui.position()
+        for i, monitor in enumerate(sct.monitors[1:], start=1):
+            if (
+                monitor["left"] <= x < monitor["left"] + monitor["width"]
+                and monitor["top"] <= y < monitor["top"] + monitor["height"]
+            ):
+                return monitor, i
+        raise ScreenCaptureError("Mouse is not on any known monitor")
+
+    def match_monitor_to_overlay(self, monitor):
+        """Match an mss monitor dict to the corresponding OverlayWindow.
+
+        Returns:
+            tuple: (active_overlay, list_of_other_overlays)
+        """
+        other_overlays = []
+        active_overlay = None
+        for _, overlay in self.overlay_window.items():
+            if (
+                hasattr(overlay, "screen_geometry")
+                and overlay.screen_geometry.x() == monitor["left"]
+                and overlay.screen_geometry.y() == monitor["top"]
+                and overlay.screen_geometry.width() == monitor["width"]
+                and overlay.screen_geometry.height() == monitor["height"]
+            ):
+                active_overlay = overlay
+            else:
+                other_overlays.append(overlay)
+        if active_overlay is None:
+            raise ScreenCaptureError("No overlay matches the active monitor")
+        return active_overlay, other_overlays
 
     def start(self):
         """Start the capture+inference loop in a separate thread."""
@@ -309,6 +351,28 @@ class TargetFinder:
         removed = [pd for j, pd in enumerate(prev) if j not in used_prev]
         return added, removed
 
+    def detect_array(self, img_bgr):
+        """Run detection on a BGR numpy array.
+
+        Args:
+            img_bgr (np.ndarray): BGR image array (H, W, 3).
+
+        Returns:
+            Detections with keys ``id, x, y, width, height, score, class_id, class_name``.
+        """
+        results = self.model(img_bgr, conf=self.conf, iou=self.iou, imgsz=self.imgsz, verbose=False)[0]
+        boxes = results.boxes.xyxy.cpu().numpy()
+        scores = results.boxes.conf.cpu().numpy()
+        class_ids = results.boxes.cls.cpu().numpy()
+        detections = self._build_dicts(
+            boxes_xyxy=boxes, scores=scores, class_ids=class_ids,
+            scale_x=1.0, scale_y=1.0,
+        )
+        for d in detections:
+            d["id"] = int(self._next_id)
+            self._next_id += 1
+        return detections
+
     def detect_image(self, image_path, save_annotated=False, save_json=False):
         """Run detection on a single image and optionally save results.
 
@@ -350,13 +414,26 @@ class TargetFinder:
             self._next_id += 1
 
         # Optionally save annotated image (PNG)
+        # Colorblind-safe palette (Wong 2011) — BGR order for OpenCV
+        _ANNOTATE_PALETTE = {
+            0: (0, 159, 230),    # Button → Orange
+            1: (233, 180, 86),   # ToggleButton → Sky Blue
+            2: (115, 158, 0),    # Hyperlink → Bluish Green
+            3: (66, 228, 240),   # Text → Yellow
+            4: (178, 114, 0),    # TextInput → Blue
+            5: (0, 94, 213),     # Slider → Vermillion
+        }
         if save_annotated:
             annotated = img_bgr.copy()
             for d in detections:
                 x, y, w, h = int(d["x"]), int(d["y"]), int(d["width"]), int(d["height"])
-                cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                color = _ANNOTATE_PALETTE.get(d["class_id"], (0, 255, 0))
+                cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 2)
                 label = f"{d['class_name']}:{d['score']:.2f}"
-                cv2.putText(annotated, label, (x, max(0, y - 5)),
+                # 라벨 배경 (가독성)
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(annotated, (x, max(0, y - th - 6)), (x + tw + 4, max(0, y - 1)), color, -1)
+                cv2.putText(annotated, label, (x + 2, max(0, y - 4)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
             out_path = image_path.rsplit(".", 1)[0] + "_annotated.png"
@@ -374,34 +451,77 @@ class TargetFinder:
 
     def _capture_loop(self):
         """Internal loop: capture screen, run inference, invoke callback if needed."""
-        # Create an MSS grabber and select primary monitor
         sct = mss.mss()
-        monitor = sct.monitors[0]
-        prev_small = None     # last low-res grayscale for change detection
+        prev_small = None
 
         while not self._stop:
+            # Determine which monitor to capture
+            try:
+                monitor, _ = self.get_monitor_from_mouse(sct)
+            except ScreenCaptureError:
+                monitor = sct.monitors[0]
+
             # Low-res screenshot for change detection
             frame = np.array(sct.grab(monitor))[..., :3]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (64, 64), interpolation=cv2.INTER_AREA)
 
-            # Trigger detection only if significant screen change is detected
             if prev_small is None or cv2.norm(small, prev_small, cv2.NORM_L2) > self.change_thresh:
+                # Activate/deactivate per-screen overlays if available
+                active_overlay = None
+                other_overlays = []
+                has_per_screen = (
+                    len(self.overlay_window) > 1
+                    and any(hasattr(ov, "screen_geometry") for ov in self.overlay_window.values())
+                )
+                if has_per_screen:
+                    try:
+                        active_overlay, other_overlays = self.match_monitor_to_overlay(monitor)
+                        active_overlay.activate()
+                        for ov in other_overlays:
+                            ov.reset()
+                    except ScreenCaptureError:
+                        pass
+
                 prev_small = small.copy()
 
-                # Hide the overlay before full-resolution capture
-                if self.overlay_window:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "hide",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
-                time.sleep(0.03)  # allow time for the overlay to disappear
+                # Hide overlay(s) before full-resolution capture when needed
+                target_ov = active_overlay if active_overlay else None
+                if self.overlay_window and self.hide_overlay_during_capture:
+                    if target_ov:
+                        QtCore.QMetaObject.invokeMethod(
+                            target_ov, "hide",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                        )
+                    else:
+                        for ov in self.overlay_window.values():
+                            QtCore.QMetaObject.invokeMethod(
+                                ov, "hide",
+                                QtCore.Qt.ConnectionType.QueuedConnection,
+                            )
+                    time.sleep(0.03)
 
-                # Full-resolution capture without overlay
+                # Full-resolution capture
                 full = np.array(sct.grab(monitor))[..., :3]
 
-                # Re-show the overlay
-                if self.overlay_window:
-                    QtCore.QMetaObject.invokeMethod(self.overlay_window, "show",
-                        QtCore.Qt.ConnectionType.QueuedConnection)
+                # Re-show overlay(s)
+                if self.overlay_window and self.hide_overlay_during_capture:
+                    if target_ov:
+                        QtCore.QMetaObject.invokeMethod(
+                            target_ov, "show",
+                            QtCore.Qt.ConnectionType.QueuedConnection,
+                        )
+                    else:
+                        for ov in self.overlay_window.values():
+                            QtCore.QMetaObject.invokeMethod(
+                                ov, "show",
+                                QtCore.Qt.ConnectionType.QueuedConnection,
+                            )
+
+                # Reset non-active overlays (clear leftover detections)
+                if has_per_screen and active_overlay:
+                    for ov in other_overlays:
+                        ov.reset()
 
                 # YOLO inference
                 results = self.model(full, conf=self.conf, iou=self.iou, end2end=False, verbose = False)[0]
@@ -411,82 +531,89 @@ class TargetFinder:
 
                 # DPI-aware scaling
                 h_phy, w_phy = full.shape[:2]
-                screen_geom = QtWidgets.QApplication.primaryScreen().geometry()
+                if active_overlay and hasattr(active_overlay, "screen_geometry"):
+                    screen_geom = active_overlay.screen_geometry
+                else:
+                    screen_geom = QtWidgets.QApplication.primaryScreen().geometry()
                 self.sx = screen_geom.width() / w_phy
                 self.sy = screen_geom.height() / h_phy
 
-                # Store detections as list of tuples for the overlay painter
-                self.detections = [(int(x1 * self.sx), int(y1 * self.sy), int((x2 - x1) * self.sx), int((y2 - y1) * self.sy), float(score),
-                                    int(cls_id)) for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, class_ids)]
+                # Store detections as tuples for the overlay painter
+                self.detections = [
+                    (int(x1 * self.sx), int(y1 * self.sy),
+                     int((x2 - x1) * self.sx), int((y2 - y1) * self.sy),
+                     float(score), int(cls_id))
+                    for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, class_ids)
+                ]
 
-                # Notify callback with dicts and (optionally) the frame
+                # Notify callback
                 if self._on_change:
                     det_dicts = self._build_dicts(boxes, scores, class_ids, self.sx, self.sy)
                     added, removed = self._assign_ids_and_diff(self._prev_det_dicts, det_dicts)
                     frame_to_send = None
                     if self._with_frame:
-                        frame_to_send = cv2.resize(full, (screen_geom.width(), screen_geom.height()), interpolation=cv2.INTER_AREA)
+                        frame_to_send = cv2.resize(
+                            full, (screen_geom.width(), screen_geom.height()),
+                            interpolation=cv2.INTER_AREA,
+                        )
                     try:
                         self._on_change(det_dicts, added, removed, frame_to_send)
                     except Exception:
                         pass
-                    # Keep current detections for next-frame tracking
                     self._prev_det_dicts = det_dicts
 
-
-            # Pause to limit loop frequency
-            # Prevents saturating RAM and CPU with too many captures
-            # On very powerful machines with lots of RAM we can set self.interval = 0
             time.sleep(self.interval)
 
 
 class OverlayWindow(QtWidgets.QWidget):
-    # Transparent full-screen overlay window for drawing bounding boxes. Colors are assigned per class ID.
     PALETTE = [
-        QtGui.QColor(0, 255, 0, 200),    # Button → green
-        QtGui.QColor(255, 0, 0, 200),    # ToggleButton → red
-        QtGui.QColor(0, 0, 255, 200),    # Hyperlink → blue
-        QtGui.QColor(255, 255, 0, 200),  # Text → yellow
-        QtGui.QColor(255, 0, 255, 200),  # TextInput → magenta
-        QtGui.QColor(0, 255, 255, 200),  # Slider → cyan
+        QtGui.QColor(0, 255, 0, 200),    # Button
+        QtGui.QColor(255, 0, 0, 200),    # ToggleButton
+        QtGui.QColor(0, 0, 255, 200),    # Hyperlink
+        QtGui.QColor(255, 255, 0, 200),  # Text
+        QtGui.QColor(255, 0, 255, 200),  # TextInput
+        QtGui.QColor(0, 255, 255, 200),  # Slider
     ]
 
-    def __init__(self, detector: TargetFinder):
-        # Construct an always-on-top, click-through, transparent overlay.
+    def __init__(self, detector: TargetFinder, screen: QtGui.QScreen = None):
         super().__init__()
         self.detector = detector
+        self._is_macos = sys.platform == "darwin"
+        self.active = True
 
-        # Link overlay to the detector so it can hide/show the window during capture
-        detector.overlay_window = self
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
 
-        # Full-screen geometry (Qt DPI-aware)
-        geom = QtWidgets.QApplication.primaryScreen().geometry()
-        self.setGeometry(geom)
+        # Register in detector's overlay dict
+        self.detector.overlay_window[str(screen.name())] = self
 
-        # Window flags for frameless, always-on-top, click-through & transparent
+        # Per-screen geometry
+        self.setScreen(screen)
+        self.screen_geometry = screen.geometry()
+        self.resize(self.screen_geometry.size())
+
+        # Window flags
         flags = (
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
-            | QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.WindowTransparentForInput
         )
+        if not self._is_macos:
+            flags |= QtCore.Qt.WindowType.Tool
         if sys.platform.startswith("linux"):
-            # Avoid window manager interference on some X11 setups
             flags |= QtCore.Qt.WindowType.X11BypassWindowManagerHint
 
         self.setWindowFlags(flags)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # Start the detection loop (background thread)
-        self.detector.start()
-
-        # refresh to update the overlay
+        # Refresh timer
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.update)
-        self._timer.start(10)  # 10 ms
+        self._timer.start(10)
 
     def paintEvent(self, event):
-        # Paint bounding boxes and scores on the transparent overlay.
+        if not self.active:
+            return
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -497,7 +624,6 @@ class OverlayWindow(QtWidgets.QWidget):
             painter.setPen(pen)
             painter.drawRect(x, y, w, h)
 
-            # Label
             label = f"{score:.2f}"
             fm = painter.fontMetrics()
             tw, th = fm.horizontalAdvance(label), fm.height()
@@ -505,6 +631,39 @@ class OverlayWindow(QtWidgets.QWidget):
             painter.drawText(x + 2, y - 2, label)
 
         painter.end()
+
+    def activate(self):
+        self.active = True
+
+    def reset(self):
+        self.active = False
+        self.update()
+
+
+class MultiMonitorOverlay:
+    """Creates one OverlayWindow per screen and starts detection."""
+
+    def __init__(self, app: QtWidgets.QApplication, detector: TargetFinder):
+        self.overlays = []
+        for screen in app.screens():
+            g = screen.geometry()
+            overlay = OverlayWindow(detector, screen)
+            self.overlays.append((overlay, g.x(), g.y()))
+        self.detector = detector
+        self.detector.start()
+
+    def show(self):
+        for overlay, xshift, yshift in self.overlays:
+            g = overlay.screen_geometry
+            overlay.show()
+            overlay.move(xshift, yshift)
+            overlay.resize(g.width(), g.height())
+            overlay.raise_()
+            overlay.activateWindow()
+
+    def hide(self):
+        for overlay, _, _ in self.overlays:
+            overlay.hide()
 
 
 def show_detections(detector: TargetFinder):
@@ -514,7 +673,7 @@ def show_detections(detector: TargetFinder):
         detector (TargetFinder): The detector instance providing the detections.
     """
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    ov  = OverlayWindow(detector)
+    ov = MultiMonitorOverlay(app, detector)
     ov.show()
     signal.signal(signal.SIGINT, lambda sig, frame: QtWidgets.QApplication.quit())
     sys.exit(app.exec())
@@ -535,7 +694,6 @@ def main():
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     args = parser.parse_args()
 
-    # Instantiate detector and start overlay
     det = TargetFinder(args.model, args.change_thresh, args.capture_interval, args.confidence, args.iou)
     show_detections(det)
 
