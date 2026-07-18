@@ -235,6 +235,7 @@ def add_session_technique_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--ninja-snap-system-cursor-to-active", action="store_true")
     parser.add_argument("--ninja-calib-points", type=int, choices=[5, 9, 13], default=5)
     parser.add_argument("--ninja-auto-calibrate", action="store_true")
+    parser.add_argument("--ninja-without-targetfinder", dest="ninja_without_targetfinder", action="store_true")
     parser.add_argument("--ninja-with-targetfinder", dest="ninja_without_targetfinder", action="store_false")
     parser.set_defaults(ninja_without_targetfinder=True)
     parser.add_argument("--technique-log-cursor-hz", type=float, default=30.0)
@@ -290,6 +291,10 @@ def task_runtime_args(args) -> list[str]:
         values.append("--ninja-auto-calibrate")
     # Full experimental sessions use annotation-control files with known labels,
     # not live TargetFinder/YOLO detections.
+    if getattr(args, "ninja_without_targetfinder", True):
+        values.append("--ninja-without-targetfinder")
+    else:
+        values.append("--ninja-with-targetfinder")
     return values
 
 

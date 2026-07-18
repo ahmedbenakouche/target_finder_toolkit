@@ -1900,6 +1900,7 @@ def main():
     parser.add_argument("--ninja-snap-system-cursor-to-active", action="store_true", help="Move the native cursor to the active Ninja cursor")
     parser.add_argument("--ninja-calib-points", type=int, choices=[5, 9, 13], default=5, help="Ninja calibration point count")
     parser.add_argument("--ninja-auto-calibrate", action="store_true", help="Start Ninja calibration automatically")
+    parser.add_argument("--ninja-without-targetfinder", dest="ninja_without_targetfinder", action="store_true", help="Disable TargetFinder detections inside Ninja Cursors")
     parser.add_argument("--ninja-with-targetfinder", dest="ninja_without_targetfinder", action="store_false", help="Enable TargetFinder detections inside Ninja Cursors")
     parser.set_defaults(ninja_without_targetfinder=True)
     args = parser.parse_args()

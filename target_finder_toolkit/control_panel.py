@@ -3724,8 +3724,9 @@ error "No supported browser window found"
             ]
             if cfg.rake_lock_on_dwell:
                 cmd.append("--ninja-lock-on-dwell")
-            if not cfg.rake_show_gaze:
-                cmd.append("--ninja-hide-gaze-point")
+            # The tester gaze marker is only for calibration/debugging and must
+            # not carry over into experimental trials.
+            cmd.append("--ninja-hide-gaze-point")
             if not cfg.rake_show_debug_status:
                 cmd.append("--ninja-hide-debug-status")
             if cfg.rake_snap_system_cursor:
@@ -3813,8 +3814,9 @@ error "No supported browser window found"
             ]
             if cfg.rake_lock_on_dwell:
                 cmd.append("--ninja-lock-on-dwell")
-            if not cfg.rake_show_gaze:
-                cmd.append("--ninja-hide-gaze-point")
+            # The tester gaze marker is only for calibration/debugging and must
+            # not carry over into experimental trials.
+            cmd.append("--ninja-hide-gaze-point")
             if not cfg.rake_show_debug_status:
                 cmd.append("--ninja-hide-debug-status")
             if cfg.rake_snap_system_cursor:
@@ -3906,8 +3908,9 @@ error "No supported browser window found"
             cmd.append("--semantic-disable-accel")
         if cfg.rake_lock_on_dwell:
             cmd.append("--ninja-lock-on-dwell")
-        if not cfg.rake_show_gaze:
-            cmd.append("--ninja-hide-gaze-point")
+        # The tester gaze marker is only for calibration/debugging and must
+        # not carry over into experimental trials.
+        cmd.append("--ninja-hide-gaze-point")
         if cfg.rake_show_debug_status:
             cmd.append("--ninja-show-debug-status")
         else:
@@ -3918,6 +3921,7 @@ error "No supported browser window found"
             cmd.append("--ninja-auto-calibrate")
         # Synthetic Fitts sessions use generated ground-truth targets,
         # not live TargetFinder/YOLO detections.
+        cmd.append("--ninja-without-targetfinder")
         return cmd
 
     def _build_comparative_session_command(self, cfg: PanelConfig):
@@ -4005,8 +4009,9 @@ error "No supported browser window found"
             cmd.append("--semantic-disable-accel")
         if cfg.rake_lock_on_dwell:
             cmd.append("--ninja-lock-on-dwell")
-        if not cfg.rake_show_gaze:
-            cmd.append("--ninja-hide-gaze-point")
+        # The tester gaze marker is only for calibration/debugging and must
+        # not carry over into experimental trials.
+        cmd.append("--ninja-hide-gaze-point")
         if cfg.rake_show_debug_status:
             cmd.append("--ninja-show-debug-status")
         else:
@@ -4017,6 +4022,7 @@ error "No supported browser window found"
             cmd.append("--ninja-auto-calibrate")
         # Comparative sessions use ground-truth labels for both task families,
         # not live TargetFinder/YOLO detections.
+        cmd.append("--ninja-without-targetfinder")
         return cmd
 
     def _build_experiment_session_command(self, cfg: PanelConfig, output_dir: Path | None = None):
@@ -4089,8 +4095,9 @@ error "No supported browser window found"
         ]
         if cfg.rake_lock_on_dwell:
             cmd.append("--ninja-lock-on-dwell")
-        if not cfg.rake_show_gaze:
-            cmd.append("--ninja-hide-gaze-point")
+        # The tester gaze marker is only for calibration/debugging and must
+        # not carry over into experimental trials.
+        cmd.append("--ninja-hide-gaze-point")
         if cfg.rake_show_debug_status:
             cmd.append("--ninja-show-debug-status")
         else:
@@ -4101,6 +4108,7 @@ error "No supported browser window found"
             cmd.append("--ninja-auto-calibrate")
         # Realistic experimental sessions use annotation-control files,
         # not live TargetFinder/YOLO detections.
+        cmd.append("--ninja-without-targetfinder")
         return cmd
 
     def _is_demo_running(self):
