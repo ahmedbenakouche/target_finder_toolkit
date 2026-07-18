@@ -43,6 +43,13 @@ CLASS_NAMES = {
     5: "Slider"
 }
 
+# List of official YOLO26 models provided in the toolkit
+AVAILABLE_MODELS = [
+    "yolo26n-640", "yolo26n-1280", "yolo26n-1920",
+    "yolo26s-640", "yolo26s-1280", "yolo26s-1920",
+    "yolo26m-640", "yolo26m-1280", "yolo26m-1920"
+]
+
 
 def _iou(a, b):
     """Compute IoU between two (x, y, w, h) boxes.
@@ -87,15 +94,16 @@ def _require_between(name, val, lo, hi, inclusive=True):
 
 
 class TargetFinder:
-    def __init__(self, model_name=None, change_thresh=100, capture_interval=1/30, confidence=0.4, iou = 0.3, imgsz=640):
+    def __init__(self, model_name=None, change_thresh=100, capture_interval=1/30, confidence=0.4, iou = 0.3):
         """Initialize the detector.
 
         Args:
-            model_path (str | None, optional):
-                Path to a YOLO ``.pt`` weights file.  
-                If ``None``, the detector loads the default model (``best.pt``)
-                packaged with the toolkit. You can also supply your own trained
-                YOLOv8 model.
+            model_name (str | None, optional): Name of the model to load.
+                Available choices: yolo26n-640, yolo26n-1280, yolo26n-1920,
+                yolo26s-640, yolo26s-1280, yolo26s-1920, yolo26m-640, yolo26m-1280, yolo26m-1920.
+                Defaults to 'yolo26n-640'.
+                Note: Larger models (s, m) or higher resolutions (1280, 1920)
+                improve widget detection but increase latency.
 
             change_thresh (int, optional):
                 Screen change detection threshold (L2 distance on a down-scaled
@@ -112,7 +120,7 @@ class TargetFinder:
             confidence (float, optional):
                 Minimum YOLO confidence score required to keep a detection.  
                 Must be in the range ``[0.0 – 1.0]``.  
-                Default = ``0.28``.
+                Default = ``0.4``.
 
             iou (float, optional):
                 Intersection-over-Union (IoU) threshold used for YOLO’s
@@ -138,6 +146,9 @@ class TargetFinder:
         # Handle model selection
         if model_name is None:
             model_name = "yolo26n-640"
+
+        if model_name not in AVAILABLE_MODELS:
+            raise ValueError(f"Invalid model name '{model_name}'. Choose from: {AVAILABLE_MODELS}")
 
         # Resolve internal path to the models directory
         here = os.path.dirname(__file__)
@@ -384,7 +395,7 @@ class TargetFinder:
             raise FileNotFoundError(f"Cannot read image: {image_path}")
 
         # Single-shot YOLO inference
-        results = self.model(img_bgr, conf=self.conf, iou=self.iou, imgsz=self.imgsz, end2end=False, verbose=False)[0]
+        results = self.model(img_bgr, conf=self.conf, iou=self.iou, end2end=False, verbose=False)[0]
         boxes = results.boxes.xyxy.cpu().numpy()
         scores = results.boxes.conf.cpu().numpy()
         class_ids = results.boxes.cls.cpu().numpy()
@@ -513,7 +524,7 @@ class TargetFinder:
                         ov.reset()
 
                 # YOLO inference
-                results = self.model(full, conf=self.conf, iou=self.iou, imgsz=self.imgsz, end2end=False, verbose=False)[0]
+                results = self.model(full, conf=self.conf, iou=self.iou, end2end=False, verbose = False)[0]
                 boxes = results.boxes.xyxy.cpu().numpy()
                 scores = results.boxes.conf.cpu().numpy()
                 class_ids = results.boxes.cls.cpu().numpy()
@@ -672,14 +683,14 @@ def show_detections(detector: TargetFinder):
 def main():
     """CLI entry point for launching the TargetFinder overlay.
 
-    **Example:**  ``python -m target_finder_toolkit.targetfinder --confidence 0.3 --iou 0.4``
+    **Example:**  ``python -m target_finder_toolkit.targetfinder --confidence 0.5 --iou 0.4``
 
     """
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")
-    parser.add_argument('--model', default="yolo26n-1920", help="Select the YOLO26 model.")
+    parser.add_argument('--model', default="yolo26n-640", choices=AVAILABLE_MODELS, help="Select the YOLO26 model.")
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
-    parser.add_argument('--confidence', type=float, default=0.28, help="YOLO confidence threshold (0.0–1.0)")
+    parser.add_argument('--confidence', type=float, default=0.4, help="YOLO confidence threshold (0.0–1.0)")
     parser.add_argument('--iou', type=float, default=0.3, help="YOLO IoU threshold for NMS (0.0–1.0)")
     args = parser.parse_args()
 
