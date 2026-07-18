@@ -89,12 +89,12 @@ DEFAULT_DYNASPOT_REDUCE_TIME = 0.500
 DEFAULT_RAKE_CAMERA_INDEX = 0
 DEFAULT_RAKE_SCREEN_WIDTH_CM = 34.0
 DEFAULT_RAKE_SCREEN_HEIGHT_CM = 19.0
-DEFAULT_RAKE_SPACING = 320.0
+DEFAULT_RAKE_SPACING = 350.0
 DEFAULT_RAKE_GAZE_SMOOTHING = 0.35
 DEFAULT_RAKE_GAZE_GAIN_X = 1.0
 DEFAULT_RAKE_GAZE_GAIN_Y = 1.0
-DEFAULT_RAKE_GAZE_OFFSET_X = 0.0
-DEFAULT_RAKE_GAZE_OFFSET_Y = 0.0
+DEFAULT_RAKE_GAZE_OFFSET_X = -40.0
+DEFAULT_RAKE_GAZE_OFFSET_Y = -140.0
 DEFAULT_RAKE_SELECTION_HOLD = 2.0
 DEFAULT_RAKE_LOCK_ON_DWELL = False
 DEFAULT_RAKE_USE_CALIBRATION = True
@@ -220,7 +220,7 @@ UI_TEXTS = {
         "rake_screen_width_cm_desc": "Auto-detected physical screen width used by WebEyeTrack. You can override it if detection is wrong.",
         "rake_screen_height_cm": "Screen height (cm) (range: 10.0-200.0, default: auto-detected current screen)",
         "rake_screen_height_cm_desc": "Auto-detected physical screen height used by WebEyeTrack. You can override it if detection is wrong.",
-        "rake_spacing": "Ninja spacing (range: 80.0-800.0, default: 320.0)",
+        "rake_spacing": "Ninja spacing (range: 80.0-800.0, default: 350.0)",
         "rake_spacing_desc": "Controls how widely the 8 cursors are spread. Lower = cursors closer together. Higher = cursors farther apart. The default reproduces the paper-style 4x2 layout.",
         "rake_gaze_smoothing": "Gaze smoothing (range: 0.0-0.95, default: 0.35)",
         "rake_gaze_smoothing_desc": "Per frame, the system keeps this fraction of the previous gaze point and uses the rest from the new webcam sample. Higher = steadier but more lag.",
@@ -243,17 +243,14 @@ UI_TEXTS = {
         "rake_calibration_mode_desc": "Shows whether Ninja Cursors(gaze) is currently using manual correction or calibration mode.",
         "rake_calibration_mode_manual": "Manual correction mode",
         "rake_calibration_mode_active": "Calibration mode",
-        "rake_calibration_manual_enabled": "Manual correction mode: gaze offset and gain remain editable.",
-        "rake_calibration_manual_disabled": "Calibration active: gain and offset will be filled automatically, then remain editable for manual tuning.",
-        "rake_manual_disabled_hint": "Auto-filled after calibration; still editable",
         "rake_reset_calibration": "Reset calibration",
-        "rake_gaze_gain_x": "Gaze gain X (range: 0.1-10.0, default: 1.0)",
-        "rake_gaze_gain_x_desc": "Scales horizontal gaze movement around the screen center before offset is applied. Higher values increase left-right travel.",
-        "rake_gaze_gain_y": "Gaze gain Y (range: 0.1-10.0, default: 1.0)",
-        "rake_gaze_gain_y_desc": "Scales vertical gaze movement around the screen center before offset is applied. Higher values increase up-down travel.",
-        "rake_gaze_offset_x": "Gaze offset X (px) (range: -1000.0-1000.0, default: 0.0)",
+        "rake_gaze_gain_x": "Gaze gain X (range: -10.0-10.0, default: 1.0)",
+        "rake_gaze_gain_x_desc": "Scales horizontal gaze movement around the screen center before offset is applied. Negative values invert left-right movement.",
+        "rake_gaze_gain_y": "Gaze gain Y (range: -10.0-10.0, default: 1.0)",
+        "rake_gaze_gain_y_desc": "Scales vertical gaze movement around the screen center before offset is applied. Negative values invert up-down movement.",
+        "rake_gaze_offset_x": "Gaze offset X (px) (range: -3000.0-3000.0, default: -40.0)",
         "rake_gaze_offset_x_desc": "Shifts the gaze estimate horizontally before selecting the active cursor. Positive = move right, negative = move left.",
-        "rake_gaze_offset_y": "Gaze offset Y (px) (range: -1000.0-1000.0, default: 0.0)",
+        "rake_gaze_offset_y": "Gaze offset Y (px) (range: -3000.0-3000.0, default: -140.0)",
         "rake_gaze_offset_y_desc": "Shifts the gaze estimate vertically before selecting the active cursor. Positive = move down, negative = move up.",
         "rake_lock_on_dwell": "Lock cursor by gaze dwell (range: off/on, default: off)",
         "rake_lock_on_dwell_desc": "When enabled, gaze must stay on the same cursor before it locks. When disabled, the current orange cursor can be clicked immediately.",
@@ -452,7 +449,7 @@ UI_TEXTS = {
         "rake_screen_width_cm_desc": "Largeur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
         "rake_screen_height_cm": "Hauteur écran (cm) (plage : 10.0-200.0, défaut : écran courant détecté automatiquement)",
         "rake_screen_height_cm_desc": "Hauteur physique de l’écran détectée automatiquement et utilisée par WebEyeTrack. Vous pouvez la corriger si la détection est incorrecte.",
-        "rake_spacing": "Espacement Ninja (plage : 80.0-800.0, défaut : 320.0)",
+        "rake_spacing": "Espacement Ninja (plage : 80.0-800.0, défaut : 350.0)",
         "rake_spacing_desc": "Contrôle à quel point les 8 curseurs sont espacés. Plus bas = plus rapprochés. Plus haut = plus éloignés. La valeur par défaut reproduit la disposition 4x2 de l’article.",
         "rake_gaze_smoothing": "Lissage du regard (plage : 0.0-0.95, défaut : 0.35)",
         "rake_gaze_smoothing_desc": "À chaque frame, le système garde cette fraction de l’ancien point de regard et prend le reste depuis la nouvelle mesure webcam. Plus haut = plus stable mais plus de retard.",
@@ -475,17 +472,14 @@ UI_TEXTS = {
         "rake_calibration_mode_desc": "Indique si Ninja Cursors(gaze) utilise actuellement le mode manuel ou le mode calibration.",
         "rake_calibration_mode_manual": "Mode de correction manuelle",
         "rake_calibration_mode_active": "Mode calibration",
-        "rake_calibration_manual_enabled": "Mode de correction manuelle : le gain et le décalage du regard restent modifiables.",
-        "rake_calibration_manual_disabled": "Calibration active : le gain et le décalage seront remplis automatiquement puis restent modifiables.",
-        "rake_manual_disabled_hint": "Rempli automatiquement après calibration ; reste modifiable",
         "rake_reset_calibration": "Réinitialiser la calibration",
-        "rake_gaze_gain_x": "Gain du regard X (plage : 0.1-10.0, défaut : 1.0)",
-        "rake_gaze_gain_x_desc": "Agrandit ou réduit l’amplitude horizontale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement gauche-droite.",
-        "rake_gaze_gain_y": "Gain du regard Y (plage : 0.1-10.0, défaut : 1.0)",
-        "rake_gaze_gain_y_desc": "Agrandit ou réduit l’amplitude verticale du regard autour du centre de l’écran avant d’appliquer le décalage. Plus haut = plus de déplacement haut-bas.",
-        "rake_gaze_offset_x": "Décalage regard X (px) (plage : -1000.0-1000.0, défaut : 0.0)",
+        "rake_gaze_gain_x": "Gain du regard X (plage : -10.0-10.0, défaut : 1.0)",
+        "rake_gaze_gain_x_desc": "Agrandit ou réduit l’amplitude horizontale du regard autour du centre de l’écran avant d’appliquer le décalage. Une valeur négative inverse gauche-droite.",
+        "rake_gaze_gain_y": "Gain du regard Y (plage : -10.0-10.0, défaut : 1.0)",
+        "rake_gaze_gain_y_desc": "Agrandit ou réduit l’amplitude verticale du regard autour du centre de l’écran avant d’appliquer le décalage. Une valeur négative inverse haut-bas.",
+        "rake_gaze_offset_x": "Décalage regard X (px) (plage : -3000.0-3000.0, défaut : -40.0)",
         "rake_gaze_offset_x_desc": "Décale l’estimation du regard horizontalement avant de choisir le curseur actif. Positif = vers la droite, négatif = vers la gauche.",
-        "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -1000.0-1000.0, défaut : 0.0)",
+        "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -3000.0-3000.0, défaut : -140.0)",
         "rake_gaze_offset_y_desc": "Décale l’estimation du regard verticalement avant de choisir le curseur actif. Positif = vers le bas, négatif = vers le haut.",
         "rake_lock_on_dwell": "Verrouiller par fixation du regard (plage : off/on, défaut : off)",
         "rake_lock_on_dwell_desc": "Si activé, le regard doit rester sur le même curseur avant verrouillage. Sinon, le curseur orange courant peut être cliqué immédiatement.",
@@ -972,33 +966,6 @@ class ControlPanel(QtWidgets.QWidget):
         self._bind_text(title, title_key)
         layout.addWidget(title)
 
-        for row in rows:
-            layout.addWidget(row)
-        return group
-
-    def _create_calibration_params_group(self):
-        group = QtWidgets.QFrame()
-        group.setObjectName("CalibrationParamsGroup")
-        layout = QtWidgets.QVBoxLayout(group)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(0)
-
-        note = QtWidgets.QLabel()
-        note.setObjectName("CalibrationParamsNotice")
-        note.setWordWrap(True)
-        self._bind_text(note, "rake_calibration_manual_disabled")
-        layout.addWidget(note)
-        layout.addWidget(self._create_separator())
-
-        rows = [
-            self._create_field_row("rake_gaze_gain_x", self.rake_gaze_gain_x_spin, "rake_gaze_gain_x_desc"),
-            self._create_separator(),
-            self._create_field_row("rake_gaze_gain_y", self.rake_gaze_gain_y_spin, "rake_gaze_gain_y_desc"),
-            self._create_separator(),
-            self._create_field_row("rake_gaze_offset_x", self.rake_gaze_offset_x_spin, "rake_gaze_offset_x_desc"),
-            self._create_separator(),
-            self._create_field_row("rake_gaze_offset_y", self.rake_gaze_offset_y_spin, "rake_gaze_offset_y_desc"),
-        ]
         for row in rows:
             layout.addWidget(row)
         return group
@@ -1497,28 +1464,28 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_gaze_gain_x_spin = QtWidgets.QDoubleSpinBox()
         self.rake_gaze_gain_x_spin.setKeyboardTracking(False)
         self.rake_gaze_gain_x_spin.setDecimals(2)
-        self.rake_gaze_gain_x_spin.setRange(0.1, 10.0)
+        self.rake_gaze_gain_x_spin.setRange(-10.0, 10.0)
         self.rake_gaze_gain_x_spin.setSingleStep(0.05)
         self.rake_gaze_gain_x_spin.setValue(DEFAULT_RAKE_GAZE_GAIN_X)
 
         self.rake_gaze_gain_y_spin = QtWidgets.QDoubleSpinBox()
         self.rake_gaze_gain_y_spin.setKeyboardTracking(False)
         self.rake_gaze_gain_y_spin.setDecimals(2)
-        self.rake_gaze_gain_y_spin.setRange(0.1, 10.0)
+        self.rake_gaze_gain_y_spin.setRange(-10.0, 10.0)
         self.rake_gaze_gain_y_spin.setSingleStep(0.05)
         self.rake_gaze_gain_y_spin.setValue(DEFAULT_RAKE_GAZE_GAIN_Y)
 
         self.rake_gaze_offset_x_spin = QtWidgets.QDoubleSpinBox()
         self.rake_gaze_offset_x_spin.setKeyboardTracking(False)
         self.rake_gaze_offset_x_spin.setDecimals(1)
-        self.rake_gaze_offset_x_spin.setRange(-1000.0, 1000.0)
+        self.rake_gaze_offset_x_spin.setRange(-3000.0, 3000.0)
         self.rake_gaze_offset_x_spin.setSingleStep(5.0)
         self.rake_gaze_offset_x_spin.setValue(DEFAULT_RAKE_GAZE_OFFSET_X)
 
         self.rake_gaze_offset_y_spin = QtWidgets.QDoubleSpinBox()
         self.rake_gaze_offset_y_spin.setKeyboardTracking(False)
         self.rake_gaze_offset_y_spin.setDecimals(1)
-        self.rake_gaze_offset_y_spin.setRange(-1000.0, 1000.0)
+        self.rake_gaze_offset_y_spin.setRange(-3000.0, 3000.0)
         self.rake_gaze_offset_y_spin.setSingleStep(5.0)
         self.rake_gaze_offset_y_spin.setValue(DEFAULT_RAKE_GAZE_OFFSET_Y)
 
@@ -1560,10 +1527,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_calibration_mode_value = QtWidgets.QLabel()
         self.rake_calibration_mode_value.setObjectName("SettingValueLabel")
         self.rake_calibration_mode_value.setWordWrap(True)
-
-        self.rake_calibration_note = QtWidgets.QLabel()
-        self.rake_calibration_note.setObjectName("SectionNote")
-        self.rake_calibration_note.setWordWrap(True)
 
         self.experiment_enabled_cb = self._create_switch()
 
@@ -1704,8 +1667,6 @@ class ControlPanel(QtWidgets.QWidget):
             self._create_label_value_row("rake_calibration_status", self.rake_calibration_status_value, "rake_calibration_status_desc"),
             self._create_separator(),
             self._create_label_value_row("rake_calibration_mode", self.rake_calibration_mode_value, "rake_calibration_mode_desc"),
-            self._create_separator(),
-            self._create_calibration_params_group(),
         ]
         rake_selection_rows = [
             self._create_switch_row("rake_lock_on_dwell", self.rake_lock_on_dwell_cb, "rake_lock_on_dwell_desc"),
@@ -2453,7 +2414,7 @@ class ControlPanel(QtWidgets.QWidget):
             self.rake_gaze_offset_x_spin,
             self.rake_gaze_offset_y_spin,
         ):
-            widget.setEnabled(rake_enabled)
+            widget.setEnabled(False)
         self.rake_lock_on_dwell_cb.setEnabled(rake_enabled)
         self.rake_show_gaze_cb.setEnabled(rake_enabled)
         self.rake_show_debug_status_cb.setEnabled(rake_enabled)
@@ -2469,10 +2430,6 @@ class ControlPanel(QtWidgets.QWidget):
         self.rake_calibration_mode_value.setText(
             self._text("rake_calibration_mode_active" if use_calibration else "rake_calibration_mode_manual")
         )
-        self.rake_calibration_note.setText(
-            self._text("rake_calibration_manual_disabled" if use_calibration else "rake_calibration_manual_enabled")
-        )
-
     def _register_numeric_field(self, widget, text_key: str):
         self._focus_prompt_keys[widget] = text_key
         widget.installEventFilter(self)
@@ -3000,14 +2957,6 @@ error "No supported browser window found"
                 border-radius: 22px;
             }}
 
-            QFrame#CalibrationParamsGroup {{
-                background: {bg_card};
-                border: 2px solid {border_card};
-                border-radius: 18px;
-                margin-top: 10px;
-                margin-bottom: 10px;
-            }}
-
             QFrame#NinjaOptionGroup {{
                 background: {bg_card};
                 border: 2px solid {border_card};
@@ -3293,10 +3242,10 @@ error "No supported browser window found"
             rake_screen_height_cm=self.rake_screen_height_cm_spin.value(),
             rake_spacing=self.rake_spacing_spin.value(),
             rake_gaze_smoothing=self.rake_gaze_smoothing_spin.value(),
-            rake_gaze_gain_x=self.rake_gaze_gain_x_spin.value(),
-            rake_gaze_gain_y=self.rake_gaze_gain_y_spin.value(),
-            rake_gaze_offset_x=self.rake_gaze_offset_x_spin.value(),
-            rake_gaze_offset_y=self.rake_gaze_offset_y_spin.value(),
+            rake_gaze_gain_x=DEFAULT_RAKE_GAZE_GAIN_X,
+            rake_gaze_gain_y=DEFAULT_RAKE_GAZE_GAIN_Y,
+            rake_gaze_offset_x=DEFAULT_RAKE_GAZE_OFFSET_X,
+            rake_gaze_offset_y=DEFAULT_RAKE_GAZE_OFFSET_Y,
             rake_selection_hold=self.rake_selection_hold_spin.value(),
             rake_lock_on_dwell=self.rake_lock_on_dwell_cb.isChecked(),
             rake_show_gaze=self.rake_show_gaze_cb.isChecked(),
@@ -3363,10 +3312,10 @@ error "No supported browser window found"
         self.rake_screen_height_cm_spin.setValue(cfg.rake_screen_height_cm)
         self.rake_spacing_spin.setValue(cfg.rake_spacing)
         self.rake_gaze_smoothing_spin.setValue(cfg.rake_gaze_smoothing)
-        self.rake_gaze_gain_x_spin.setValue(cfg.rake_gaze_gain_x)
-        self.rake_gaze_gain_y_spin.setValue(cfg.rake_gaze_gain_y)
-        self.rake_gaze_offset_x_spin.setValue(cfg.rake_gaze_offset_x)
-        self.rake_gaze_offset_y_spin.setValue(cfg.rake_gaze_offset_y)
+        self.rake_gaze_gain_x_spin.setValue(DEFAULT_RAKE_GAZE_GAIN_X)
+        self.rake_gaze_gain_y_spin.setValue(DEFAULT_RAKE_GAZE_GAIN_Y)
+        self.rake_gaze_offset_x_spin.setValue(DEFAULT_RAKE_GAZE_OFFSET_X)
+        self.rake_gaze_offset_y_spin.setValue(DEFAULT_RAKE_GAZE_OFFSET_Y)
         self.rake_selection_hold_spin.setValue(cfg.rake_selection_hold)
         self.rake_lock_on_dwell_cb.setChecked(cfg.rake_lock_on_dwell)
         self.rake_show_gaze_cb.setChecked(cfg.rake_show_gaze)
@@ -3636,8 +3585,8 @@ error "No supported browser window found"
                 cmd.append("--lock-on-dwell")
             if cfg.rake_use_calibration:
                 cmd += ["--calib-points", str(cfg.rake_calib_points)]
-                if cfg.rake_auto_calibrate:
-                    cmd.append("--auto-calibrate")
+                # In tester mode, enabling calibration means Démarrer runs a fresh calibration.
+                cmd.append("--auto-calibrate")
             if not cfg.rake_show_gaze:
                 cmd.append("--hide-gaze-point")
             if not cfg.rake_show_debug_status:
@@ -4182,7 +4131,12 @@ error "No supported browser window found"
             self._apply_calibration_correction_values(correction_values)
         elif event == "failed":
             self._rake_calibration_status = "failed"
-            self._rake_calibration_status_detail = None
+            mean_error_px = payload.get("mean_error_px")
+            self._rake_calibration_status_detail = (
+                f"{float(mean_error_px):.0f}px"
+                if mean_error_px is not None
+                else None
+            )
         elif event == "cancelled":
             self._rake_calibration_status = "cancelled"
             self._rake_calibration_status_detail = None
@@ -4193,12 +4147,7 @@ error "No supported browser window found"
     def _apply_calibration_correction_values(self, values):
         if not isinstance(values, dict):
             return
-        updates = [
-            (self.rake_gaze_gain_x_spin, values.get("gaze_gain_x")),
-            (self.rake_gaze_gain_y_spin, values.get("gaze_gain_y")),
-            (self.rake_gaze_offset_x_spin, values.get("gaze_offset_x")),
-            (self.rake_gaze_offset_y_spin, values.get("gaze_offset_y")),
-        ]
+        updates = []
         changed = False
         self._suspend_updates = True
         try:
@@ -4242,6 +4191,8 @@ error "No supported browser window found"
             if line:
                 self._process_output_lines.append(line)
                 self._process_output_lines = self._process_output_lines[-20:]
+                if line.startswith("[ninja]") or line.startswith("[calib]"):
+                    print(line, flush=True)
             self._handle_process_output_line(line)
 
     def _format_process_error(self, exit_code: int) -> str:

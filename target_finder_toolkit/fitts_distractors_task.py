@@ -73,6 +73,10 @@ HOME_RADIUS = 24.0
 MIN_DISTRACTOR_DIAMETER = 6.0
 MIN_TARGET_DIAMETER = 0.0
 DISTRACTOR_SCREEN_MARGIN = 12.0
+FALLBACK_MIN_DISTRACTOR_DIAMETER = 4.0
+FALLBACK_MAX_DISTRACTOR_DIAMETER = 10.0
+FALLBACK_DENSITY_AREA_PER_DISTRACTOR = 1300.0
+FALLBACK_MAX_DISTRACTORS = 600
 
 DIFFICULTY_IDS = {
     "easy": 3.0,
@@ -317,6 +321,100 @@ def _generate_blanch_ortega_2d_distractors(
     return distractors, metadata
 
 
+def _generate_viewport_density_distractors(
+    *,
+    home: tuple[float, float],
+    target: SyntheticObject,
+    id_value: float,
+    amplitude: float,
+    rho: float,
+    width: int,
+    height: int,
+    movement_angle: float,
+    rng: random.Random,
+    object_id_start: int = 2,
+) -> tuple[list[SyntheticObject], dict]:
+    """Viewport-aware fallback for extreme IDs where the analytic layout clips out.
+
+    At ID=8 the theoretical distractor diameter implied by constant-ID objects
+    becomes so small that the original min-diameter filter can remove every
+    distractor.  This fallback samples the visible movement corridor instead,
+    keeping the displayed density proportional to rho.
+    """
+    if rho <= 0.0:
+        return [], {"layout": "viewport_density_fallback", "rho": rho}
+
+    base_diameter = max(
+        FALLBACK_MIN_DISTRACTOR_DIAMETER,
+        min(FALLBACK_MAX_DISTRACTOR_DIAMETER, max(target.diameter * 2.0, FALLBACK_MIN_DISTRACTOR_DIAMETER)),
+    )
+    longitudinal_padding = max(48.0, amplitude * 0.10)
+    longitudinal_min = -longitudinal_padding
+    longitudinal_max = amplitude + longitudinal_padding
+    lateral_half_span = max(140.0, min(height * 0.35, amplitude * 0.32))
+    local_width = max(1.0, longitudinal_max - longitudinal_min)
+    local_height = max(1.0, lateral_half_span * 2.0)
+    local_area = local_width * local_height
+    target_count = int(round(rho * local_area / FALLBACK_DENSITY_AREA_PER_DISTRACTOR))
+    target_count = max(1, min(FALLBACK_MAX_DISTRACTORS, target_count))
+
+    aspect = local_width / max(1.0, local_height)
+    cols = max(1, int(math.ceil(math.sqrt(target_count * aspect))))
+    rows = max(1, int(math.ceil(target_count / cols)))
+    cell_w = local_width / cols
+    cell_h = local_height / rows
+    cells = [(col, row) for row in range(rows) for col in range(cols)]
+    cells.sort(key=lambda cell: (((cell[0] * 0.754877666 + cell[1] * 0.569840291) % 1.0), cell[1], cell[0]))
+
+    distractors: list[SyntheticObject] = []
+    object_id = object_id_start
+    cos_a = math.cos(movement_angle)
+    sin_a = math.sin(movement_angle)
+    max_attempts = max(len(cells), target_count * 4)
+    attempts = 0
+    while len(distractors) < target_count and attempts < max_attempts:
+        if attempts < len(cells):
+            col, row = cells[attempts]
+        else:
+            col = attempts % cols
+            row = (attempts // cols) % rows
+        attempts += 1
+
+        x_jitter = 0.20 + 0.60 * (((col * 37 + row * 17 + 11) % 101) / 100.0)
+        y_jitter = 0.20 + 0.60 * (((col * 19 + row * 43 + 29) % 103) / 102.0)
+        diameter_jitter = 0.85 + 0.35 * (((col * 23 + row * 31 + 7) % 97) / 96.0)
+        diameter = base_diameter * diameter_jitter
+        local_x = longitudinal_min + (col + x_jitter) * cell_w
+        local_y = -lateral_half_span + (row + y_jitter) * cell_h
+        world_x = home[0] + local_x * cos_a - local_y * sin_a
+        world_y = home[1] + local_x * sin_a + local_y * cos_a
+        obj = make_object(object_id, "distractor", (world_x, world_y), diameter, home)
+        if not _inside_task_area(obj.center, obj.diameter, width, height):
+            continue
+        if math.hypot(obj.center[0] - target.center[0], obj.center[1] - target.center[1]) < (obj.diameter + target.diameter) * 0.90:
+            continue
+        if math.hypot(obj.center[0] - home[0], obj.center[1] - home[1]) < (obj.diameter + HOME_RADIUS) * 0.90:
+            continue
+        distractors.append(obj)
+        object_id += 1
+
+    metadata = {
+        "layout": "viewport_density_fallback",
+        "rho": rho,
+        "requested_fitts_id": id_value,
+        "base_distractor_diameter": base_diameter,
+        "target_count": target_count,
+        "actual_count": len(distractors),
+        "local_area": local_area,
+        "longitudinal_range": [longitudinal_min, longitudinal_max],
+        "lateral_half_span": lateral_half_span,
+        "grid": [cols, rows],
+        "density_area_per_distractor": FALLBACK_DENSITY_AREA_PER_DISTRACTOR,
+        "deterministic": True,
+    }
+    return distractors, metadata
+
+
 def _inside_task_area(center: tuple[float, float], diameter: float, width: int, height: int) -> bool:
     radius = diameter / 2.0
     return (
@@ -338,7 +436,11 @@ def generate_trial(
 ) -> SyntheticTrial:
     width, height = widget_size
     id_value = float(id_value) if id_value is not None else DIFFICULTY_IDS[difficulty]
-    rho = DENSITY_VALUES[density]
+    rho = (
+        float(condition_metadata["rho"])
+        if condition_metadata is not None and condition_metadata.get("rho") is not None
+        else DENSITY_VALUES[density]
+    )
 
     home = (width * 0.22, max(HEADER_HEIGHT + 130.0, height * 0.54))
     amplitude = min(width * 0.52, 760.0)
@@ -374,6 +476,28 @@ def generate_trial(
         height=height,
         movement_angle=angle,
     )
+    minimum_visible_distractors = max(6, int(round(rho * 20.0)))
+    if rho > 0.0 and len(distractors) < minimum_visible_distractors:
+        fallback_distractors, fallback_metadata = _generate_viewport_density_distractors(
+            home=home,
+            target=target,
+            id_value=id_value,
+            amplitude=target.distance,
+            rho=rho,
+            width=width,
+            height=height,
+            movement_angle=angle,
+            rng=rng,
+        )
+        layout_metadata = {
+            **layout_metadata,
+            "fallback_reason": (
+                f"analytic distractor count {len(distractors)} below minimum visible "
+                f"count {minimum_visible_distractors}"
+            ),
+            "fallback_layout": fallback_metadata,
+        }
+        distractors = fallback_distractors
 
     return SyntheticTrial(
         trial_id=trial_id,

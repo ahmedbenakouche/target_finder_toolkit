@@ -24,6 +24,8 @@ import tempfile
 import time
 from typing import Optional
 
+import numpy as np
+
 os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "target_finder_toolkit_mpl"))
 
 import cv2
@@ -384,10 +386,10 @@ class NinjaCursors(QtWidgets.QWidget):
     DEFAULT_CAMERA_INDEX = 0
     DEFAULT_SCREEN_WIDTH_CM = 34.0
     DEFAULT_SCREEN_HEIGHT_CM = 19.0
-    DEFAULT_RAKE_SPACING = 320.0
+    DEFAULT_RAKE_SPACING = 350.0
     DEFAULT_GAZE_SMOOTHING = 0.35
-    DEFAULT_GAZE_OFFSET_X = 0.0
-    DEFAULT_GAZE_OFFSET_Y = 0.0
+    DEFAULT_GAZE_OFFSET_X = -40.0
+    DEFAULT_GAZE_OFFSET_Y = -140.0
     DEFAULT_GAZE_GAIN_X = 1.0
     DEFAULT_GAZE_GAIN_Y = 1.0
     DEFAULT_TOP_HALF_EXTRA_Y = 0.0
@@ -406,6 +408,12 @@ class NinjaCursors(QtWidgets.QWidget):
     CLICK_EPSILON = 3.0
     DEBUG_TEXT_REFRESH_SEC = 1.0
     GAZE_VALID_TTL_SEC = 0.6
+    GAZE_DISPLAY_SMOOTHING = 0.68
+    GAZE_DROPOUT_NORM_EPS = 1e-6
+    GAZE_STABLE_SWITCH_NEAR_FRACTION = 0.16
+    GAZE_STABLE_SWITCH_MAX_SPEED_PX_S = 220.0
+    BOTTOM_ROW_LEFT_PREDICTION_SEC = 0.20
+    BOTTOM_ROW_LEFT_PREDICTION_MAX_GAP = 0.72
 
     @classmethod
     def resolve_screen_size_cm(
@@ -496,10 +504,13 @@ class NinjaCursors(QtWidgets.QWidget):
         )
         self.rake_spacing = max(40.0, float(rake_spacing))
         self.gaze_smoothing = max(0.0, min(float(gaze_smoothing), 0.95))
-        self.gaze_offset_x = float(gaze_offset_x)
-        self.gaze_offset_y = float(gaze_offset_y)
-        self.gaze_gain_x = max(0.1, min(float(gaze_gain_x), 10.0))
-        self.gaze_gain_y = max(0.1, min(float(gaze_gain_y), 10.0))
+        # Fixed Ninja gaze manual correction.  Calibration supplies the affine
+        # matrix; these four values are intentionally no longer editable from
+        # the control panel.
+        self.gaze_offset_x = float(self.DEFAULT_GAZE_OFFSET_X)
+        self.gaze_offset_y = float(self.DEFAULT_GAZE_OFFSET_Y)
+        self.gaze_gain_x = float(self.DEFAULT_GAZE_GAIN_X)
+        self.gaze_gain_y = float(self.DEFAULT_GAZE_GAIN_Y)
         self.top_half_extra_y = float(self.DEFAULT_TOP_HALF_EXTRA_Y)
         self.selection_hold = max(0.0, float(selection_hold))
         self.lock_on_dwell = bool(lock_on_dwell)
@@ -522,6 +533,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self._quit_shortcut = None
         self._tracking_ok = False
         self._gaze_point: Optional[tuple[float, float]] = None
+        self._display_gaze_point: Optional[tuple[float, float]] = None
         self._active_cursor_id: Optional[tuple[int, int]] = None
         self._active_point: Optional[tuple[float, float]] = None
         self._active_target = None
@@ -536,6 +548,13 @@ class NinjaCursors(QtWidgets.QWidget):
         self._last_gaze_status = "waiting for webcam"
         self._last_gaze_debug_t = 0.0
         self._last_successful_gaze_t = 0.0
+        self._last_gaze_velocity_t = 0.0
+        self._last_gaze_velocity_point: Optional[tuple[float, float]] = None
+        self._gaze_velocity_x_px_s = 0.0
+        self._gaze_velocity_y_px_s = 0.0
+        self._selection_gaze_point: Optional[tuple[float, float]] = None
+        self._gaze_affine_matrix: Optional[np.ndarray] = None
+        self._last_affine_reload_attempt_t = 0.0
         self._raw_offset_x = 0.0
         self._raw_offset_y = 0.0
         self._filtered_offset_x = 0.0
@@ -576,6 +595,8 @@ class NinjaCursors(QtWidgets.QWidget):
             screen_cm_dimensions=(self.screen_width_cm, self.screen_height_cm),
         )
         self._tracker = _create_webeyetrack(cfg)
+        self._reset_runtime_debug_log()
+        self._load_last_gaze_affine_matrix()
         self._capture = cv2.VideoCapture(self.camera_index)
         if not self._capture.isOpened():
             raise RuntimeError(f"Could not open webcam index {self.camera_index}.")
@@ -607,6 +628,158 @@ class NinjaCursors(QtWidgets.QWidget):
 
         if self._auto_calibrate:
             QtCore.QTimer.singleShot(self._auto_calibrate_delay_ms, self._start_calibration)
+
+    @staticmethod
+    def _clamp_gaze_gain(value) -> float:
+        try:
+            gain = float(value)
+        except (TypeError, ValueError):
+            gain = 1.0
+        if not math.isfinite(gain):
+            gain = 1.0
+        gain = max(-10.0, min(gain, 10.0))
+        if abs(gain) < 0.1:
+            gain = 0.1 if gain >= 0.0 else -0.1
+        return gain
+
+    def _clamp_gaze_point(self, gx: float, gy: float, *, calibrated: bool) -> tuple[float, float]:
+        left = float(self._screen_rect.left())
+        top = float(self._screen_rect.top())
+        min_x = left
+        max_x = float(self._screen_rect.right())
+        min_y = top
+        max_y = float(self._screen_rect.bottom())
+        return (
+            max(min_x, min(max_x, float(gx))),
+            max(min_y, min(max_y, float(gy))),
+        )
+
+    @staticmethod
+    def _coerce_gaze_affine_matrix(value) -> Optional[np.ndarray]:
+        if value is None:
+            return None
+        try:
+            matrix = np.asarray(value, dtype=np.float64)
+        except Exception:
+            return None
+        if matrix.shape != (2, 3) or not np.all(np.isfinite(matrix)):
+            return None
+        return matrix
+
+    def _install_gaze_affine_matrix(self, source: str, value) -> bool:
+        matrix = self._coerce_gaze_affine_matrix(value)
+        if matrix is None:
+            try:
+                arr = np.asarray(value, dtype=np.float64)
+                detail = f"type={type(value).__name__} shape={arr.shape} value={value!r}"
+            except Exception as exc:
+                detail = f"type={type(value).__name__} coercion_error={exc} value={value!r}"
+            self._log_runtime_debug(f"failed to install gaze affine from {source}: {detail}")
+            return False
+        self._gaze_affine_matrix = matrix
+        self._log_runtime_debug(
+            f"installed gaze affine from {source}: "
+            f"[[{matrix[0,0]:.4f}, {matrix[0,1]:.4f}, {matrix[0,2]:.4f}], "
+            f"[{matrix[1,0]:.4f}, {matrix[1,1]:.4f}, {matrix[1,2]:.4f}]]"
+        )
+        return True
+
+    def _apply_gaze_affine(self, raw_norm_x: float, raw_norm_y: float) -> tuple[float, float]:
+        matrix = self._gaze_affine_matrix
+        if matrix is None:
+            return raw_norm_x, raw_norm_y
+        corrected = matrix @ np.array([raw_norm_x, raw_norm_y, 1.0], dtype=np.float64)
+        if corrected.shape != (2,) or not np.all(np.isfinite(corrected)):
+            return raw_norm_x, raw_norm_y
+        return float(corrected[0]), float(corrected[1])
+
+    def _is_raw_gaze_dropout(self, raw_norm_x: float, raw_norm_y: float) -> bool:
+        if not math.isfinite(raw_norm_x) or not math.isfinite(raw_norm_y):
+            return True
+        # With Ninja affine calibration active, WebEyeTrack occasionally emits
+        # exactly (0, 0) as a transient dropout.  In this coordinate space the
+        # calibrated center is not (0, 0); treating that sentinel as gaze maps it
+        # through affine to the bottom-right edge and makes the red marker jump.
+        return (
+            self._gaze_affine_matrix is not None
+            and abs(raw_norm_x) <= self.GAZE_DROPOUT_NORM_EPS
+            and abs(raw_norm_y) <= self.GAZE_DROPOUT_NORM_EPS
+        )
+
+    def _hold_previous_gaze_after_dropout(self, reason: str):
+        if self._gaze_point is None:
+            self._tracking_ok = False
+            self._set_gaze_status(f"{reason}; no previous gaze")
+            return
+        now = time.time()
+        self._tracking_ok = True
+        self._last_successful_gaze_t = now
+        self._set_gaze_status(
+            f"{reason}; keeping previous gaze=({self._gaze_point[0]:.0f},{self._gaze_point[1]:.0f})"
+        )
+
+    def _load_last_gaze_affine_matrix(self):
+        path = EyeCalibration.SAVE_DIR / "last_calibration.json"
+        try:
+            data = json.loads(path.read_text())
+        except Exception as exc:
+            self._log_runtime_debug(f"no accepted gaze affine loaded: cannot read {path}: {exc}")
+            return False
+        if data.get("accepted") is not True:
+            self._log_runtime_debug(
+                f"no accepted gaze affine loaded: last calibration accepted={data.get('accepted')}"
+            )
+            return False
+        try:
+            saved_screen = (int(data.get("screen_w")), int(data.get("screen_h")))
+        except Exception as exc:
+            self._log_runtime_debug(f"no accepted gaze affine loaded: invalid saved screen: {exc}")
+            return False
+        if saved_screen != tuple(int(v) for v in self._screen_px_dimensions):
+            self._log_runtime_debug(
+                "no accepted gaze affine loaded: "
+                f"screen mismatch saved={saved_screen} current={self._screen_px_dimensions}"
+            )
+            return False
+        correction_values = data.get("correction_values") or {}
+        matrix_value = correction_values.get("ninja_affine_matrix")
+        if matrix_value is None:
+            matrix_value = correction_values.get("affine_matrix")
+        if matrix_value is None:
+            self._log_runtime_debug(
+                "no accepted gaze affine loaded: correction_values has no affine matrix "
+                f"keys={sorted(correction_values.keys())}"
+            )
+            return False
+        return self._install_gaze_affine_matrix(f"file:{path}", matrix_value)
+
+    def _log_runtime_debug(self, message: str):
+        text = f"[ninja] {message}"
+        print(text, flush=True)
+        try:
+            EyeCalibration.SAVE_DIR.mkdir(parents=True, exist_ok=True)
+            path = EyeCalibration.SAVE_DIR / "ninja_runtime_debug.log"
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(f"{time.time():.3f} {text}\n")
+        except Exception:
+            pass
+
+    def _reset_runtime_debug_log(self):
+        try:
+            EyeCalibration.SAVE_DIR.mkdir(parents=True, exist_ok=True)
+            path = EyeCalibration.SAVE_DIR / "ninja_runtime_debug.log"
+            path.write_text("", encoding="utf-8")
+        except Exception:
+            pass
+
+    def _ensure_gaze_affine_loaded(self):
+        if self._gaze_affine_matrix is not None:
+            return
+        now = time.time()
+        if now - self._last_affine_reload_attempt_t < 2.0:
+            return
+        self._last_affine_reload_attempt_t = now
+        self._load_last_gaze_affine_matrix()
 
     def _should_hide_system_cursor_for_state(self, state: str | None = None) -> bool:
         if self._experiment_control_file is None:
@@ -853,6 +1026,21 @@ class NinjaCursors(QtWidgets.QWidget):
         self._unlock_cursor_selection()
         self._ignore_next_mouse_delta = True
 
+    def _reset_gaze_runtime_state(self):
+        self._tracking_ok = False
+        self._gaze_point = None
+        self._display_gaze_point = None
+        self._selection_gaze_point = None
+        self._last_gaze_velocity_point = None
+        self._last_gaze_velocity_t = 0.0
+        self._gaze_velocity_x_px_s = 0.0
+        self._gaze_velocity_y_px_s = 0.0
+        self._candidate_cursor_id = None
+        self._candidate_since = 0.0
+        self._active_cursor_id = None
+        self._active_point = None
+        self._active_target = None
+
     def _recover_points_if_all_offscreen(
         self,
         points: list[tuple[tuple[int, int], tuple[float, float]]],
@@ -864,6 +1052,75 @@ class NinjaCursors(QtWidgets.QWidget):
             self._last_all_offscreen_reset_t = now
             self._reset_cursor_array_offset()
         return self._grid_points()
+
+    def _gaze_point_for_selection(
+        self,
+        points: list[tuple[tuple[int, int], tuple[float, float]]],
+    ) -> tuple[float, float] | None:
+        if not self._gaze_is_recent() or self._gaze_point is None:
+            self._selection_gaze_point = None
+            return None
+
+        gx, gy = self._gaze_point
+        visible_points = self._visible_points(points)
+        if not visible_points:
+            self._selection_gaze_point = (gx, gy)
+            return self._selection_gaze_point
+
+        row_ys = sorted({round(float(point[1]), 3) for _cursor_id, point in visible_points})
+        if len(row_ys) < 2:
+            self._selection_gaze_point = (gx, gy)
+            return self._selection_gaze_point
+
+        row_split_y = (row_ys[0] + row_ys[-1]) * 0.5
+        vx = float(self._gaze_velocity_x_px_s)
+        if gy >= row_split_y and abs(vx) > 120.0:
+            col_xs = sorted({round(float(point[0]), 3) for _cursor_id, point in visible_points})
+            gaps = [b - a for a, b in zip(col_xs, col_xs[1:]) if b > a]
+            col_gap = min(gaps) if gaps else float(self.rake_spacing)
+            max_lead = max(
+                30.0,
+                min(360.0, col_gap * self.BOTTOM_ROW_LEFT_PREDICTION_MAX_GAP),
+            )
+            lead_x = max(
+                -max_lead,
+                min(max_lead, vx * self.BOTTOM_ROW_LEFT_PREDICTION_SEC),
+            )
+            gx += lead_x
+
+        self._selection_gaze_point = (gx, gy)
+        return self._selection_gaze_point
+
+    def _commit_gaze_candidate(
+        self,
+        candidate_id: tuple[int, int],
+        *,
+        now: float,
+        candidate_dist_sq: float,
+        current_dist_sq: float | None,
+        switch_margin_px: float,
+    ) -> tuple[int, int]:
+        if candidate_id != self._candidate_cursor_id:
+            self._candidate_cursor_id = candidate_id
+            self._candidate_since = now
+
+        near_boundary = (
+            current_dist_sq is not None
+            and candidate_dist_sq < current_dist_sq
+            and (current_dist_sq - candidate_dist_sq) < switch_margin_px * switch_margin_px
+        )
+        if (
+            not self.lock_on_dwell
+            and self._active_cursor_id is not None
+            and candidate_id != self._active_cursor_id
+            and near_boundary
+            and math.hypot(self._gaze_velocity_x_px_s, self._gaze_velocity_y_px_s)
+            <= self.GAZE_STABLE_SWITCH_MAX_SPEED_PX_S
+        ):
+            return self._active_cursor_id
+
+        self._active_cursor_id = candidate_id
+        return candidate_id
 
     def _active_cursor_from_gaze(
         self,
@@ -883,21 +1140,37 @@ class NinjaCursors(QtWidgets.QWidget):
             self._active_cursor_id = None
             return None
 
-        if self._gaze_is_recent() and self._gaze_point is not None:
-            gx, gy = self._gaze_point
-            candidate_id, _candidate_point = min(
+        selection_gaze = self._gaze_point_for_selection(points)
+        if selection_gaze is not None:
+            gx, gy = selection_gaze
+            def dist_sq(point):
+                px, py = self._point_for_gaze_selection(*point)
+                return (px - gx) ** 2 + (py - gy) ** 2
+
+            candidate_id, candidate_point = min(
                 candidates,
-                key=lambda item: (
-                    (self._point_for_gaze_selection(*item[1])[0] - gx) ** 2
-                    + (self._point_for_gaze_selection(*item[1])[1] - gy) ** 2
-                ),
+                key=lambda item: dist_sq(item[1]),
             )
+            if not self.lock_on_dwell:
+                col_xs = sorted({round(float(point[0]), 3) for _cursor_id, point in candidates})
+                gaps = [b - a for a, b in zip(col_xs, col_xs[1:]) if b > a]
+                col_gap = min(gaps) if gaps else float(self.rake_spacing)
+                switch_margin_px = max(12.0, col_gap * self.GAZE_STABLE_SWITCH_NEAR_FRACTION)
+                current_dist_sq = (
+                    dist_sq(visible_point_map[self._active_cursor_id])
+                    if self._active_cursor_id in visible_point_map
+                    else None
+                )
+                return self._commit_gaze_candidate(
+                    candidate_id,
+                    now=now,
+                    candidate_dist_sq=dist_sq(candidate_point),
+                    current_dist_sq=current_dist_sq,
+                    switch_margin_px=switch_margin_px,
+                )
             if candidate_id != self._candidate_cursor_id:
                 self._candidate_cursor_id = candidate_id
                 self._candidate_since = now
-            if not self.lock_on_dwell:
-                self._active_cursor_id = candidate_id
-                return candidate_id
             dwell_time = max(0.0, float(self.selection_hold))
             if dwell_time <= 0.0 or (now - self._candidate_since) >= dwell_time:
                 self._lock_active_cursor(candidate_id)
@@ -951,6 +1224,20 @@ class NinjaCursors(QtWidgets.QWidget):
             old_y * keep + y * (1.0 - keep),
         )
 
+    def _update_display_gaze_point(self, x: float, y: float):
+        if self._display_gaze_point is None:
+            self._display_gaze_point = (x, y)
+            return
+        keep = self.GAZE_DISPLAY_SMOOTHING
+        old_x, old_y = self._display_gaze_point
+        self._display_gaze_point = (
+            old_x * keep + x * (1.0 - keep),
+            old_y * keep + y * (1.0 - keep),
+        )
+
+    def _drawn_gaze_point(self) -> tuple[float, float] | None:
+        return self._display_gaze_point if self._display_gaze_point is not None else self._gaze_point
+
     def _gaze_is_recent(self) -> bool:
         return (
             self._gaze_point is not None
@@ -961,7 +1248,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self._last_gaze_status = message
         now = time.time()
         if now - self._last_gaze_debug_t >= self.DEBUG_TEXT_REFRESH_SEC:
-            print(f"[ninja] {message}", flush=True)
+            self._log_runtime_debug(message)
             self._last_gaze_debug_t = now
 
     @QtCore.pyqtSlot()
@@ -1001,34 +1288,80 @@ class NinjaCursors(QtWidgets.QWidget):
 
         norm_pog = getattr(gaze_result, "norm_pog", None) if gaze_result is not None else None
         if status == TrackingStatus.SUCCESS and norm_pog is not None:
-            gx = self._screen_rect.left() + (float(norm_pog[0]) + 0.5) * self._screen_rect.width()
-            gy = self._screen_rect.top() + (float(norm_pog[1]) + 0.5) * self._screen_rect.height()
-            calibrated = self._calibration and self._calibration.is_calibrated
-            center_x = self._screen_rect.left() + self._screen_rect.width() * 0.5
-            center_y = self._screen_rect.top() + self._screen_rect.height() * 0.5
-            gx = center_x + (gx - center_x) * self.gaze_gain_x
-            gy = center_y + (gy - center_y) * self.gaze_gain_y
+            self._ensure_gaze_affine_loaded()
+            raw_norm_x = float(norm_pog[0])
+            raw_norm_y = float(norm_pog[1])
+            if self._is_raw_gaze_dropout(raw_norm_x, raw_norm_y):
+                self._hold_previous_gaze_after_dropout(
+                    f"ignored gaze dropout raw=({raw_norm_x:.3f},{raw_norm_y:.3f})"
+                )
+                self.update()
+                return
+            affine_norm_x, affine_norm_y = self._apply_gaze_affine(raw_norm_x, raw_norm_y)
+            calibrated = self._gaze_affine_matrix is not None or (
+                self._calibration and self._calibration.is_calibrated
+            )
+            width = float(self._screen_rect.width())
+            height = float(self._screen_rect.height())
+            corrected_norm_x = (
+                affine_norm_x * self.gaze_gain_x
+                + self.gaze_offset_x / max(1.0, width)
+            )
+            corrected_norm_y = (
+                affine_norm_y * self.gaze_gain_y
+                + self.gaze_offset_y / max(1.0, height)
+            )
+            gx = self._screen_rect.left() + (corrected_norm_x + 0.5) * width
+            gy = self._screen_rect.top() + (corrected_norm_y + 0.5) * height
+            unclamped_gx = gx
+            unclamped_gy = gy
             assist_start_y = self._screen_rect.top() + self._screen_rect.height() * 0.68
             if gy < assist_start_y:
                 assist_span = max(1.0, assist_start_y - float(self._screen_rect.top()))
                 assist_ratio = max(0.0, min(1.0, (assist_start_y - gy) / assist_span))
                 assist_strength = math.pow(assist_ratio, 1.35)
                 gy += self.top_half_extra_y * assist_strength
-            gx += self.gaze_offset_x
-            gy += self.gaze_offset_y
-            gx = max(float(self._screen_rect.left()), min(float(self._screen_rect.right()), gx))
-            gy = max(float(self._screen_rect.top()), min(float(self._screen_rect.bottom()), gy))
+            gx, gy = self._clamp_gaze_point(gx, gy, calibrated=bool(calibrated))
+            now = time.time()
+            if self._last_gaze_velocity_point is not None and self._last_gaze_velocity_t > 0.0:
+                dt = max(1e-3, now - self._last_gaze_velocity_t)
+                prev_x, prev_y = self._last_gaze_velocity_point
+                measured_vx = (gx - prev_x) / dt
+                measured_vy = (gy - prev_y) / dt
+                self._gaze_velocity_x_px_s = (
+                    self._gaze_velocity_x_px_s * 0.55 + measured_vx * 0.45
+                )
+                self._gaze_velocity_y_px_s = (
+                    self._gaze_velocity_y_px_s * 0.55 + measured_vy * 0.45
+                )
+            self._last_gaze_velocity_point = (gx, gy)
+            self._last_gaze_velocity_t = now
             if calibrated:
                 self._gaze_point = (gx, gy)
             else:
                 self._apply_gaze_smoothing(gx, gy)
+            if self._gaze_point is not None:
+                self._update_display_gaze_point(*self._gaze_point)
             self._tracking_ok = True
-            self._last_successful_gaze_t = time.time()
-            self._set_gaze_status(f"tracking ok gaze=({gx:.0f}, {gy:.0f}) {'[calibrated]' if calibrated else ''}")
+            self._last_successful_gaze_t = now
+            self._set_gaze_status(
+                "tracking ok "
+                f"raw=({raw_norm_x:.3f},{raw_norm_y:.3f}) "
+                f"affine=({affine_norm_x:.3f},{affine_norm_y:.3f}) "
+                f"screen=({unclamped_gx:.0f},{unclamped_gy:.0f}) "
+                f"gaze=({gx:.0f},{gy:.0f}) "
+                f"{'[affine]' if self._gaze_affine_matrix is not None else '[raw]'}"
+            )
         else:
             self._tracking_ok = False
             if time.time() - self._last_successful_gaze_t > self.GAZE_VALID_TTL_SEC:
                 self._gaze_point = None
+                self._display_gaze_point = None
+                self._selection_gaze_point = None
+                self._last_gaze_velocity_point = None
+                self._last_gaze_velocity_t = 0.0
+                self._gaze_velocity_x_px_s = 0.0
+                self._gaze_velocity_y_px_s = 0.0
                 self._candidate_cursor_id = None
                 self._candidate_since = 0.0
             face_count = 0
@@ -1182,8 +1515,9 @@ class NinjaCursors(QtWidgets.QWidget):
         visible_points = self._visible_points(points)
         if not visible_points:
             return None
-        if self._gaze_is_recent() and self._gaze_point is not None:
-            gx, gy = self._gaze_point
+        selection_gaze = self._gaze_point_for_selection(points)
+        if selection_gaze is not None:
+            gx, gy = selection_gaze
             active_id, _ = min(
                 visible_points,
                 key=lambda item: (
@@ -1230,8 +1564,9 @@ class NinjaCursors(QtWidgets.QWidget):
             painter.drawLine(QtCore.QLineF(draw_x + gap, draw_y, draw_x + gap + line_len, draw_y))
             painter.drawLine(QtCore.QLineF(draw_x - gap - line_len, draw_y, draw_x - gap, draw_y))
 
-        if self.show_gaze and self._gaze_point is not None:
-            gx, gy = self._gaze_point
+        drawn_gaze = self._drawn_gaze_point()
+        if self.show_gaze and drawn_gaze is not None:
+            gx, gy = drawn_gaze
             painter.setPen(QtGui.QPen(QtGui.QColor(255, 90, 90, 220), 2))
             painter.setBrush(QtGui.QColor(255, 90, 90, 24))
             painter.drawEllipse(QtCore.QPointF(gx, gy), 12, 12)
@@ -1305,8 +1640,9 @@ class NinjaCursors(QtWidgets.QWidget):
                 painter.drawLine(QtCore.QLineF(draw_x, draw_y + gap, draw_x, draw_y + gap + line_len))
                 painter.drawLine(QtCore.QLineF(draw_x + gap, draw_y, draw_x + gap + line_len, draw_y))
                 painter.drawLine(QtCore.QLineF(draw_x - gap - line_len, draw_y, draw_x - gap, draw_y))
-            if self.show_gaze and self._gaze_point is not None:
-                gx, gy = self._gaze_point
+            drawn_gaze = self._drawn_gaze_point()
+            if self.show_gaze and drawn_gaze is not None:
+                gx, gy = drawn_gaze
                 if self._gaze_is_recent():
                     gaze_color = QtGui.QColor(255, 90, 90, 220)
                     gaze_fill = QtGui.QColor(255, 90, 90, 24)
@@ -1385,8 +1721,9 @@ class NinjaCursors(QtWidgets.QWidget):
             painter.drawLine(QtCore.QLineF(draw_x + gap, draw_y, draw_x + gap + line_len, draw_y))
             painter.drawLine(QtCore.QLineF(draw_x - gap - line_len, draw_y, draw_x - gap, draw_y))
 
-        if self.show_gaze and self._gaze_point is not None:
-            gx, gy = self._gaze_point
+        drawn_gaze = self._drawn_gaze_point()
+        if self.show_gaze and drawn_gaze is not None:
+            gx, gy = drawn_gaze
             if self._gaze_is_recent():
                 gaze_color = QtGui.QColor(255, 90, 90, 220)
                 gaze_fill = QtGui.QColor(255, 90, 90, 24)
@@ -1419,6 +1756,8 @@ class NinjaCursors(QtWidgets.QWidget):
                 "gaze_gain_y": round(float(self.gaze_gain_y), 3),
                 "gaze_offset_x": round(float(self.gaze_offset_x), 3),
                 "gaze_offset_y": round(float(self.gaze_offset_y), 3),
+                "gaze_velocity_x_px_s": round(float(self._gaze_velocity_x_px_s), 3),
+                "gaze_velocity_y_px_s": round(float(self._gaze_velocity_y_px_s), 3),
                 "selection_mode": (
                     "nearest_gaze_cursor_with_dwell_lock"
                     if self.lock_on_dwell
@@ -1433,6 +1772,16 @@ class NinjaCursors(QtWidgets.QWidget):
             fields.update(self._log_mode_fields())
             if self._gaze_point is not None:
                 fields["gaze"] = [round(float(self._gaze_point[0]), 3), round(float(self._gaze_point[1]), 3)]
+            if self._display_gaze_point is not None:
+                fields["gaze_display"] = [
+                    round(float(self._display_gaze_point[0]), 3),
+                    round(float(self._display_gaze_point[1]), 3),
+                ]
+            if self._selection_gaze_point is not None:
+                fields["gaze_selection"] = [
+                    round(float(self._selection_gaze_point[0]), 3),
+                    round(float(self._selection_gaze_point[1]), 3),
+                ]
             self.logger.log_cursor_sample(
                 raw_x=round(float(self._raw_offset_x), 3),
                 raw_y=round(float(self._raw_offset_y), 3),
@@ -1609,12 +1958,7 @@ class NinjaCursors(QtWidgets.QWidget):
             return
         sw, sh = self._screen_px_dimensions
         self._set_detector_capture_suspended(True)
-        # Calibration is fitted from WebEyeTrack's coordinates.  Do not carry
-        # manual corrections from a previous run into the calibrated runtime.
-        self.gaze_gain_x = 1.0
-        self.gaze_gain_y = 1.0
-        self.gaze_offset_x = 0.0
-        self.gaze_offset_y = 0.0
+        self._reset_gaze_runtime_state()
         self._calibration = EyeCalibration(
             sw, sh,
             num_points=self._calib_points,
@@ -1635,12 +1979,17 @@ class NinjaCursors(QtWidgets.QWidget):
             self._calib_status_text = f"Calibrated! Error: {mean_error_px:.0f}px"
             correction_values = self._calibration.correction_values if self._calibration is not None else None
             if correction_values:
-                # The full affine matrix remains inside WebEyeTrack.  A second
-                # gain/offset correction here would apply calibration twice.
-                self.gaze_gain_x = 1.0
-                self.gaze_gain_y = 1.0
-                self.gaze_offset_x = 0.0
-                self.gaze_offset_y = 0.0
+                matrix_value = correction_values.get("ninja_affine_matrix")
+                if matrix_value is None:
+                    matrix_value = correction_values.get("affine_matrix")
+                self._install_gaze_affine_matrix(
+                    "calibration_result",
+                    matrix_value,
+                )
+                self.gaze_gain_x = float(self.DEFAULT_GAZE_GAIN_X)
+                self.gaze_gain_y = float(self.DEFAULT_GAZE_GAIN_Y)
+                self.gaze_offset_x = float(self.DEFAULT_GAZE_OFFSET_X)
+                self.gaze_offset_y = float(self.DEFAULT_GAZE_OFFSET_Y)
                 correction_values = {
                     "gaze_gain_x": self.gaze_gain_x,
                     "gaze_gain_y": self.gaze_gain_y,
@@ -1654,7 +2003,17 @@ class NinjaCursors(QtWidgets.QWidget):
             )
         else:
             self._calib_status_text = "Calibration failed"
-            _emit_calibration_event("failed")
+            self.gaze_gain_x = float(self.DEFAULT_GAZE_GAIN_X)
+            self.gaze_gain_y = float(self.DEFAULT_GAZE_GAIN_Y)
+            self.gaze_offset_x = float(self.DEFAULT_GAZE_OFFSET_X)
+            self.gaze_offset_y = float(self.DEFAULT_GAZE_OFFSET_Y)
+            if self._gaze_affine_matrix is None:
+                self._load_last_gaze_affine_matrix()
+            self._reset_gaze_runtime_state()
+            _emit_calibration_event(
+                "failed",
+                mean_error_px=round(float(mean_error_px), 3) if mean_error_px is not None else None,
+            )
         self._calib_status_until = time.time() + 3.0
 
     def _set_detector_capture_suspended(self, suspended: bool):
