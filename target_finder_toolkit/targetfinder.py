@@ -51,6 +51,31 @@ AVAILABLE_MODELS = [
 ]
 
 
+MODEL_ARG_HELP = (
+    "Bundled YOLO26 model name (default: yolo26n-640) "
+    "or path to a custom .pt weights file."
+)
+
+
+def _resolve_model_path(model_name):
+    """Resolve a bundled model name or custom ``.pt`` path to a weights file."""
+    if model_name in AVAILABLE_MODELS:
+        here = os.path.dirname(__file__)
+        path = os.path.join(here, "models", f"{model_name}.pt")
+    else:
+        path = os.path.abspath(os.path.expanduser(model_name))
+        if not path.lower().endswith(".pt"):
+            raise ValueError(
+                f"Invalid model '{model_name}'. Choose from: {AVAILABLE_MODELS}, "
+                "or supply the path to a .pt weights file."
+            )
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Model weights not found at: {path}")
+
+    return path
+
+
 def _iou(a, b):
     """Compute IoU between two (x, y, w, h) boxes.
 
@@ -98,8 +123,9 @@ class TargetFinder:
         """Initialize the detector.
 
         Args:
-            model_name (str | None, optional): Name of the model to load.
-                Available choices: yolo26n-640, yolo26n-1280, yolo26n-1920,
+            model_name (str | None, optional): Bundled model name or path to a
+                custom ``.pt`` weights file.
+                Available bundled choices: yolo26n-640, yolo26n-1280, yolo26n-1920,
                 yolo26s-640, yolo26s-1280, yolo26s-1920, yolo26m-640, yolo26m-1280, yolo26m-1920.
                 Defaults to 'yolo26n-640'.
                 Note: Larger models (s, m) or higher resolutions (1280, 1920)
@@ -147,15 +173,7 @@ class TargetFinder:
         if model_name is None:
             model_name = "yolo26n-640"
 
-        if model_name not in AVAILABLE_MODELS:
-            raise ValueError(f"Invalid model name '{model_name}'. Choose from: {AVAILABLE_MODELS}")
-
-        # Resolve internal path to the models directory
-        here = os.path.dirname(__file__)
-        full_model_path = os.path.join(here, "models", f"{model_name}.pt")
-
-        if not os.path.isfile(full_model_path):
-            raise FileNotFoundError(f"Model weights not found at: {full_model_path}")
+        full_model_path = _resolve_model_path(model_name)
 
         # Load YOLO model
         self.model = YOLO(full_model_path)
@@ -686,7 +704,7 @@ def main():
 
     """
     parser = argparse.ArgumentParser(description="Launch the TargetFinder overlay")
-    parser.add_argument('--model', default="yolo26n-640", choices=AVAILABLE_MODELS, help="Select the YOLO26 model.")
+    parser.add_argument('--model', default="yolo26n-640", help=MODEL_ARG_HELP)
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.4, help="YOLO confidence threshold (0.0–1.0)")

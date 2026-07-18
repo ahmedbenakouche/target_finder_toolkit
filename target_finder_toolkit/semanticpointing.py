@@ -27,7 +27,7 @@ import math
 import pyautogui
 from pynput import keyboard, mouse
 import argparse
-from target_finder_toolkit.targetfinder import TargetFinder, AVAILABLE_MODELS
+from target_finder_toolkit.targetfinder import TargetFinder, MODEL_ARG_HELP
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
 import math
 
@@ -500,7 +500,7 @@ def main():
         Starts the Qt event loop until exit.
     """
     parser = argparse.ArgumentParser(description="Launch the Semantic Pointing overlay")
-    parser.add_argument('--model', default="yolo26n-640", choices=AVAILABLE_MODELS, help="Select the YOLO26 model.")
+    parser.add_argument('--model', default="yolo26n-640", help=MODEL_ARG_HELP)
     parser.add_argument('--change-thresh', type=int, default=100, help="Threshold for detecting screen changes")
     parser.add_argument('--capture-interval', type=float, default=1 / 30, help="Interval between screen captures (in seconds)")
     parser.add_argument('--confidence', type=float, default=0.4, help="YOLO confidence threshold (0.0–1.0)")

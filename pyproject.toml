@@ -41,7 +41,7 @@ semanticpointing = "target_finder_toolkit.semanticpointing:main"
 
 [project.urls]
 Repository = "https://github.com/ahmedbenakouche/target_finder_toolkit"
-Documentation = "https://zingy-biscuit-a4bc5c.netlify.app/"
+Documentation = "https://target-finder-toolkit.netlify.app/"
 
 [tool.setuptools]
 include-package-data = true

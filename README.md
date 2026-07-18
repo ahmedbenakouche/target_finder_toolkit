@@ -4,7 +4,7 @@
 # TargetFinder Toolkit
 
 This toolkit accompanies the work presented in the article **TargetFinder: Detecting Widgets from Pixels on Desktop Interfaces**.  
-It provides a real-time detection system using the YOLOv8 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
+It provides a real-time detection system using the YOLO26 model to predict the bounding boxes of GUI widgets from desktop screenshots — **without requiring access to application internals or accessibility APIs**.
 
 The system is lightweight and easy to integrate, enabling the implementation of advanced interaction techniques.  
 As proof of concept, we include two interaction techniques built on top of TargetFinder:
@@ -13,8 +13,7 @@ As proof of concept, we include two interaction techniques built on top of Targe
 - **[Semantic Pointing](https://dl.acm.org/doi/10.1145/985692.985758)** 
 
 > **Compatibility Note**  
-> TargetFinder uses the `mss` library for fast screen capture, and the detection engine is theoretically cross-platform. However, the system has been **validated only on Windows 10/11 and Linux (Ubuntu X11)**.
-> Operation is **not guaranteed on macOS**, where additional adaptations are required.  
+> TargetFinder uses the `mss` library for fast screen capture, and the detection engine is theoretically cross-platform. However, the system has been **validated on Windows 10/11 and Linux (Ubuntu X11), and macOS (tested on Apple Silicon in beta)**. 
 > Other Linux setups (e.g., distributions other than Ubuntu, or Wayland instead of X11) may also require adjustments.
 
 
@@ -177,7 +176,7 @@ if __name__ == "__main__":
 For the full API reference and detailed explanations of all parameters,  
 visit the documentation site:
 
-👉 [**Documentation (API & Developer Guide)**](https://zingy-biscuit-a4bc5c.netlify.app/)
+👉 [**Documentation (API & Developer Guide)**](https://target-finder-toolkit.netlify.app/)
 
 
 
@@ -213,12 +212,14 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 
 #### Available options:
 
+> **Note:** The models are automatically loaded by the toolkit. They are also available on Hugging Face: [ab-dev26/targetfinder](https://huggingface.co/ab-dev26/targetfinder).
+
 | Option | Description |
 |--------|-------------|
-| `--model-path` | By default, TargetFinder loads our trained model `YOLOv8n` packaged with the toolkit, but you can supply your own. |
+| `--model` | Select one of our trained YOLO26 models. A higher input resolution or a larger model size provides better performance, especially for small widgets, but increases inference time. Available models: `yolo26[n\|s\|m]-[640\|1280\|1920]` (default = `yolo26n-640`). You can also supply your own model by passing the path to your `.pt` weights file. |
 | `--change-thresh` | Screen change detection threshold. A higher value makes detection less sensitive to small variations. (`default = 100`). |
 | `--capture-interval` | Time between screen captures in seconds. Lower values = higher frequency but more CPU/GPU usage. (`default = 1/30 ≈ 0.033s`). |
-| `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0], default = 0.28`). |
+| `--confidence` | Minimum YOLO confidence required to keep a detection. (`[0.0–1.0], default = 0.4`). |
 | `--iou` | IoU threshold for non-max suppression (controls overlap merging). (`[0.0–1.0], default = 0.3`). |
 | `--display` *(semanticpointing only)* | Show visual feedback (motor vs visual space). |
 | `--disable-accel` *(semanticpointing only)* | Disable system mouse acceleration. |
@@ -228,7 +229,7 @@ Example:
 bubblecursor \
   --change-thresh 100 \
   --capture-interval 0.033 \
-  --confidence 0.28 \
+  --confidence 0.4 \
   --iou 0.3
 ```
 
