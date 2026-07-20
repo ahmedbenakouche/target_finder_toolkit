@@ -33,7 +33,7 @@ from target_finder_toolkit.annotation_detector import FakeTargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors, disable_mouse_acceleration, restore_mouse_acceleration
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
-from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui, warm_up_macos_keyboard_layout
 
 
 
@@ -597,16 +597,20 @@ class SemanticPointing(QtWidgets.QWidget):
         self.control_panel.toggle_visible()
     @QtCore.pyqtSlot()
     def panel_up(self):
-        self.control_panel.move_selection_up()
+        if self.control_panel.isVisible():
+            self.control_panel.move_selection_up()
     @QtCore.pyqtSlot()
     def panel_down(self):
-        self.control_panel.move_selection_down()
+        if self.control_panel.isVisible():
+            self.control_panel.move_selection_down()
     @QtCore.pyqtSlot()
     def panel_left(self):
-        self.control_panel.adjust_current(-1)
+        if self.control_panel.isVisible():
+            self.control_panel.adjust_current(-1)
     @QtCore.pyqtSlot()
     def panel_right(self):
-        self.control_panel.adjust_current(1)
+        if self.control_panel.isVisible():
+            self.control_panel.adjust_current(1)
 
 
     # === Quit ===
@@ -687,16 +691,21 @@ class SemanticPointing(QtWidgets.QWidget):
                     return
             except AttributeError:
                 pass
-            if self.control_panel.isVisible():
-                if key == keyboard.Key.up:
-                    QtCore.QMetaObject.invokeMethod(self, "panel_up", QtCore.Qt.ConnectionType.QueuedConnection)
-                elif key == keyboard.Key.down:
-                    QtCore.QMetaObject.invokeMethod(self, "panel_down", QtCore.Qt.ConnectionType.QueuedConnection)
-                elif key == keyboard.Key.left:
-                    QtCore.QMetaObject.invokeMethod(self, "panel_left", QtCore.Qt.ConnectionType.QueuedConnection)
-                elif key == keyboard.Key.right:
-                    QtCore.QMetaObject.invokeMethod(self, "panel_right", QtCore.Qt.ConnectionType.QueuedConnection)
-                
+            # Do not touch self.control_panel (a Qt widget) here: this
+            # callback runs on pynput's own background thread, never the Qt
+            # main thread, and reading Qt widget state off-thread is unsafe.
+            # Each panel_* slot below runs on the main thread (queued) and
+            # checks visibility itself.
+            if key == keyboard.Key.up:
+                QtCore.QMetaObject.invokeMethod(self, "panel_up", QtCore.Qt.ConnectionType.QueuedConnection)
+            elif key == keyboard.Key.down:
+                QtCore.QMetaObject.invokeMethod(self, "panel_down", QtCore.Qt.ConnectionType.QueuedConnection)
+            elif key == keyboard.Key.left:
+                QtCore.QMetaObject.invokeMethod(self, "panel_left", QtCore.Qt.ConnectionType.QueuedConnection)
+            elif key == keyboard.Key.right:
+                QtCore.QMetaObject.invokeMethod(self, "panel_right", QtCore.Qt.ConnectionType.QueuedConnection)
+
+        warm_up_macos_keyboard_layout()
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 

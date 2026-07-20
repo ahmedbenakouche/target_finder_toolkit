@@ -30,7 +30,10 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from target_finder_toolkit.filters import add_filter_arguments
 from target_finder_toolkit.logging_utils import make_default_log_path
 from target_finder_toolkit.mouse_utils import restore_default_cursors
-from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.window_utils import (
+    install_qt_crash_guard,
+    raise_macos_window_above_system_ui,
+)
 from target_finder_toolkit.windows_process_utils import (
     attach_windows_kill_on_close_job,
     close_windows_process_job,
@@ -81,13 +84,14 @@ DEFAULT_DYNASPOT_SPOT_WIDTH = 128.0
 DEFAULT_DYNASPOT_LAG = 0.300
 DEFAULT_DYNASPOT_REDUCE_TIME = 0.500
 DEFAULT_NINJA_CAMERA_INDEX = 0
-DEFAULT_NINJA_SPACING = 320.0
+DEFAULT_NINJA_SPACING = 350.0
 DEFAULT_NINJA_GAZE_SMOOTHING = 0.35
 DEFAULT_NINJA_GAZE_GAIN_X = 1.0
 DEFAULT_NINJA_GAZE_GAIN_Y = 1.0
-DEFAULT_NINJA_GAZE_OFFSET_X = 0.0
-DEFAULT_NINJA_GAZE_OFFSET_Y = 0.0
+DEFAULT_NINJA_GAZE_OFFSET_X = -40.0
+DEFAULT_NINJA_GAZE_OFFSET_Y = -50.0
 DEFAULT_NINJA_SELECTION_HOLD = 2.0
+NINJA_CALIBRATION_MAX_RETRIES = 2
 COUNTDOWN_STEP_SEC = 0.5
 
 
@@ -952,14 +956,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._process_output_buffer = ""
         self._process_output_lines: list[str] = []
         self._waiting_for_ninja_calibration = False
+        self._ninja_calibration_retries_left = NINJA_CALIBRATION_MAX_RETRIES
         self._pending_external_click_payload: dict | None = None
         self._exit_code = 0
         self._aborting = False
         self._app_filter_installed = False
         self._pretrial_cursor_lock_active = False
         self.mouse_decoupled = False
-        self._global_keyboard_listener = None
-        self._global_keyboard_listener_failed = False
         self.technique_name = self.trials[0].technique if self.trials else None
         self.ninja_control_file: Path | None = Path(ninja_control_file) if ninja_control_file else None
         if self.technique_command is not None and self._uses_ninja_cursors():
@@ -1008,11 +1011,13 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
         self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
         self._escape_shortcut.activated.connect(lambda: self._abort_experiment("keyboard_escape"))
+        self._quit_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
+        self._quit_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+        self._quit_shortcut.activated.connect(lambda: self._abort_experiment("keyboard_q"))
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
             self._app_filter_installed = True
-        self._start_global_keyboard_listener()
 
         if self.emit_session_events:
             self._write_event(
@@ -1055,7 +1060,6 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._cleanup_ninja_control_file()
         self._cleanup_annotation_control_file()
         self._end_session("window_close")
-        self._stop_global_keyboard_listener()
         app = QtWidgets.QApplication.instance()
         if app is not None and self._app_filter_installed:
             app.removeEventFilter(self)
@@ -1098,54 +1102,9 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._cleanup_ninja_control_file()
         self._cleanup_annotation_control_file()
         self._end_session(reason)
-        self._stop_global_keyboard_listener()
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.exit(self._exit_code)
-
-    def _start_global_keyboard_listener(self):
-        if sys.platform == "darwin":
-            return
-        if self._global_keyboard_listener is not None or self._global_keyboard_listener_failed:
-            return
-        try:
-            from pynput import keyboard as pynput_keyboard
-        except Exception:
-            self._global_keyboard_listener_failed = True
-            return
-
-        def on_press(key):
-            try:
-                if key == pynput_keyboard.Key.esc:
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_abort_from_global_keyboard",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                    )
-            except Exception:
-                return
-
-        try:
-            self._global_keyboard_listener = pynput_keyboard.Listener(on_press=on_press)
-            self._global_keyboard_listener.start()
-        except Exception:
-            self._global_keyboard_listener = None
-            self._global_keyboard_listener_failed = True
-
-    def _stop_global_keyboard_listener(self):
-        listener = self._global_keyboard_listener
-        self._global_keyboard_listener = None
-        if listener is None:
-            return
-        try:
-            listener.stop()
-        except Exception:
-            pass
-
-    @QtCore.pyqtSlot()
-    def _abort_from_global_keyboard(self):
-        if self.isVisible():
-            self._abort_experiment("keyboard_escape")
 
     def _start_technique_process(self):
         if self.technique_command is None or self.technique_process is not None:
@@ -1251,14 +1210,29 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
             return
         if not self._waiting_for_ninja_calibration:
             return
-        self._waiting_for_ninja_calibration = False
         if event == "calibrated":
+            self._waiting_for_ninja_calibration = False
             self._set_message_text("Calibration complete" if is_english(self.language) else "Calibration terminee", style="center")
+            QtCore.QTimer.singleShot(900, self._show_trial_intro)
         elif event == "failed":
+            if self._ninja_calibration_retries_left > 0:
+                self._ninja_calibration_retries_left -= 1
+                self._set_message_text(
+                    "Calibration failed, retrying..." if is_english(self.language) else "Calibration echouee, nouvel essai...",
+                    style="center",
+                )
+                self._write_event({"type": "ninja_calibration_retry", "event": event})
+                QtCore.QTimer.singleShot(1200, self._retry_ninja_calibration)
+                return
+            self._waiting_for_ninja_calibration = False
             self._set_message_text("Calibration failed" if is_english(self.language) else "Calibration echouee", style="center")
+            self._write_event({"type": "ninja_calibration_blocked_experiment", "event": event})
+            QtCore.QTimer.singleShot(1200, lambda: self._abort_experiment("ninja_calibration_failed"))
         else:
+            self._waiting_for_ninja_calibration = False
             self._set_message_text("Calibration cancelled" if is_english(self.language) else "Calibration annulee", style="center")
-        QtCore.QTimer.singleShot(900, self._show_trial_intro)
+            self._write_event({"type": "ninja_calibration_blocked_experiment", "event": event})
+            QtCore.QTimer.singleShot(1200, lambda: self._abort_experiment("ninja_calibration_cancelled"))
 
     def _check_technique_process(self):
         if self.technique_process is None:
@@ -1286,11 +1260,16 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         )
         if self._waiting_for_ninja_calibration:
             self._waiting_for_ninja_calibration = False
-            self._set_message_text(
-                f"{'Ninja Cursors stopped' if is_english(self.language) else 'Ninja Cursors arrete'} ({exit_code})",
-                style="center",
-            )
-            QtCore.QTimer.singleShot(900, self._show_trial_intro)
+            self._write_event({"type": "ninja_calibration_blocked_experiment", "event": "process_exited"})
+            self._abort_experiment("ninja_exited_during_calibration")
+            return
+        # The technique subprocess died on its own outside the calibration
+        # wait (crashed, or the participant quit it directly -- e.g. Ninja
+        # Cursors' own "q" shortcut while its overlay has OS focus). Without
+        # this, the trial keeps running against a dead technique process
+        # (frozen/no-op cursor) instead of ending the experiment.
+        if not self._session_ended and not self._aborting:
+            self._abort_experiment("technique_exited_unexpectedly")
 
     def _stop_technique_process(self, *, wait: bool = True):
         if self.technique_process is None:
@@ -1394,6 +1373,21 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
 
     def _ninja_active_state(self) -> str:
         return self._ninja_state_at_start("active")
+
+    def _ninja_calibrate_state(self) -> str:
+        return self._ninja_state_at_start("calibrate")
+
+    def _retry_ninja_calibration(self):
+        if self.technique_process is None or self.technique_process.poll() is not None:
+            self._waiting_for_ninja_calibration = False
+            self._abort_experiment("ninja_calibration_failed")
+            return
+        self._waiting_for_ninja_calibration = True
+        self._set_message_text(
+            "Recalibrating Ninja Cursors..." if is_english(self.language) else "Nouvelle calibration de Ninja Cursors...",
+            style="center",
+        )
+        self._set_ninja_control_state(self._ninja_calibrate_state())
 
     def _ninja_state_at_start(self, state: str) -> str:
         if not self._uses_ninja_cursors():
@@ -1609,16 +1603,6 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         self._accept_clicks = False
         self._set_ninja_control_state(self._ninja_pretrial_state())
         self._start_cursor_lock_if_needed()
-        if self.current_index == 0:
-            countdown_label = format_countdown_seconds(self.countdown_sec)
-            intro_text = (
-                f"After a {countdown_label} s countdown,\nclick the red target."
-                if is_english(self.language)
-                else f"Après un compte à rebours de {countdown_label} s,\ncliquez sur la cible rouge."
-            )
-            self._set_message_text(intro_text, style="center")
-            QtCore.QTimer.singleShot(5000, self._start_countdown)
-            return
         self._set_message_text(f"Image {self.current_index + 1}", style="center")
         QtCore.QTimer.singleShot(800, self._start_countdown)
 
@@ -1812,12 +1796,18 @@ class ExperimentalTaskWindow(QtWidgets.QWidget):
         if event.key() == QtCore.Qt.Key.Key_Escape:
             self._abort_experiment("keyboard_escape")
             return
+        if event.key() == QtCore.Qt.Key.Key_Q:
+            self._abort_experiment("keyboard_q")
+            return
         super().keyPressEvent(event)
 
     def eventFilter(self, watched, event):
         if self.isVisible() and event.type() == QtCore.QEvent.Type.KeyPress:
             if event.key() == QtCore.Qt.Key.Key_Escape:
                 self._abort_experiment("keyboard_escape")
+                return True
+            if event.key() == QtCore.Qt.Key.Key_Q:
+                self._abort_experiment("keyboard_q")
                 return True
         return super().eventFilter(watched, event)
 
@@ -1929,6 +1919,7 @@ def main():
     if args.summary_only:
         return
 
+    install_qt_crash_guard()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     dataset_by_image = {str(item.image_path): item for item in dataset}
     log_file = (

@@ -27,7 +27,11 @@ from target_finder_toolkit.annotation_detector import FakeTargetFinder
 from target_finder_toolkit.mouse_utils import restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
-from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.window_utils import (
+    install_qt_crash_guard,
+    raise_macos_window_above_system_ui,
+    warm_up_macos_keyboard_layout,
+)
 
 __all__ = ["dynaspot", "main"]
 
@@ -375,6 +379,8 @@ class DynaSpot(QtWidgets.QWidget):
             except AttributeError:
                 pass
 
+        warm_up_macos_keyboard_layout()
+
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 
@@ -637,6 +643,7 @@ def dynaspot(
     logger=None,
     **dynaspot_kwargs,
 ):
+    install_qt_crash_guard()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     ov = DynaSpot(detector, cursor_filter=cursor_filter, logger=logger, **dynaspot_kwargs)
     ov.show()

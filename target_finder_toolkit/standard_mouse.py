@@ -19,6 +19,7 @@ from pynput import keyboard, mouse
 
 from target_finder_toolkit.filters import add_filter_arguments, filter_kwargs_from_args, PointFilter2D
 from target_finder_toolkit.logging_utils import SessionLogger
+from target_finder_toolkit.window_utils import install_qt_crash_guard, warm_up_macos_keyboard_layout
 
 
 class StandardMouseRunner(QtCore.QObject):
@@ -152,6 +153,7 @@ class StandardMouseRunner(QtCore.QObject):
             except AttributeError:
                 pass
 
+        warm_up_macos_keyboard_layout()
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 
@@ -214,6 +216,7 @@ def parse_args(argv: list[str] | None = None):
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    install_qt_crash_guard()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
     logger = SessionLogger(args.log_file, cursor_hz=args.log_cursor_hz) if args.log_file else None
     runner = StandardMouseRunner(args, logger=logger)

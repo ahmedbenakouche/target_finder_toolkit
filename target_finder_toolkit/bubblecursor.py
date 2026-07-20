@@ -33,7 +33,7 @@ from target_finder_toolkit.annotation_detector import FakeTargetFinder
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.filters import FILTER_OPTIONS, PointFilter2D, add_filter_arguments, filter_kwargs_from_args
 from target_finder_toolkit.logging_utils import SessionLogger
-from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui, warm_up_macos_keyboard_layout
 
 __all__ = ["bubble_cursor", "main"]
 
@@ -441,6 +441,7 @@ class BubbleCursor(QtWidgets.QWidget):
                     QtCore.QMetaObject.invokeMethod(self, "stop_and_quit", QtCore.Qt.ConnectionType.QueuedConnection)
             except AttributeError:
                 pass
+        warm_up_macos_keyboard_layout()
         self._keyboard_listener = keyboard.Listener(on_press=on_press)
         self._keyboard_listener.start()
 

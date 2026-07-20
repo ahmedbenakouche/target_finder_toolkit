@@ -62,6 +62,9 @@ if sys.platform.startswith("win"):
     def restore_default_cursors():
         user32.SystemParametersInfoW(SPI_SETCURSORS, 0, None, SPIF_SENDCHANGE)
 
+    # Already unconditional on this platform.
+    force_restore_cursor_visibility = restore_default_cursors
+
 elif sys.platform.startswith("linux"):
     import ctypes
 
@@ -106,6 +109,9 @@ elif sys.platform.startswith("linux"):
         libXfixes.XFixesShowCursor(_X11_DISPLAY, _X11_ROOT)
         # flush the request buffer to ensure the command is sent immediately
         libX11.XFlush(_X11_DISPLAY)
+
+    # Already unconditional (only gated on X11/XFixes availability) on this platform.
+    force_restore_cursor_visibility = restore_default_cursors
 
 else:
     # macOS implementation using ApplicationServices
@@ -209,10 +215,46 @@ else:
             if threading.current_thread() is threading.main_thread():
                 _restore_ns_cursor()
             _CURSOR_HIDDEN = False
+
+        def force_restore_cursor_visibility():
+            """Unconditionally show the system cursor, ignoring this
+            process's own _CURSOR_HIDDEN flag.
+
+            _CURSOR_HIDDEN only tracks whether *this* process called
+            hide_cursor_everywhere(). The cursor is often actually hidden by
+            a different process (e.g. the Ninja Cursors technique
+            subprocess); if that process crashes instead of exiting
+            gracefully, its cleanup code never runs and the cursor can stay
+            hidden. A supervising process (the control panel) needs to be
+            able to force the cursor back regardless of what its own local
+            flag says.
+            """
+            global _CURSOR_HIDDEN, _CURSOR_MONITOR_STOP, _CURSOR_MONITOR_THREAD, _NS_CURSOR_HIDE_COUNT
+            if _CURSOR_MONITOR_STOP is not None:
+                _CURSOR_MONITOR_STOP.set()
+            _CURSOR_MONITOR_STOP = None
+            _CURSOR_MONITOR_THREAD = None
+            try:
+                display_id = _app_services.CGMainDisplayID()
+                if not _app_services.CGCursorIsVisible():
+                    _app_services.CGDisplayShowCursor(display_id)
+            except Exception:
+                pass
+            if threading.current_thread() is threading.main_thread():
+                try:
+                    if _NSCursor is not None and QtWidgets.QApplication.instance() is not None:
+                        for _ in range(8):
+                            _NSCursor.unhide()
+                except Exception:
+                    pass
+            _NS_CURSOR_HIDE_COUNT = 0
+            _CURSOR_HIDDEN = False
     except Exception:
         def hide_cursor_everywhere():
             pass
         def restore_default_cursors():
+            pass
+        def force_restore_cursor_visibility():
             pass
 
 

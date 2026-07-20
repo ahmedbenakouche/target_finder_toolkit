@@ -13,7 +13,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -37,6 +39,41 @@ from target_finder_toolkit.fitts_distractors_task import (
     DEFAULT_MAX_CLICKS,
     DEFAULT_TRIALS,
 )
+from target_finder_toolkit.window_utils import install_qt_crash_guard
+
+
+_current_child_process: list = [None]
+
+
+def _handle_termination_signal(signum, frame):
+    """Forward SIGTERM to the currently running task subprocess.
+
+    Without this, killing this orchestrator process (e.g. the control
+    panel's Stop button) leaves the synthetic-Fitts/realistic subprocess
+    running with no idea its parent is gone; that subprocess in turn has its
+    own preloaded technique subprocesses (bubble cursor, Ninja Cursors, ...)
+    detached into their own process groups, so the whole tree is orphaned.
+    Forwarding the signal lets the child's own termination handler tear its
+    own children down before this process exits.
+    """
+    proc = _current_child_process[0]
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    os._exit(130)
+
+
+def install_termination_signal_forwarding():
+    try:
+        signal.signal(signal.SIGTERM, _handle_termination_signal)
+    except Exception:
+        pass
 
 
 def _safe_id(participant_id: str) -> str:
@@ -161,10 +198,17 @@ def task_description(task_name: str, *, language: str) -> str:
     )
 
 
-def show_between_task_pause(args, *, previous_task: str, next_task: str):
+def show_between_task_pause(args, screen, *, previous_task: str, next_task: str):
+    """Show the pause screen on the given (already created) session screen.
+
+    The screen is kept alive (as a lowered fullscreen backdrop) instead of
+    being closed, so the desktop is never exposed between the moment the
+    participant clicks continue and the moment the next task's subprocess
+    window has actually appeared -- that subprocess needs a few seconds to
+    start Python, Qt, and (for Ninja Cursors) the eye-tracking stack.
+    """
     from PyQt6 import QtWidgets
 
-    screen = create_session_screen(windowed=args.windowed, language=args.language)
     previous_label = task_label(previous_task, language=args.language)
     next_label = task_label(next_task, language=args.language)
     if is_english(args.language):
@@ -181,35 +225,82 @@ def show_between_task_pause(args, *, previous_task: str, next_task: str):
         )
         hint = "Quand la pause est terminée, cliquez sur le bouton pour commencer l’expérience suivante."
         button_text = "Commencer l’expérience suivante"
+    screen.show_content(
+        title="Pause",
+        body=body,
+        hint=hint,
+        button_text=button_text,
+        pending_feedback=False,
+    )
+    aborted = screen.wait_for_continue()
+    app = QtWidgets.QApplication.instance()
+    if aborted:
+        return True
+    show_preparing_next_task_backdrop(args, screen, next_task=next_task)
+    if app is not None:
+        app.processEvents()
+    return False
+
+
+def show_preparing_next_task_backdrop(args, screen, *, next_task: str):
+    """Keep a fullscreen black backdrop up while the next task subprocess starts."""
+    next_label = task_label(next_task, language=args.language)
+    if is_english(args.language):
+        title = "Preparing next experiment..."
+        body = f"Starting: {next_label}."
+    else:
+        title = "Préparation de l’expérience suivante..."
+        body = f"Démarrage : {next_label}."
+    screen.show_content(
+        title=title,
+        body=body,
+        hint="",
+        button_text=None,
+        pending_feedback=False,
+    )
+    screen.show_background_behind(clear_content=False)
+
+
+def show_task_error_screen(args, screen, *, task_name: str, returncode: int):
+    """Show a visible error message before closing instead of silently
+    dropping to the desktop when a task subprocess fails unexpectedly."""
+    from PyQt6 import QtWidgets
+
+    failed_label = task_label(task_name, language=args.language)
+    if is_english(args.language):
+        title = "Experiment stopped"
+        body = f"{failed_label} stopped unexpectedly (exit code {returncode})."
+        hint = "The session log has the details. Click Close to exit."
+        button_text = "Close"
+    else:
+        title = "Expérience arrêtée"
+        body = f"{failed_label} s’est arrêtée de façon inattendue (code de sortie {returncode})."
+        hint = "Le journal de session contient les détails. Cliquez sur Fermer pour quitter."
+        button_text = "Fermer"
     try:
         screen.show_content(
-            title="Pause",
+            title=title,
             body=body,
             hint=hint,
             button_text=button_text,
             pending_feedback=False,
         )
-        aborted = screen.wait_for_continue()
-        if aborted:
-            screen.close()
-            return True, None
-        screen.close()
-        app = QtWidgets.QApplication.instance()
-        if app is not None:
-            app.processEvents()
-        return False, None
+        screen.wait_for_continue()
     except Exception:
-        screen.close()
+        pass
+    finally:
+        try:
+            screen.close()
+        except Exception:
+            pass
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.processEvents()
-        raise
 
 
-def show_completion_screen(args):
+def show_completion_screen(args, screen):
     from PyQt6 import QtWidgets
 
-    screen = create_session_screen(windowed=args.windowed, language=args.language)
     if is_english(args.language):
         title = "Experiment completed"
         body = "Congratulations, you have completed this experimental session."
@@ -268,6 +359,14 @@ def parse_args(argv: list[str] | None = None):
 
 
 def run(args) -> int:
+    # Without this, an unhandled exception in any Qt slot running in this
+    # process (session-screen timers, the global Escape listener, ...) makes
+    # PyQt6 call qFatal() and abort the whole process. Since this process
+    # holds the fullscreen backdrop between the two experiments, that abort
+    # is exactly what shows up as "jumps straight to the desktop" -- every
+    # other entry point in this project already installs this guard.
+    install_qt_crash_guard()
+    install_termination_signal_forwarding()
     order = comparative_task_order(args.participant, args.seed)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     session_id = f"{_safe_id(args.participant)}_{stamp}_comparative"
@@ -304,6 +403,30 @@ def run(args) -> int:
             },
         )
 
+    # A single session screen stays alive (as a lowered fullscreen backdrop)
+    # for the whole comparative protocol. Each task subprocess needs a few
+    # seconds to start Python/Qt (and, for Ninja Cursors, the eye-tracking
+    # stack); without a backdrop covering that gap, the desktop is briefly
+    # exposed between the end of one task's window and the appearance of the
+    # next one's. Closing this screen only happens once, right before the
+    # process exits.
+    from PyQt6 import QtWidgets
+
+    session_screen = None if args.summary_only else create_session_screen(
+        windowed=args.windowed, language=args.language
+    )
+
+    def _close_session_screen():
+        if session_screen is None:
+            return
+        try:
+            session_screen.close()
+        except Exception:
+            pass
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.processEvents()
+
     started = time.time()
     for task_index, task_name in enumerate(order, start=1):
         if task_name == "realistic":
@@ -330,6 +453,9 @@ def run(args) -> int:
             )
             continue
 
+        if task_index == 1:
+            show_preparing_next_task_backdrop(args, session_screen, next_task=task_name)
+
         if not args.no_log:
             write_event(
                 log_file,
@@ -346,7 +472,12 @@ def run(args) -> int:
                 },
             )
 
-        returncode = subprocess.call(cmd, cwd=str(PROJECT_ROOT))
+        child_proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT))
+        _current_child_process[0] = child_proc
+        try:
+            returncode = child_proc.wait()
+        finally:
+            _current_child_process[0] = None
 
         if not args.no_log:
             write_event(
@@ -374,6 +505,15 @@ def run(args) -> int:
                         "total_duration_sec": round(time.time() - started, 3),
                     },
                 )
+            # 130 means the participant deliberately pressed Escape inside
+            # the task -- that is an intentional exit, not an error, so just
+            # close quietly. Anything else (a crash, a missing dependency,
+            # calibration exhausting its retries, ...) is unexpected and
+            # should be shown, not silently dropped to the desktop.
+            if returncode != 130 and session_screen is not None and not args.summary_only:
+                show_task_error_screen(args, session_screen, task_name=task_name, returncode=returncode)
+            else:
+                _close_session_screen()
             return returncode
 
         if task_index < len(order):
@@ -390,8 +530,9 @@ def run(args) -> int:
                     },
                 )
 
-            aborted, _pause_screen = show_between_task_pause(
+            aborted = show_between_task_pause(
                 args,
+                session_screen,
                 previous_task=task_name,
                 next_task=next_task,
             )
@@ -421,10 +562,11 @@ def run(args) -> int:
                             "total_duration_sec": round(time.time() - started, 3),
                         },
                     )
+                _close_session_screen()
                 return 130
 
     if not args.summary_only:
-        show_completion_screen(args)
+        show_completion_screen(args, session_screen)
     if not args.summary_only and not args.no_log:
         write_event(
             log_file,

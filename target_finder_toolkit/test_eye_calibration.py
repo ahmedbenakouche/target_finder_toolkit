@@ -111,7 +111,7 @@ class EyeCalibrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             calibration.SAVE_DIR = Path(tmpdir)
             calibration._fit()
-            saved = json.loads((Path(tmpdir) / "last_calibration.json").read_text())
+            saved = json.loads((Path(tmpdir) / "last_failed_calibration.json").read_text())
 
         self.assertFalse(calibration.is_calibrated)
         self.assertIsNone(calibration.correction_values)
@@ -122,6 +122,98 @@ class EyeCalibrationTest(unittest.TestCase):
         self.assertIn("affine calibration error too high", saved["failure_reason"])
         self.assertIn("diagnostics", saved)
         self.assertIn("correction_values", saved)
+        self.assertFalse((Path(tmpdir) / "last_calibration.json").exists())
+
+    def test_fit_uses_point_median_and_rejects_internal_outliers(self):
+        screen_w, screen_h = 1000, 800
+        done = []
+        calibration = EyeCalibration(
+            screen_w,
+            screen_h,
+            num_points=5,
+            on_done=lambda success, error: done.append((success, error)),
+        )
+        tracker = _FakeTracker()
+        calibration.start(tracker)
+
+        expected_gain_x = 1.1
+        expected_gain_y = 0.9
+        expected_bias_x = 0.03
+        expected_bias_y = -0.02
+        calibration._gaze_results = []
+        for target_x, target_y in calibration.targets:
+            target_norm_x = target_x / screen_w - 0.5
+            target_norm_y = target_y / screen_h - 0.5
+            raw_x = (target_norm_x - expected_bias_x) / expected_gain_x
+            raw_y = (target_norm_y - expected_bias_y) / expected_gain_y
+            good_samples = [
+                SimpleNamespace(norm_pog=np.array([raw_x + dx, raw_y + dy]))
+                for dx, dy in [
+                    (0.000, 0.000),
+                    (0.004, -0.002),
+                    (-0.003, 0.003),
+                    (0.002, 0.001),
+                    (-0.002, -0.001),
+                ]
+            ]
+            bad_samples = [
+                SimpleNamespace(norm_pog=np.array([raw_x + 0.8, raw_y - 0.8])),
+                SimpleNamespace(norm_pog=np.array([np.nan, raw_y])),
+            ]
+            calibration._gaze_results.append(good_samples + bad_samples)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            calibration.SAVE_DIR = Path(tmpdir)
+            calibration._fit()
+            saved = json.loads((Path(tmpdir) / "last_calibration.json").read_text())
+
+        self.assertTrue(calibration.is_calibrated)
+        self.assertTrue(done[0][0])
+        affine = np.array(calibration.correction_values["ninja_affine_matrix"], dtype=np.float64)
+        self.assertAlmostEqual(affine[0, 0], expected_gain_x, places=2)
+        self.assertAlmostEqual(affine[1, 1], expected_gain_y, places=2)
+        for point in saved["diagnostics"]["points"]:
+            self.assertEqual(point["sample_count_raw"], 7)
+            self.assertEqual(point["sample_count_valid"], 6)
+            self.assertLess(point["sample_count_kept"], point["sample_count_valid"])
+            self.assertIn("raw_median_norm", point)
+
+    def test_fit_rejects_single_extreme_point_without_saving_as_success(self):
+        screen_w, screen_h = 1000, 800
+        done = []
+        calibration = EyeCalibration(
+            screen_w,
+            screen_h,
+            num_points=5,
+            on_done=lambda success, error: done.append((success, error)),
+        )
+        tracker = _FakeTracker()
+        calibration.start(tracker)
+
+        calibration._gaze_results = []
+        for point_idx, (target_x, target_y) in enumerate(calibration.targets):
+            target_norm_x = target_x / screen_w - 0.5
+            target_norm_y = target_y / screen_h - 0.5
+            raw_x = target_norm_x
+            raw_y = target_norm_y
+            if point_idx == 4:
+                raw_x += 1.0
+                raw_y += 1.0
+            calibration._gaze_results.append(
+                [SimpleNamespace(norm_pog=np.array([raw_x, raw_y])) for _ in range(5)]
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            calibration.SAVE_DIR = Path(tmpdir)
+            calibration._fit()
+            failed_path = Path(tmpdir) / "last_failed_calibration.json"
+            saved = json.loads(failed_path.read_text())
+
+        self.assertFalse(calibration.is_calibrated)
+        self.assertFalse(done[0][0])
+        self.assertFalse((Path(tmpdir) / "last_calibration.json").exists())
+        self.assertFalse(saved["accepted"])
+        self.assertIn("one calibration point error too high", saved["failure_reason"])
 
 
 if __name__ == "__main__":

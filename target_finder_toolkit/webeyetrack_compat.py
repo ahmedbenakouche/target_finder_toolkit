@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import sys
 import copy
 
 
 def patch_webeyetrack_dataclass_defaults() -> None:
-    """Allow older WebEyeTrack dataclasses with mutable defaults on Windows.
+    """Allow older WebEyeTrack dataclasses with mutable defaults to import.
 
     Some WebEyeTrack releases define dataclass fields with mutable defaults
-    such as numpy.ndarray or nested WebEyeTrack config objects. Recent
-    Python/dataclasses versions reject these during import. Patch dataclasses
+    such as numpy.ndarray or nested WebEyeTrack config objects. Python 3.11+
+    rejects these during import on every platform (dataclasses now considers
+    unhashable defaults, including numpy arrays, invalid) -- this used to only
+    reproduce on Windows setups that happened to pin a newer Python, but it
+    reproduces identically on macOS/Linux with Python 3.11+. Patch dataclasses
     only for WebEyeTrack-related mutable defaults before importing WebEyeTrack.
     """
-    if not sys.platform.startswith("win"):
-        return
-
     try:
         import dataclasses
         import numpy as np

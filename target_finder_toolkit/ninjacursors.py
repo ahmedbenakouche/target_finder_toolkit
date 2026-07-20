@@ -40,7 +40,11 @@ from target_finder_toolkit.logging_utils import SessionLogger
 from target_finder_toolkit.mouse_utils import hide_cursor_everywhere, restore_default_cursors
 from target_finder_toolkit.targetfinder import TargetFinder
 from target_finder_toolkit.webeyetrack_compat import patch_webeyetrack_dataclass_defaults
-from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.window_utils import (
+    install_qt_crash_guard,
+    raise_macos_window_above_system_ui,
+    warm_up_macos_keyboard_layout,
+)
 
 
 if sys.platform.startswith("win"):
@@ -389,7 +393,7 @@ class NinjaCursors(QtWidgets.QWidget):
     DEFAULT_RAKE_SPACING = 350.0
     DEFAULT_GAZE_SMOOTHING = 0.35
     DEFAULT_GAZE_OFFSET_X = -40.0
-    DEFAULT_GAZE_OFFSET_Y = -140.0
+    DEFAULT_GAZE_OFFSET_Y = -50.0
     DEFAULT_GAZE_GAIN_X = 1.0
     DEFAULT_GAZE_GAIN_Y = 1.0
     DEFAULT_TOP_HALF_EXTRA_Y = 0.0
@@ -546,6 +550,7 @@ class NinjaCursors(QtWidgets.QWidget):
         self._pending_click_target = None
         self._pending_click_cursor_id = None
         self._last_gaze_status = "waiting for webcam"
+        self._gaze_blocked_reason: str | None = None
         self._last_gaze_debug_t = 0.0
         self._last_successful_gaze_t = 0.0
         self._last_gaze_velocity_t = 0.0
@@ -596,6 +601,7 @@ class NinjaCursors(QtWidgets.QWidget):
         )
         self._tracker = _create_webeyetrack(cfg)
         self._reset_runtime_debug_log()
+        self._log_runtime_configuration()
         self._load_last_gaze_affine_matrix()
         self._capture = cv2.VideoCapture(self.camera_index)
         if not self._capture.isOpened():
@@ -719,7 +725,7 @@ class NinjaCursors(QtWidgets.QWidget):
         )
 
     def _load_last_gaze_affine_matrix(self):
-        path = EyeCalibration.SAVE_DIR / "last_calibration.json"
+        path = EyeCalibration.last_calibration_path()
         try:
             data = json.loads(path.read_text())
         except Exception as exc:
@@ -763,6 +769,21 @@ class NinjaCursors(QtWidgets.QWidget):
                 fh.write(f"{time.time():.3f} {text}\n")
         except Exception:
             pass
+
+    def _log_runtime_configuration(self):
+        detector_name = self.detector.__class__.__name__ if self.detector is not None else "none"
+        self._log_runtime_debug(
+            "runtime config "
+            f"calibration_file={EyeCalibration.last_calibration_path()} "
+            f"failed_calibration_file={EyeCalibration.last_failed_calibration_path()} "
+            f"detector={detector_name} "
+            f"experiment_control_file={self._experiment_control_file} "
+            f"spacing={self.rake_spacing:.1f} "
+            f"fixed_gain=({self.gaze_gain_x:.3f},{self.gaze_gain_y:.3f}) "
+            f"fixed_offset_px=({self.gaze_offset_x:.1f},{self.gaze_offset_y:.1f}) "
+            f"show_gaze={self.show_gaze} "
+            f"snap_system_cursor_to_active={self.snap_system_cursor_to_active}"
+        )
 
     def _reset_runtime_debug_log(self):
         try:
@@ -1253,6 +1274,14 @@ class NinjaCursors(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def _update_gaze(self):
+        if self._gaze_blocked_reason:
+            self._tracking_ok = False
+            self._gaze_point = None
+            self._display_gaze_point = None
+            self._selection_gaze_point = None
+            self._set_gaze_status(self._gaze_blocked_reason)
+            self.update()
+            return
         if self._capture is None:
             self._tracking_ok = False
             self._set_gaze_status("camera not initialized")
@@ -1912,6 +1941,7 @@ class NinjaCursors(QtWidgets.QWidget):
         def on_release(key):
             self._pressed_keys.discard(key)
 
+        warm_up_macos_keyboard_layout()
         self._keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self._keyboard_listener.start()
 
@@ -1956,6 +1986,7 @@ class NinjaCursors(QtWidgets.QWidget):
     def _start_calibration(self):
         if self._calibration and self._calibration.is_calibrating:
             return
+        self._gaze_blocked_reason = None
         sw, sh = self._screen_px_dimensions
         self._set_detector_capture_suspended(True)
         self._reset_gaze_runtime_state()
@@ -1976,6 +2007,7 @@ class NinjaCursors(QtWidgets.QWidget):
     def _on_calib_done(self, success, mean_error_px):
         self._set_detector_capture_suspended(False)
         if success:
+            self._gaze_blocked_reason = None
             self._calib_status_text = f"Calibrated! Error: {mean_error_px:.0f}px"
             correction_values = self._calibration.correction_values if self._calibration is not None else None
             if correction_values:
@@ -2007,9 +2039,20 @@ class NinjaCursors(QtWidgets.QWidget):
             self.gaze_gain_y = float(self.DEFAULT_GAZE_GAIN_Y)
             self.gaze_offset_x = float(self.DEFAULT_GAZE_OFFSET_X)
             self.gaze_offset_y = float(self.DEFAULT_GAZE_OFFSET_Y)
+            # A failed *recalibration* should not strand the cursors if a
+            # previously accepted calibration is still available: fall back to
+            # it instead of freezing gaze entirely. Only block gaze when there
+            # is truly no usable affine matrix to fall back on.
             if self._gaze_affine_matrix is None:
                 self._load_last_gaze_affine_matrix()
             self._reset_gaze_runtime_state()
+            if self._gaze_affine_matrix is None:
+                self._gaze_blocked_reason = "calibration failed; gaze disabled until recalibration"
+            else:
+                self._gaze_blocked_reason = None
+                self._log_runtime_debug(
+                    "calibration failed; keeping previously accepted gaze affine as fallback"
+                )
             _emit_calibration_event(
                 "failed",
                 mean_error_px=round(float(mean_error_px), 3) if mean_error_px is not None else None,
@@ -2228,6 +2271,7 @@ class NinjaCursors(QtWidgets.QWidget):
 
 
 def ninja_cursors(detector: Optional[TargetFinder], cursor_filter=None, logger=None, **kwargs):
+    install_qt_crash_guard()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     overlay = NinjaCursors(detector, cursor_filter=cursor_filter, logger=logger, **kwargs)
     overlay.show()
@@ -2242,6 +2286,17 @@ def ninja_cursors(detector: Optional[TargetFinder], cursor_filter=None, logger=N
         screen_height_px=int(overlay._screen_rect.height()),
         camera_index=int(overlay.camera_index),
         calib_points=int(overlay._calib_points),
+        calibration_file=str(EyeCalibration.last_calibration_path()),
+        fixed_gaze_gain_x=float(overlay.gaze_gain_x),
+        fixed_gaze_gain_y=float(overlay.gaze_gain_y),
+        fixed_gaze_offset_x=float(overlay.gaze_offset_x),
+        fixed_gaze_offset_y=float(overlay.gaze_offset_y),
+        detector=overlay.detector.__class__.__name__ if overlay.detector is not None else "none",
+        experiment_control_file=(
+            str(overlay._experiment_control_file)
+            if overlay._experiment_control_file is not None
+            else None
+        ),
     )
     def _handle_signal(sig, frame):
         global _SESSION_STOP_REASON
@@ -2342,6 +2397,12 @@ def main():
             gaze_offset_y=args.gaze_offset_y,
             gaze_gain_x=args.gaze_gain_x,
             gaze_gain_y=args.gaze_gain_y,
+            effective_gaze_offset_x=NinjaCursors.DEFAULT_GAZE_OFFSET_X,
+            effective_gaze_offset_y=NinjaCursors.DEFAULT_GAZE_OFFSET_Y,
+            effective_gaze_gain_x=NinjaCursors.DEFAULT_GAZE_GAIN_X,
+            effective_gaze_gain_y=NinjaCursors.DEFAULT_GAZE_GAIN_Y,
+            calibration_file=str(EyeCalibration.last_calibration_path()),
+            failed_calibration_file=str(EyeCalibration.last_failed_calibration_path()),
             selection_hold=args.selection_hold,
             lock_on_dwell=bool(args.lock_on_dwell),
             show_gaze=not args.hide_gaze_point,

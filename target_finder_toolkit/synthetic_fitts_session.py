@@ -23,6 +23,7 @@ from target_finder_toolkit.experimental_session import (
     balanced_latin_square_indices,
     cleanup_session_resources,
     create_session_screen,
+    install_termination_cleanup_handler,
     show_break_screen,
     start_preloaded_techniques,
     wait_for_initial_ninja_calibration,
@@ -33,6 +34,8 @@ from target_finder_toolkit.experimental_session import (
     _technique_instruction,
     _participant_row_index,
     _drain_preloaded_outputs,
+    _set_active_cleanup_state,
+    _clear_active_cleanup_state,
 )
 from target_finder_toolkit.fitts_distractors_task import (
     DEFAULT_COUNTDOWN,
@@ -45,6 +48,7 @@ from target_finder_toolkit.fitts_distractors_task import (
     SYNTHETIC_ID_VALUES,
     build_technique_command as build_fitts_technique_command,
 )
+from target_finder_toolkit.window_utils import install_qt_crash_guard
 
 
 DEFAULT_CONDITIONS_FILE = PROJECT_ROOT / "experiment_design" / "conditions.csv"
@@ -656,6 +660,7 @@ def run_block_in_process(
 
     from PyQt6 import QtCore, QtWidgets
 
+    install_qt_crash_guard()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
     technique_log_file = None if args.no_technique_log else (
         session_dir / f"{block_log_file.stem}_{block.technique}_runtime.jsonl"
@@ -734,6 +739,7 @@ def run_block_in_process(
 
 
 def run_session(args) -> int:
+    install_termination_cleanup_handler()
     session_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     session_id = f"{_safe_id(args.participant)}_{session_stamp}_synthetic_fitts"
     temp_dir_obj = None
@@ -817,6 +823,7 @@ def run_session(args) -> int:
             },
         )
 
+    install_qt_crash_guard()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
     session_screen = create_session_screen(windowed=args.windowed, language=args.language)
     ninja_control_file = session_dir / "ninja_cursors.control"
@@ -843,6 +850,11 @@ def run_session(args) -> int:
                 args,
                 session_id=session_id,
                 output_dir=session_dir,
+                session_log=session_log_file,
+                ninja_control_file=ninja_control_file,
+            )
+            _set_active_cleanup_state(
+                preloaded_processes=preloaded_processes,
                 session_log=session_log_file,
                 ninja_control_file=ninja_control_file,
             )
@@ -907,37 +919,80 @@ def run_session(args) -> int:
                     write_session_end("keyboard_escape_before_calibration")
                     return 130
 
-                session_screen.show_content(
-                    title="Calibration in progress" if args.language == "English" else "Calibration en cours",
-                    body=(
-                        "Look at the red point displayed on the screen until calibration is finished."
-                        if args.language == "English"
-                        else "Regardez le point rouge affiché à l'écran jusqu'à la fin de la calibration."
-                    ),
-                    hint=(
-                        "Do not click and avoid moving your head during this step."
-                        if args.language == "English"
-                        else "Ne cliquez pas et évitez de bouger la tête pendant cette étape."
-                    ),
-                    button_text=None,
-                    level_offset=0,
-                )
-                ninja_control_file.write_text("calibrate", encoding="utf-8")
-                write_event(session_log_file, {"type": "calibration_start_requested"})
-                calibration_result = wait_for_initial_ninja_calibration(
-                    preloaded_processes,
-                    session_log_file,
-                    app=app,
-                    abort_check=lambda: bool(session_screen.aborted),
-                )
-                ninja_control_file.write_text("paused", encoding="utf-8")
-                if calibration_result in {"aborted", "cancelled"}:
+                max_calibration_attempts = 5
+                calibration_result = None
+                calibration_payload: dict = {}
+                for calibration_attempt in range(1, max_calibration_attempts + 1):
+                    retry_suffix_en = f" (attempt {calibration_attempt}/{max_calibration_attempts})" if calibration_attempt > 1 else ""
+                    retry_suffix_fr = f" (tentative {calibration_attempt}/{max_calibration_attempts})" if calibration_attempt > 1 else ""
+                    session_screen.show_content(
+                        title=(
+                            f"Calibration in progress{retry_suffix_en}"
+                            if args.language == "English"
+                            else f"Calibration en cours{retry_suffix_fr}"
+                        ),
+                        body=(
+                            "Look at the red point displayed on the screen until calibration is finished."
+                            if args.language == "English"
+                            else "Regardez le point rouge affiché à l'écran jusqu'à la fin de la calibration."
+                        ),
+                        hint=(
+                            "Do not click and avoid moving your head during this step."
+                            if args.language == "English"
+                            else "Ne cliquez pas et évitez de bouger la tête pendant cette étape."
+                        ),
+                        button_text=None,
+                        level_offset=0,
+                    )
+                    ninja_control_file.write_text("calibrate", encoding="utf-8")
+                    write_event(session_log_file, {"type": "calibration_start_requested", "attempt": calibration_attempt})
+                    calibration_result, calibration_payload = wait_for_initial_ninja_calibration(
+                        preloaded_processes,
+                        session_log_file,
+                        app=app,
+                        abort_check=lambda: bool(session_screen.aborted),
+                    )
+                    ninja_control_file.write_text("paused", encoding="utf-8")
+                    if calibration_result != "failed":
+                        break
+                    write_event(
+                        session_log_file,
+                        {"type": "calibration_attempt_failed", "attempt": calibration_attempt, **calibration_payload},
+                    )
+                    if calibration_attempt >= max_calibration_attempts:
+                        break
+                    mean_error_px = calibration_payload.get("mean_error_px")
+                    error_detail_en = f" Measured error: {mean_error_px:.0f}px." if isinstance(mean_error_px, (int, float)) else ""
+                    error_detail_fr = f" Erreur mesurée : {mean_error_px:.0f}px." if isinstance(mean_error_px, (int, float)) else ""
+                    session_screen.show_content(
+                        title="Calibration failed" if args.language == "English" else "Calibration échouée",
+                        body=(
+                            f"The calibration error was too high.{error_detail_en} Let's try again.\n"
+                            "Sit closer to the screen, make sure your face is well lit, "
+                            "sit still, and look directly at each red point until it disappears."
+                            if args.language == "English"
+                            else f"L'erreur de calibration était trop élevée.{error_detail_fr} Recommençons.\n"
+                            "Rapprochez-vous de l'écran, assurez-vous que votre visage est bien éclairé, "
+                            "restez immobile et regardez directement chaque point rouge jusqu'à ce qu'il disparaisse."
+                        ),
+                        hint="Click Retry when you are ready." if args.language == "English" else "Cliquez sur Réessayer quand vous êtes prêt(e).",
+                        button_text="Retry calibration" if args.language == "English" else "Réessayer la calibration",
+                    )
+                    write_event(session_log_file, {"type": "calibration_retry_instructions", "attempt": calibration_attempt + 1})
+                    if session_screen.wait_for_continue():
+                        write_session_end("keyboard_escape_during_calibration")
+                        return 130
+                if calibration_result in {"aborted", "cancelled", "failed"}:
                     write_session_end(
                         "keyboard_escape_during_calibration"
                         if calibration_result == "aborted"
-                        else "calibration_cancelled"
+                        else (
+                            "ninja_calibration_failed"
+                            if calibration_result == "failed"
+                            else "calibration_cancelled"
+                        )
                     )
-                    return 130
+                    return 1 if calibration_result == "failed" else 130
                 if calibration_result == "exited":
                     write_session_end("ninja_exited_during_calibration")
                     return 130
@@ -1154,6 +1209,7 @@ def run_session(args) -> int:
             session_screen=session_screen,
             app=app,
         )
+        _clear_active_cleanup_state()
         if temp_dir_obj is not None:
             temp_dir_obj.cleanup()
 

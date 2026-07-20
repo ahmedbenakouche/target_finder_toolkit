@@ -50,7 +50,10 @@ from target_finder_toolkit.experimental_task import (
 )
 from target_finder_toolkit.filters import add_filter_arguments
 from target_finder_toolkit.mouse_utils import restore_default_cursors
-from target_finder_toolkit.window_utils import raise_macos_window_above_system_ui
+from target_finder_toolkit.window_utils import (
+    install_qt_crash_guard,
+    raise_macos_window_above_system_ui,
+)
 from target_finder_toolkit.windows_process_utils import (
     attach_windows_kill_on_close_job,
     close_windows_process_job,
@@ -73,17 +76,14 @@ HOME_RADIUS = 24.0
 MIN_DISTRACTOR_DIAMETER = 6.0
 MIN_TARGET_DIAMETER = 0.0
 DISTRACTOR_SCREEN_MARGIN = 12.0
-FALLBACK_MIN_DISTRACTOR_DIAMETER = 4.0
-FALLBACK_MAX_DISTRACTOR_DIAMETER = 10.0
-FALLBACK_DENSITY_AREA_PER_DISTRACTOR = 1300.0
-FALLBACK_MAX_DISTRACTORS = 600
+NINJA_CALIBRATION_MAX_RETRIES = 2
 
 DIFFICULTY_IDS = {
     "easy": 3.0,
     "medium": 4.0,
     "hard": 5.0,
 }
-SYNTHETIC_ID_VALUES = (2.0, 4.0, 6.0, 8.0)
+SYNTHETIC_ID_VALUES = (2.0, 3.5, 4.5, 6.0)
 DENSITY_VALUES = {
     "low": 0.1,
     "medium": 0.3,
@@ -300,8 +300,17 @@ def _generate_blanch_ortega_2d_distractors(
             obj = make_object(object_id, "distractor", (world_x, world_y), diameter, home)
             if not _inside_task_area(obj.center, obj.diameter, width, height):
                 continue
-            if math.hypot(obj.center[0] - target.center[0], obj.center[1] - target.center[1]) < (obj.diameter + target.diameter) * 0.50:
-                continue
+            # NOTE: Blanch & Ortega (CHI 2011) specify a fully deterministic
+            # grid where the ONLY excluded slot is (i=0, j=0), which coincides
+            # exactly with the target (see Appendix, Eq. 16). There is no
+            # target-proximity/overlap exclusion in the paper: local density
+            # near the target must equal the nominal rho (Fig. 4), so we must
+            # NOT thin out distractors close to the target. A prior version of
+            # this function removed any distractor within (d_target+d_obj)/2
+            # of the target center; that ad-hoc rule silently reduced density
+            # near the target (worst at low ID, where the target is large) and
+            # made the layout depend on target size instead of purely on
+            # (ID, A, rho). It has been removed to strictly match the paper.
             distractors.append(obj)
             object_id += 1
 
@@ -317,100 +326,7 @@ def _generate_blanch_ortega_2d_distractors(
         "j_range": [j_min, j_max],
         "min_distractor_diameter": MIN_DISTRACTOR_DIAMETER,
         "max_distance": max_distance,
-    }
-    return distractors, metadata
-
-
-def _generate_viewport_density_distractors(
-    *,
-    home: tuple[float, float],
-    target: SyntheticObject,
-    id_value: float,
-    amplitude: float,
-    rho: float,
-    width: int,
-    height: int,
-    movement_angle: float,
-    rng: random.Random,
-    object_id_start: int = 2,
-) -> tuple[list[SyntheticObject], dict]:
-    """Viewport-aware fallback for extreme IDs where the analytic layout clips out.
-
-    At ID=8 the theoretical distractor diameter implied by constant-ID objects
-    becomes so small that the original min-diameter filter can remove every
-    distractor.  This fallback samples the visible movement corridor instead,
-    keeping the displayed density proportional to rho.
-    """
-    if rho <= 0.0:
-        return [], {"layout": "viewport_density_fallback", "rho": rho}
-
-    base_diameter = max(
-        FALLBACK_MIN_DISTRACTOR_DIAMETER,
-        min(FALLBACK_MAX_DISTRACTOR_DIAMETER, max(target.diameter * 2.0, FALLBACK_MIN_DISTRACTOR_DIAMETER)),
-    )
-    longitudinal_padding = max(48.0, amplitude * 0.10)
-    longitudinal_min = -longitudinal_padding
-    longitudinal_max = amplitude + longitudinal_padding
-    lateral_half_span = max(140.0, min(height * 0.35, amplitude * 0.32))
-    local_width = max(1.0, longitudinal_max - longitudinal_min)
-    local_height = max(1.0, lateral_half_span * 2.0)
-    local_area = local_width * local_height
-    target_count = int(round(rho * local_area / FALLBACK_DENSITY_AREA_PER_DISTRACTOR))
-    target_count = max(1, min(FALLBACK_MAX_DISTRACTORS, target_count))
-
-    aspect = local_width / max(1.0, local_height)
-    cols = max(1, int(math.ceil(math.sqrt(target_count * aspect))))
-    rows = max(1, int(math.ceil(target_count / cols)))
-    cell_w = local_width / cols
-    cell_h = local_height / rows
-    cells = [(col, row) for row in range(rows) for col in range(cols)]
-    cells.sort(key=lambda cell: (((cell[0] * 0.754877666 + cell[1] * 0.569840291) % 1.0), cell[1], cell[0]))
-
-    distractors: list[SyntheticObject] = []
-    object_id = object_id_start
-    cos_a = math.cos(movement_angle)
-    sin_a = math.sin(movement_angle)
-    max_attempts = max(len(cells), target_count * 4)
-    attempts = 0
-    while len(distractors) < target_count and attempts < max_attempts:
-        if attempts < len(cells):
-            col, row = cells[attempts]
-        else:
-            col = attempts % cols
-            row = (attempts // cols) % rows
-        attempts += 1
-
-        x_jitter = 0.20 + 0.60 * (((col * 37 + row * 17 + 11) % 101) / 100.0)
-        y_jitter = 0.20 + 0.60 * (((col * 19 + row * 43 + 29) % 103) / 102.0)
-        diameter_jitter = 0.85 + 0.35 * (((col * 23 + row * 31 + 7) % 97) / 96.0)
-        diameter = base_diameter * diameter_jitter
-        local_x = longitudinal_min + (col + x_jitter) * cell_w
-        local_y = -lateral_half_span + (row + y_jitter) * cell_h
-        world_x = home[0] + local_x * cos_a - local_y * sin_a
-        world_y = home[1] + local_x * sin_a + local_y * cos_a
-        obj = make_object(object_id, "distractor", (world_x, world_y), diameter, home)
-        if not _inside_task_area(obj.center, obj.diameter, width, height):
-            continue
-        if math.hypot(obj.center[0] - target.center[0], obj.center[1] - target.center[1]) < (obj.diameter + target.diameter) * 0.90:
-            continue
-        if math.hypot(obj.center[0] - home[0], obj.center[1] - home[1]) < (obj.diameter + HOME_RADIUS) * 0.90:
-            continue
-        distractors.append(obj)
-        object_id += 1
-
-    metadata = {
-        "layout": "viewport_density_fallback",
-        "rho": rho,
-        "requested_fitts_id": id_value,
-        "base_distractor_diameter": base_diameter,
-        "target_count": target_count,
-        "actual_count": len(distractors),
-        "local_area": local_area,
-        "longitudinal_range": [longitudinal_min, longitudinal_max],
-        "lateral_half_span": lateral_half_span,
-        "grid": [cols, rows],
-        "density_area_per_distractor": FALLBACK_DENSITY_AREA_PER_DISTRACTOR,
-        "deterministic": True,
+        "strict_paper_layout": True,
     }
     return distractors, metadata
 
@@ -476,28 +392,6 @@ def generate_trial(
         height=height,
         movement_angle=angle,
     )
-    minimum_visible_distractors = max(6, int(round(rho * 20.0)))
-    if rho > 0.0 and len(distractors) < minimum_visible_distractors:
-        fallback_distractors, fallback_metadata = _generate_viewport_density_distractors(
-            home=home,
-            target=target,
-            id_value=id_value,
-            amplitude=target.distance,
-            rho=rho,
-            width=width,
-            height=height,
-            movement_angle=angle,
-            rng=rng,
-        )
-        layout_metadata = {
-            **layout_metadata,
-            "fallback_reason": (
-                f"analytic distractor count {len(distractors)} below minimum visible "
-                f"count {minimum_visible_distractors}"
-            ),
-            "fallback_layout": fallback_metadata,
-        }
-        distractors = fallback_distractors
 
     return SyntheticTrial(
         trial_id=trial_id,
@@ -539,6 +433,7 @@ def generate_trial(
         ),
         condition_metadata=dict(condition_metadata or {}),
     )
+
 
 
 class FittsDistractorsWindow(QtWidgets.QWidget):
@@ -615,10 +510,12 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         self._aborting = False
         self._finished_emitted = False
         self._app_filter_installed = False
-        self._global_keyboard_listener = None
-        self._global_keyboard_listener_failed = False
         self._last_recenter_log_at = 0.0
         self._window_shown_logged = False
+        self._waiting_for_ninja_calibration = False
+        self._ninja_calibration_retries_left = NINJA_CALIBRATION_MAX_RETRIES
+        self._process_output_buffer = ""
+        self._process_output_lines: list[str] = []
 
         if self.technique_command is not None and self._uses_ninja_cursors():
             if self.ninja_control_file is None:
@@ -642,15 +539,20 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         self.cursor_sample_timer = QtCore.QTimer(self)
         self.cursor_sample_timer.setInterval(max(1, int(round(1000.0 / self.cursor_log_hz))))
         self.cursor_sample_timer.timeout.connect(self._write_cursor_sample)
+        self.technique_watch_timer = QtCore.QTimer(self)
+        self.technique_watch_timer.setInterval(100)
+        self.technique_watch_timer.timeout.connect(self._check_technique_process)
 
         self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
         self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
         self._escape_shortcut.activated.connect(lambda: self._abort_session("keyboard_escape"))
+        self._quit_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
+        self._quit_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+        self._quit_shortcut.activated.connect(lambda: self._abort_session("keyboard_q"))
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
             self._app_filter_installed = True
-        self._start_global_keyboard_listener()
 
         self.logger.write(
             {
@@ -736,10 +638,11 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         if self._session_ended or self._aborting:
             return
         if self.technique_command is not None and self.technique_process is None:
+            waits_for_ninja_calibration = self._should_wait_for_ninja_calibration()
             popen_kwargs = {
                 "cwd": str(PROJECT_ROOT),
-                "stdout": subprocess.DEVNULL,
-                "stderr": subprocess.DEVNULL,
+                "stdout": subprocess.PIPE if waits_for_ninja_calibration else subprocess.DEVNULL,
+                "stderr": subprocess.STDOUT if waits_for_ninja_calibration else subprocess.DEVNULL,
             }
             if sys.platform.startswith("win"):
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -748,6 +651,11 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
             self.technique_process = attach_windows_kill_on_close_job(
                 subprocess.Popen(self.technique_command, **popen_kwargs)
             )
+            if waits_for_ninja_calibration and self.technique_process.stdout is not None:
+                try:
+                    os.set_blocking(self.technique_process.stdout.fileno(), False)
+                except Exception:
+                    pass
             self.logger.write(
                 {
                     "type": "technique_process_start",
@@ -757,9 +665,124 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
                     "technique_log_file": str(self.technique_log_file) if self.technique_log_file else None,
                 }
             )
+            # Keep watching the technique subprocess for the rest of the
+            # session, not just while waiting for calibration: if it exits
+            # unexpectedly (crash, or the participant quitting Ninja Cursors
+            # with its own "q" shortcut while its overlay has OS focus), this
+            # window has no other way to notice and would otherwise keep
+            # running with a dead/frozen cursor for the rest of the session.
+            self.technique_watch_timer.start()
+            if waits_for_ninja_calibration:
+                # The Fitts task must not start trials before Ninja Cursors has
+                # actually finished (successfully) calibrating: without this,
+                # the cursors run on an uncalibrated/blocked gaze estimate and
+                # appear frozen on whichever cursor was selected by default.
+                self._waiting_for_ninja_calibration = True
+                return
             QtCore.QTimer.singleShot(1200, self._next_trial)
             return
         self._next_trial()
+
+    def _should_wait_for_ninja_calibration(self) -> bool:
+        return (
+            self._uses_ninja_cursors()
+            and self.technique_command is not None
+            and "--ninja-auto-calibrate" in self.technique_command
+        )
+
+    def _drain_technique_output(self):
+        if self.technique_process is None or self.technique_process.stdout is None:
+            return
+        fd = self.technique_process.stdout.fileno()
+        chunks = []
+        while True:
+            try:
+                data = os.read(fd, 65536)
+            except BlockingIOError:
+                break
+            except OSError:
+                break
+            if not data:
+                break
+            chunks.append(data.decode("utf-8", errors="replace"))
+        if not chunks:
+            return
+        self._process_output_buffer += "".join(chunks)
+        while True:
+            newline_idx = self._process_output_buffer.find("\n")
+            if newline_idx < 0:
+                break
+            line = self._process_output_buffer[:newline_idx].rstrip("\r")
+            self._process_output_buffer = self._process_output_buffer[newline_idx + 1:]
+            if line:
+                self._process_output_lines.append(line)
+                self._process_output_lines = self._process_output_lines[-40:]
+                self.logger.write({"type": "technique_process_output", "line": line})
+            self._handle_technique_output_line(line)
+
+    def _handle_technique_output_line(self, line: str):
+        prefix = "__NINJA_CALIB__ "
+        if not line.startswith(prefix):
+            return
+        try:
+            payload = json.loads(line[len(prefix):])
+        except Exception:
+            return
+        event = payload.get("event")
+        self.logger.write({"type": "ninja_calibration_event", **payload})
+        if event not in {"calibrated", "failed", "cancelled"}:
+            return
+        if not self._waiting_for_ninja_calibration:
+            return
+        if event == "calibrated":
+            self._waiting_for_ninja_calibration = False
+            QtCore.QTimer.singleShot(900, self._next_trial)
+        elif event == "failed":
+            if self._ninja_calibration_retries_left > 0:
+                self._ninja_calibration_retries_left -= 1
+                self.logger.write({"type": "ninja_calibration_retry", "event": event})
+                self._set_ninja_control_state(self._ninja_state_at_screen_center("calibrate"))
+            else:
+                self._waiting_for_ninja_calibration = False
+                self.technique_watch_timer.stop()
+                self.logger.write({"type": "ninja_calibration_blocked_session", "event": event})
+                self._abort_session("ninja_calibration_failed")
+        else:
+            self._waiting_for_ninja_calibration = False
+            self.technique_watch_timer.stop()
+            self.logger.write({"type": "ninja_calibration_blocked_session", "event": event})
+            self._abort_session("ninja_calibration_cancelled")
+
+    def _check_technique_process(self):
+        if self.technique_process is None:
+            self.technique_watch_timer.stop()
+            return
+        self._drain_technique_output()
+        exit_code = self.technique_process.poll()
+        if exit_code is None:
+            return
+        self._drain_technique_output()
+        if self._process_output_buffer.strip():
+            line = self._process_output_buffer.strip()
+            self._process_output_lines.append(line)
+            self._process_output_lines = self._process_output_lines[-40:]
+            self.logger.write({"type": "technique_process_output", "line": line})
+            self._handle_technique_output_line(line)
+            self._process_output_buffer = ""
+        self.logger.write({"type": "technique_process_exit", "exit_code": exit_code})
+        self.technique_watch_timer.stop()
+        if self._waiting_for_ninja_calibration:
+            self._waiting_for_ninja_calibration = False
+            self.logger.write({"type": "ninja_calibration_blocked_session", "event": "process_exited"})
+            self._abort_session("ninja_exited_during_calibration")
+            return
+        # The technique subprocess died on its own outside the calibration
+        # wait (crashed, or the participant quit it directly -- e.g. Ninja
+        # Cursors' own "q" shortcut while its overlay has OS focus). Without
+        # this, the trial keeps running against a dead technique process
+        # (frozen/no-op cursor) instead of ending the session.
+        if not self._session_ended and not self._aborting:
+            self._abort_session("technique_exited_unexpectedly")
 
     def _uses_ninja_cursors(self) -> bool:
         return self.technique == "ninja_cursors" or (
@@ -1221,12 +1244,18 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         if event.key() == QtCore.Qt.Key.Key_Escape:
             self._abort_session("keyboard_escape")
             return
+        if event.key() == QtCore.Qt.Key.Key_Q:
+            self._abort_session("keyboard_q")
+            return
         super().keyPressEvent(event)
 
     def eventFilter(self, watched, event):
         if self.isVisible() and event.type() == QtCore.QEvent.Type.KeyPress:
             if event.key() == QtCore.Qt.Key.Key_Escape:
                 self._abort_session("keyboard_escape")
+                return True
+            if event.key() == QtCore.Qt.Key.Key_Q:
+                self._abort_session("keyboard_q")
                 return True
         return super().eventFilter(watched, event)
 
@@ -1236,60 +1265,13 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         self._aborting = True
         self._exit_code = 130
         self._end_session(reason)
-        self._stop_global_keyboard_listener()
         self._finish_window(self._exit_code)
-
-    def _start_global_keyboard_listener(self):
-        if sys.platform == "darwin":
-            return
-        if self._global_keyboard_listener is not None or self._global_keyboard_listener_failed:
-            return
-        try:
-            from pynput import keyboard as pynput_keyboard
-        except Exception:
-            self._global_keyboard_listener_failed = True
-            return
-
-        def on_press(key):
-            try:
-                char = getattr(key, "char", None)
-                if key == pynput_keyboard.Key.esc:
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_abort_from_global_keyboard",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                    )
-            except Exception:
-                return
-
-        try:
-            self._global_keyboard_listener = pynput_keyboard.Listener(on_press=on_press)
-            self._global_keyboard_listener.start()
-        except Exception:
-            self._global_keyboard_listener = None
-            self._global_keyboard_listener_failed = True
-
-    def _stop_global_keyboard_listener(self):
-        listener = self._global_keyboard_listener
-        self._global_keyboard_listener = None
-        if listener is None:
-            return
-        try:
-            listener.stop()
-        except Exception:
-            pass
-
-    @QtCore.pyqtSlot()
-    def _abort_from_global_keyboard(self):
-        if self.isVisible():
-            self._abort_session("keyboard_escape")
 
     def _finish_window(self, exit_code: int):
         if self._finished_emitted:
             return
         self._finished_emitted = True
         self._exit_code = int(exit_code)
-        self._stop_global_keyboard_listener()
         if self.quit_application_on_complete:
             app = QtWidgets.QApplication.instance()
             if app is not None:
@@ -1306,6 +1288,7 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         self.cursor_lock_timer.stop()
         self.countdown_timer.stop()
         self.cursor_sample_timer.stop()
+        self.technique_watch_timer.stop()
         self._set_mouse_association(True)
         self._set_ninja_control_state("paused")
         self._write_annotation_state("inactive")
@@ -1326,7 +1309,6 @@ class FittsDistractorsWindow(QtWidgets.QWidget):
         if app is not None and self._app_filter_installed:
             app.removeEventFilter(self)
             self._app_filter_installed = False
-        self._stop_global_keyboard_listener()
         self._end_session("window_closed" if not self._aborting else "abort_close")
         super().closeEvent(event)
 
@@ -1545,6 +1527,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    install_qt_crash_guard()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
     temp_dir_obj = None
     if args.no_log:

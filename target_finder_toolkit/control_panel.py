@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 from target_finder_toolkit.filters import (
     DEFAULT_FILTER_BETA,
     DEFAULT_FILTER_D_CUTOFF,
@@ -18,8 +18,9 @@ from target_finder_toolkit.filters import (
     FILTER_OPTIONS,
 )
 from target_finder_toolkit.logging_utils import make_default_log_path
-from target_finder_toolkit.mouse_utils import restore_default_cursors
+from target_finder_toolkit.mouse_utils import force_restore_cursor_visibility
 from target_finder_toolkit.webeyetrack_compat import patch_webeyetrack_dataclass_defaults
+from target_finder_toolkit.window_utils import install_qt_crash_guard
 from target_finder_toolkit.windows_process_utils import (
     attach_windows_kill_on_close_job,
     close_windows_process_job,
@@ -94,7 +95,7 @@ DEFAULT_RAKE_GAZE_SMOOTHING = 0.35
 DEFAULT_RAKE_GAZE_GAIN_X = 1.0
 DEFAULT_RAKE_GAZE_GAIN_Y = 1.0
 DEFAULT_RAKE_GAZE_OFFSET_X = -40.0
-DEFAULT_RAKE_GAZE_OFFSET_Y = -140.0
+DEFAULT_RAKE_GAZE_OFFSET_Y = -50.0
 DEFAULT_RAKE_SELECTION_HOLD = 2.0
 DEFAULT_RAKE_LOCK_ON_DWELL = False
 DEFAULT_RAKE_USE_CALIBRATION = True
@@ -250,7 +251,7 @@ UI_TEXTS = {
         "rake_gaze_gain_y_desc": "Scales vertical gaze movement around the screen center before offset is applied. Negative values invert up-down movement.",
         "rake_gaze_offset_x": "Gaze offset X (px) (range: -3000.0-3000.0, default: -40.0)",
         "rake_gaze_offset_x_desc": "Shifts the gaze estimate horizontally before selecting the active cursor. Positive = move right, negative = move left.",
-        "rake_gaze_offset_y": "Gaze offset Y (px) (range: -3000.0-3000.0, default: -140.0)",
+        "rake_gaze_offset_y": "Gaze offset Y (px) (range: -3000.0-3000.0, default: -50.0)",
         "rake_gaze_offset_y_desc": "Shifts the gaze estimate vertically before selecting the active cursor. Positive = move down, negative = move up.",
         "rake_lock_on_dwell": "Lock cursor by gaze dwell (range: off/on, default: off)",
         "rake_lock_on_dwell_desc": "When enabled, gaze must stay on the same cursor before it locks. When disabled, the current orange cursor can be clicked immediately.",
@@ -479,7 +480,7 @@ UI_TEXTS = {
         "rake_gaze_gain_y_desc": "Agrandit ou réduit l’amplitude verticale du regard autour du centre de l’écran avant d’appliquer le décalage. Une valeur négative inverse haut-bas.",
         "rake_gaze_offset_x": "Décalage regard X (px) (plage : -3000.0-3000.0, défaut : -40.0)",
         "rake_gaze_offset_x_desc": "Décale l’estimation du regard horizontalement avant de choisir le curseur actif. Positif = vers la droite, négatif = vers la gauche.",
-        "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -3000.0-3000.0, défaut : -140.0)",
+        "rake_gaze_offset_y": "Décalage regard Y (px) (plage : -3000.0-3000.0, défaut : -50.0)",
         "rake_gaze_offset_y_desc": "Décale l’estimation du regard verticalement avant de choisir le curseur actif. Positif = vers le bas, négatif = vers le haut.",
         "rake_lock_on_dwell": "Verrouiller par fixation du regard (plage : off/on, défaut : off)",
         "rake_lock_on_dwell_desc": "Si activé, le regard doit rester sur le même curseur avant verrouillage. Sinon, le curseur orange courant peut être cliqué immédiatement.",
@@ -1865,6 +1866,11 @@ class ControlPanel(QtWidgets.QWidget):
         self.browser_compatible_fullscreen_button.clicked.connect(self._handle_browser_compatible_fullscreen)
         self.start_button.clicked.connect(self._handle_apply_clicked)
         self.stop_button.clicked.connect(self._stop_demo)
+        # Escape must stop the running experiment/technique no matter which
+        # control panel page or widget currently has focus.
+        self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
+        self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+        self._escape_shortcut.activated.connect(self._handle_escape_stop)
         self.change_thresh_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.capture_interval_spin.valueChanged.connect(self._handle_runtime_option_change)
         self.confidence_spin.valueChanged.connect(self._handle_runtime_option_change)
@@ -3575,10 +3581,10 @@ error "No supported browser window found"
                 "--screen-height-cm", str(cfg.rake_screen_height_cm),
                 "--ninja-spacing", str(cfg.rake_spacing),
                 "--gaze-smoothing", str(cfg.rake_gaze_smoothing),
-                "--gaze-gain-x", str(cfg.rake_gaze_gain_x),
-                "--gaze-gain-y", str(cfg.rake_gaze_gain_y),
-                "--gaze-offset-x", str(cfg.rake_gaze_offset_x),
-                "--gaze-offset-y", str(cfg.rake_gaze_offset_y),
+                "--gaze-gain-x", str(DEFAULT_RAKE_GAZE_GAIN_X),
+                "--gaze-gain-y", str(DEFAULT_RAKE_GAZE_GAIN_Y),
+                "--gaze-offset-x", str(DEFAULT_RAKE_GAZE_OFFSET_X),
+                "--gaze-offset-y", str(DEFAULT_RAKE_GAZE_OFFSET_Y),
                 "--selection-hold", str(cfg.rake_selection_hold),
             ]
             if cfg.rake_lock_on_dwell:
@@ -3715,10 +3721,10 @@ error "No supported browser window found"
                 "--ninja-screen-height-cm", str(cfg.rake_screen_height_cm),
                 "--ninja-spacing", str(cfg.rake_spacing),
                 "--ninja-gaze-smoothing", str(cfg.rake_gaze_smoothing),
-                "--ninja-gaze-gain-x", str(cfg.rake_gaze_gain_x),
-                "--ninja-gaze-gain-y", str(cfg.rake_gaze_gain_y),
-                "--ninja-gaze-offset-x", str(cfg.rake_gaze_offset_x),
-                "--ninja-gaze-offset-y", str(cfg.rake_gaze_offset_y),
+                "--ninja-gaze-gain-x", str(DEFAULT_RAKE_GAZE_GAIN_X),
+                "--ninja-gaze-gain-y", str(DEFAULT_RAKE_GAZE_GAIN_Y),
+                "--ninja-gaze-offset-x", str(DEFAULT_RAKE_GAZE_OFFSET_X),
+                "--ninja-gaze-offset-y", str(DEFAULT_RAKE_GAZE_OFFSET_Y),
                 "--ninja-selection-hold", str(cfg.rake_selection_hold),
                 "--ninja-calib-points", str(cfg.rake_calib_points),
             ]
@@ -3735,6 +3741,7 @@ error "No supported browser window found"
                 cmd.append("--ninja-auto-calibrate")
             # Experimental tasks use ground-truth annotations / generated targets,
             # not live TargetFinder/YOLO detections.
+            cmd.append("--ninja-without-targetfinder")
         return cmd
 
     def _build_synthetic_fitts_command(self, cfg: PanelConfig):
@@ -3805,10 +3812,10 @@ error "No supported browser window found"
                 "--ninja-screen-height-cm", str(cfg.rake_screen_height_cm),
                 "--ninja-spacing", str(cfg.rake_spacing),
                 "--ninja-gaze-smoothing", str(cfg.rake_gaze_smoothing),
-                "--ninja-gaze-gain-x", str(cfg.rake_gaze_gain_x),
-                "--ninja-gaze-gain-y", str(cfg.rake_gaze_gain_y),
-                "--ninja-gaze-offset-x", str(cfg.rake_gaze_offset_x),
-                "--ninja-gaze-offset-y", str(cfg.rake_gaze_offset_y),
+                "--ninja-gaze-gain-x", str(DEFAULT_RAKE_GAZE_GAIN_X),
+                "--ninja-gaze-gain-y", str(DEFAULT_RAKE_GAZE_GAIN_Y),
+                "--ninja-gaze-offset-x", str(DEFAULT_RAKE_GAZE_OFFSET_X),
+                "--ninja-gaze-offset-y", str(DEFAULT_RAKE_GAZE_OFFSET_Y),
                 "--ninja-selection-hold", str(cfg.rake_selection_hold),
                 "--ninja-calib-points", str(cfg.rake_calib_points),
             ]
@@ -3825,6 +3832,7 @@ error "No supported browser window found"
                 cmd.append("--ninja-auto-calibrate")
             # Synthetic Fitts uses generated ground-truth targets,
             # not live TargetFinder/YOLO detections.
+            cmd.append("--ninja-without-targetfinder")
         return cmd
 
     def _build_synthetic_fitts_session_command(self, cfg: PanelConfig, output_dir: Path | None = None):
@@ -3883,13 +3891,13 @@ error "No supported browser window found"
             "--ninja-gaze-smoothing",
             str(cfg.rake_gaze_smoothing),
             "--ninja-gaze-gain-x",
-            str(cfg.rake_gaze_gain_x),
+            str(DEFAULT_RAKE_GAZE_GAIN_X),
             "--ninja-gaze-gain-y",
-            str(cfg.rake_gaze_gain_y),
+            str(DEFAULT_RAKE_GAZE_GAIN_Y),
             "--ninja-gaze-offset-x",
-            str(cfg.rake_gaze_offset_x),
+            str(DEFAULT_RAKE_GAZE_OFFSET_X),
             "--ninja-gaze-offset-y",
-            str(cfg.rake_gaze_offset_y),
+            str(DEFAULT_RAKE_GAZE_OFFSET_Y),
             "--ninja-selection-hold",
             str(cfg.rake_selection_hold),
             "--ninja-calib-points",
@@ -3984,13 +3992,13 @@ error "No supported browser window found"
             "--ninja-gaze-smoothing",
             str(cfg.rake_gaze_smoothing),
             "--ninja-gaze-gain-x",
-            str(cfg.rake_gaze_gain_x),
+            str(DEFAULT_RAKE_GAZE_GAIN_X),
             "--ninja-gaze-gain-y",
-            str(cfg.rake_gaze_gain_y),
+            str(DEFAULT_RAKE_GAZE_GAIN_Y),
             "--ninja-gaze-offset-x",
-            str(cfg.rake_gaze_offset_x),
+            str(DEFAULT_RAKE_GAZE_OFFSET_X),
             "--ninja-gaze-offset-y",
-            str(cfg.rake_gaze_offset_y),
+            str(DEFAULT_RAKE_GAZE_OFFSET_Y),
             "--ninja-selection-hold",
             str(cfg.rake_selection_hold),
             "--ninja-calib-points",
@@ -4086,10 +4094,10 @@ error "No supported browser window found"
             "--ninja-screen-height-cm", str(cfg.rake_screen_height_cm),
             "--ninja-spacing", str(cfg.rake_spacing),
             "--ninja-gaze-smoothing", str(cfg.rake_gaze_smoothing),
-            "--ninja-gaze-gain-x", str(cfg.rake_gaze_gain_x),
-            "--ninja-gaze-gain-y", str(cfg.rake_gaze_gain_y),
-            "--ninja-gaze-offset-x", str(cfg.rake_gaze_offset_x),
-            "--ninja-gaze-offset-y", str(cfg.rake_gaze_offset_y),
+            "--ninja-gaze-gain-x", str(DEFAULT_RAKE_GAZE_GAIN_X),
+            "--ninja-gaze-gain-y", str(DEFAULT_RAKE_GAZE_GAIN_Y),
+            "--ninja-gaze-offset-x", str(DEFAULT_RAKE_GAZE_OFFSET_X),
+            "--ninja-gaze-offset-y", str(DEFAULT_RAKE_GAZE_OFFSET_Y),
             "--ninja-selection-hold", str(cfg.rake_selection_hold),
             "--ninja-calib-points", str(cfg.rake_calib_points),
         ]
@@ -4228,7 +4236,7 @@ error "No supported browser window found"
         self.process = None
         self._process_output_buffer = ""
         self._process_watch_timer.stop()
-        restore_default_cursors()
+        force_restore_cursor_visibility()
         self._update_action_buttons()
         if exit_code:
             self.info_label.setText(self._format_process_error(exit_code))
@@ -4303,12 +4311,16 @@ error "No supported browser window found"
         else:
             self._set_status("running_semantic", speak=speak)
 
+    def _handle_escape_stop(self):
+        if self._is_demo_running():
+            self._stop_demo()
+
     def _stop_demo(self, silent: bool = False):
         if not self._is_demo_running():
             close_windows_process_job(self.process)
             self.process = None
             self._process_watch_timer.stop()
-            restore_default_cursors()
+            force_restore_cursor_visibility()
             self._update_action_buttons()
             if not silent:
                 self._set_status("no_running", speak=False)
@@ -4336,7 +4348,7 @@ error "No supported browser window found"
             self.process = None
             self._process_output_buffer = ""
             self._process_watch_timer.stop()
-            restore_default_cursors()
+            force_restore_cursor_visibility()
             self._update_action_buttons()
 
         if not silent:
@@ -4447,6 +4459,7 @@ error "No supported browser window found"
 
 
 def main():
+    install_qt_crash_guard()
     app = QtWidgets.QApplication(sys.argv)
     window = ControlPanel()
     window.show()

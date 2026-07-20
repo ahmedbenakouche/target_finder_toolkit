@@ -333,6 +333,9 @@ def _technique_instruction(block: ExperimentBlock, *, language: str = "French") 
 def _ensure_qapplication():
     from PyQt6 import QtWidgets
 
+    from target_finder_toolkit.window_utils import install_qt_crash_guard
+
+    install_qt_crash_guard()
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
 
@@ -361,8 +364,6 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             self._continue_enabled_at = 0.0
             self._input_generation = 0
             self._keyboard_grabbed = False
-            self._global_keyboard_listener = None
-            self._global_keyboard_listener_failed = False
             self._keyboard_events_enabled = True
             self._app_filter_installed = False
             self._win_escape_timer = None
@@ -449,6 +450,9 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
             self._escape_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
             self._escape_shortcut.activated.connect(self._abort)
+            self._quit_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Q"), self)
+            self._quit_shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
+            self._quit_shortcut.activated.connect(self._abort)
             if sys.platform.startswith("win"):
                 self._win_escape_timer = QtCore.QTimer(self)
                 self._win_escape_timer.setInterval(50)
@@ -457,7 +461,6 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             if app is not None:
                 app.installEventFilter(self)
                 self._app_filter_installed = True
-            self._start_global_keyboard_listener()
 
         def eventFilter(self, watched, event):
             if (
@@ -467,7 +470,7 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
                 if event.type() != QtCore.QEvent.Type.KeyPress:
                     return super().eventFilter(watched, event)
                 key = event.key()
-                if key == QtCore.Qt.Key.Key_Escape:
+                if key in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
                     self._abort()
                     return True
                 if self.continue_button.isVisible() and key in (
@@ -550,7 +553,6 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
                     120,
                     lambda: raise_macos_window_above_system_ui(self, level_offset=level_offset),
                 )
-            self._start_global_keyboard_listener()
             self._start_windows_escape_poll()
             if grab_keyboard:
                 self._grab_session_keyboard()
@@ -581,7 +583,7 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             if not self._keyboard_events_enabled:
                 super().keyPressEvent(event)
                 return
-            if event.key() == QtCore.Qt.Key.Key_Escape:
+            if event.key() in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Q):
                 self._abort()
                 return
             if self.continue_button.isVisible() and event.key() in (
@@ -600,7 +602,6 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
 
         def closeEvent(self, event):
             self._release_session_keyboard()
-            self._stop_global_keyboard_listener()
             self._stop_windows_escape_poll()
             app = QtWidgets.QApplication.instance()
             if app is not None and self._app_filter_installed:
@@ -631,48 +632,6 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
             if app is not None:
                 app.processEvents()
 
-        def _start_global_keyboard_listener(self):
-            if sys.platform == "darwin":
-                return
-            if self._global_keyboard_listener is not None or self._global_keyboard_listener_failed:
-                return
-            try:
-                from pynput import keyboard as pynput_keyboard
-            except Exception:
-                self._global_keyboard_listener_failed = True
-                return
-
-            def on_press(key):
-                if not self.isVisible() or not self._keyboard_events_enabled:
-                    return
-                try:
-                    is_escape = key == pynput_keyboard.Key.esc
-                    is_continue = key in {
-                        pynput_keyboard.Key.enter,
-                        pynput_keyboard.Key.space,
-                    }
-                    if is_escape:
-                        QtCore.QMetaObject.invokeMethod(
-                            self,
-                            "_abort",
-                            QtCore.Qt.ConnectionType.QueuedConnection,
-                        )
-                    elif is_continue and self.continue_button.isVisible():
-                        QtCore.QMetaObject.invokeMethod(
-                            self,
-                            "_request_continue",
-                            QtCore.Qt.ConnectionType.QueuedConnection,
-                        )
-                except Exception:
-                    return
-
-            try:
-                self._global_keyboard_listener = pynput_keyboard.Listener(on_press=on_press)
-                self._global_keyboard_listener.start()
-            except Exception:
-                self._global_keyboard_listener = None
-                self._global_keyboard_listener_failed = True
-
         def _start_windows_escape_poll(self):
             timer = self._win_escape_timer
             if timer is not None and not timer.isActive():
@@ -688,16 +647,6 @@ def create_session_screen(*, windowed: bool, language: str = "French"):
                 return
             if _windows_escape_pressed():
                 self._abort()
-
-        def _stop_global_keyboard_listener(self):
-            listener = self._global_keyboard_listener
-            self._global_keyboard_listener = None
-            if listener is None:
-                return
-            try:
-                listener.stop()
-            except Exception:
-                pass
 
         def _grab_session_keyboard(self):
             if sys.platform == "darwin":
@@ -1093,20 +1042,24 @@ def wait_for_initial_ninja_calibration(
     app=None,
     abort_check=None,
     timeout_sec: float | None = DEFAULT_NINJA_CALIBRATION_TIMEOUT_SEC,
-) -> str:
+) -> tuple[str, dict]:
+    """Returns (event, payload). payload carries mean_error_px/failure detail
+    for "failed" so the session can show the participant something actionable
+    (e.g. "error 340px, sit still and look directly at each point") instead of
+    a bare "calibration failed"."""
     if "ninja_cursors" not in processes:
-        return "missing"
+        return "missing", {}
     print("waiting for Ninja Cursors calibration...")
     deadline = None if timeout_sec is None else time.monotonic() + max(0.0, float(timeout_sec))
     while True:
         if app is not None:
             app.processEvents()
         if abort_check is not None and abort_check():
-            return "aborted"
+            return "aborted", {}
         for technique, payload in _drain_preloaded_outputs(processes, session_log):
             if technique == "ninja_cursors" and payload.get("event") in {"calibrated", "failed", "cancelled"}:
                 print(f"Ninja Cursors calibration: {payload.get('event')}")
-                return str(payload.get("event"))
+                return str(payload.get("event")), payload
         proc = processes["ninja_cursors"].process
         exit_code = proc.poll()
         if exit_code is not None:
@@ -1119,7 +1072,7 @@ def wait_for_initial_ninja_calibration(
                     "during": "initial_calibration",
                 },
             )
-            return "exited"
+            return "exited", {}
         if deadline is not None and time.monotonic() >= deadline:
             _drain_preloaded_outputs(processes, session_log)
             write_event(
@@ -1131,7 +1084,7 @@ def wait_for_initial_ninja_calibration(
                 },
             )
             print(f"Ninja Cursors calibration timed out after {timeout_sec} s.", flush=True)
-            return "timeout"
+            return "timeout", {}
         time.sleep(0.1)
 
 
@@ -1279,6 +1232,57 @@ def stop_preloaded_techniques(
             )
 
 
+_active_cleanup_state: dict = {}
+
+
+def _set_active_cleanup_state(**kwargs):
+    _active_cleanup_state.clear()
+    _active_cleanup_state.update(kwargs)
+
+
+def _clear_active_cleanup_state():
+    _active_cleanup_state.clear()
+
+
+def _handle_termination_signal(signum, frame):
+    state = dict(_active_cleanup_state)
+    preloaded_processes = state.get("preloaded_processes")
+    session_log = state.get("session_log")
+    ninja_control_file = state.get("ninja_control_file")
+    try:
+        if preloaded_processes and session_log is not None:
+            stop_preloaded_techniques(preloaded_processes, session_log)
+    except Exception:
+        pass
+    if ninja_control_file is not None:
+        try:
+            Path(ninja_control_file).unlink(missing_ok=True)
+        except OSError:
+            pass
+    os._exit(130)
+
+
+def install_termination_cleanup_handler():
+    """Make sure SIGTERM (e.g. the control panel's Stop button) still tears
+    down preloaded technique subprocesses instead of orphaning them.
+
+    Each preloaded technique (bubble cursor, semantic pointing, dynaspot,
+    Ninja Cursors, ...) runs detached in its own process group
+    (start_new_session=True) so that it survives if this process dies
+    unexpectedly; only this process explicitly stopping it (via
+    stop_preloaded_techniques) actually ends it. Python's default SIGTERM
+    disposition kills a process immediately without running any `finally`
+    block, so without this handler a plain SIGTERM (not SIGINT, which Python
+    already turns into a catchable KeyboardInterrupt) leaves every preloaded
+    technique running forever -- exactly the leftover Python processes seen
+    in the Dock/menu bar after closing the control panel.
+    """
+    try:
+        signal.signal(signal.SIGTERM, _handle_termination_signal)
+    except Exception:
+        pass
+
+
 def run_block_in_process(
     args,
     block: ExperimentBlock,
@@ -1376,6 +1380,7 @@ def run_block_in_process(
 
 
 def main():
+    install_termination_cleanup_handler()
     parser = argparse.ArgumentParser(
         description="Run a counterbalanced experimental session made of technique/difficulty blocks."
     )
@@ -1504,6 +1509,11 @@ def main():
             session_log=session_log,
             ninja_control_file=ninja_control_file,
         )
+        _set_active_cleanup_state(
+            preloaded_processes=preloaded_processes,
+            session_log=session_log,
+            ninja_control_file=ninja_control_file,
+        )
         wait_for_preloaded_startup(
             preloaded_processes,
             session_log,
@@ -1601,35 +1611,85 @@ def main():
                     app=app,
                 )
                 raise SystemExit(130)
-            session_screen.show_content(
-                title="Calibration in progress" if is_english(args.language) else "Calibration en cours",
-                body=(
-                    "Look at the red point displayed on the screen until calibration is finished."
-                    if is_english(args.language)
-                    else "Regardez le point rouge affiché à l'écran jusqu'à la fin de la calibration."
-                ),
-                hint=(
-                    "Do not click and avoid moving your head during this step."
-                    if is_english(args.language)
-                    else "Ne cliquez pas et évitez de bouger la tête pendant cette étape."
-                ),
-                button_text=None,
-                level_offset=0,
-            )
-            ninja_control_file.write_text("calibrate", encoding="utf-8")
-            write_event(session_log, {"type": "calibration_start_requested"})
-            calibration_result = wait_for_initial_ninja_calibration(
-                preloaded_processes,
-                session_log,
-                app=app,
-                abort_check=lambda: bool(session_screen.aborted),
-            )
-            ninja_control_file.write_text("paused", encoding="utf-8")
-            if calibration_result in {"aborted", "cancelled"}:
+            max_calibration_attempts = 5
+            calibration_result = None
+            calibration_payload: dict = {}
+            for calibration_attempt in range(1, max_calibration_attempts + 1):
+                retry_suffix_en = f" (attempt {calibration_attempt}/{max_calibration_attempts})" if calibration_attempt > 1 else ""
+                retry_suffix_fr = f" (tentative {calibration_attempt}/{max_calibration_attempts})" if calibration_attempt > 1 else ""
+                session_screen.show_content(
+                    title=(
+                        f"Calibration in progress{retry_suffix_en}"
+                        if is_english(args.language)
+                        else f"Calibration en cours{retry_suffix_fr}"
+                    ),
+                    body=(
+                        "Look at the red point displayed on the screen until calibration is finished."
+                        if is_english(args.language)
+                        else "Regardez le point rouge affiché à l'écran jusqu'à la fin de la calibration."
+                    ),
+                    hint=(
+                        "Do not click and avoid moving your head during this step."
+                        if is_english(args.language)
+                        else "Ne cliquez pas et évitez de bouger la tête pendant cette étape."
+                    ),
+                    button_text=None,
+                    level_offset=0,
+                )
+                ninja_control_file.write_text("calibrate", encoding="utf-8")
+                write_event(session_log, {"type": "calibration_start_requested", "attempt": calibration_attempt})
+                calibration_result, calibration_payload = wait_for_initial_ninja_calibration(
+                    preloaded_processes,
+                    session_log,
+                    app=app,
+                    abort_check=lambda: bool(session_screen.aborted),
+                )
+                ninja_control_file.write_text("paused", encoding="utf-8")
+                if calibration_result != "failed":
+                    break
+                write_event(
+                    session_log,
+                    {"type": "calibration_attempt_failed", "attempt": calibration_attempt, **calibration_payload},
+                )
+                if calibration_attempt >= max_calibration_attempts:
+                    break
+                mean_error_px = calibration_payload.get("mean_error_px")
+                error_detail_en = f" Measured error: {mean_error_px:.0f}px." if isinstance(mean_error_px, (int, float)) else ""
+                error_detail_fr = f" Erreur mesurée : {mean_error_px:.0f}px." if isinstance(mean_error_px, (int, float)) else ""
+                session_screen.show_content(
+                    title="Calibration failed" if is_english(args.language) else "Calibration échouée",
+                    body=(
+                        f"The calibration error was too high.{error_detail_en} Let's try again.\n"
+                        "Sit closer to the screen, make sure your face is well lit, "
+                        "sit still, and look directly at each red point until it disappears."
+                        if is_english(args.language)
+                        else f"L'erreur de calibration était trop élevée.{error_detail_fr} Recommençons.\n"
+                        "Rapprochez-vous de l'écran, assurez-vous que votre visage est bien éclairé, "
+                        "restez immobile et regardez directement chaque point rouge jusqu'à ce qu'il disparaisse."
+                    ),
+                    hint="Click Retry when you are ready." if is_english(args.language) else "Cliquez sur Réessayer quand vous êtes prêt(e).",
+                    button_text="Retry calibration" if is_english(args.language) else "Réessayer la calibration",
+                )
+                write_event(session_log, {"type": "calibration_retry_instructions", "attempt": calibration_attempt + 1})
+                if session_screen.wait_for_continue():
+                    write_session_end("keyboard_escape_during_calibration")
+                    cleanup_session_resources(
+                        preloaded_processes=preloaded_processes,
+                        session_log=session_log,
+                        ninja_control_file=ninja_control_file,
+                        session_screen=session_screen,
+                        app=app,
+                    )
+                    raise SystemExit(130)
+            if calibration_result in {"aborted", "cancelled", "failed"}:
                 write_session_end(
                     "keyboard_escape_during_calibration"
                     if calibration_result == "aborted"
-                    else "calibration_cancelled"
+                    else (
+                        "ninja_calibration_failed"
+                        if calibration_result == "failed"
+                        else "calibration_cancelled"
+                    )
                 )
                 cleanup_session_resources(
                     preloaded_processes=preloaded_processes,
@@ -1638,7 +1698,7 @@ def main():
                     session_screen=session_screen,
                     app=app,
                 )
-                raise SystemExit(130)
+                raise SystemExit(1 if calibration_result == "failed" else 130)
             if calibration_result == "exited":
                 write_session_end("ninja_exited_during_calibration")
                 cleanup_session_resources(
@@ -1862,6 +1922,7 @@ def main():
             ninja_control_file.unlink(missing_ok=True)
         except OSError:
             pass
+        _clear_active_cleanup_state()
 
 
 if __name__ == "__main__":
