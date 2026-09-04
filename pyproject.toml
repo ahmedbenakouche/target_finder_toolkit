@@ -40,7 +40,6 @@ bubblecursor     = "target_finder_toolkit.bubblecursor:main"
 semanticpointing = "target_finder_toolkit.semanticpointing:main"
 
 [project.urls]
-Repository = "https://github.com/ahmedbenakouche/target_finder_toolkit"
 Documentation = "https://target-finder-toolkit.netlify.app/"
 
 [tool.setuptools]

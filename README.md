@@ -1,6 +1,3 @@
-[![PyPI Version](https://img.shields.io/pypi/v/target-finder-toolkit)](https://pypi.org/project/target-finder-toolkit)
-[![Downloads](https://static.pepy.tech/badge/target-finder-toolkit)](https://pepy.tech/project/target-finder-toolkit)
-
 # TargetFinder Toolkit
 
 This toolkit accompanies the work presented in the article **TargetFinder: Detecting Widgets from Pixels on Desktop Interfaces**.  
@@ -21,11 +18,6 @@ As proof of concept, we include two interaction techniques built on top of Targe
 
 ## Installation
 
-```bash
-pip install target-finder-toolkit
-```
-
-Or after cloning the repository:
 ```bash
 pip install .
 ```
@@ -212,7 +204,6 @@ After installation, `semanticpointing` runs the Semantic Pointing interaction te
 
 #### Available options:
 
-> **Note:** The models are automatically loaded by the toolkit. They are also available on Hugging Face: [ab-dev26/targetfinder](https://huggingface.co/ab-dev26/targetfinder).
 
 | Option | Description |
 |--------|-------------|
